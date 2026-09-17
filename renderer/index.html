@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <title>Vyzium</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+      <div><strong>Vyzium</strong><span>v1.2.9</span></div>
+    </div>
+    <nav id="navigation">
+      <button class="nav-item active" data-view="operational">Controle operacional</button>
+      <button class="nav-item" data-view="dashboard">Dashboard</button>
+      <button class="nav-item" data-view="orders">Pedidos</button>
+      <button class="nav-item" data-view="suppliers">Fornecedores</button>
+      <button class="nav-item" data-view="messages">Mensagens</button>
+      <button class="nav-item" data-view="history">Histórico</button>
+      <button class="nav-item" data-view="settings">Configurações</button>
+    </nav>
+    <button id="check-updates" class="button secondary" type="button">Verificar atualizações</button>
+    <small id="update-status" role="status" aria-live="polite"></small>
+    <div class="sidebar-note">
+      <span class="dot"></span>
+      Desenvolvido por Solucionx
+    </div>
+  </aside>
+
+  <main>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">ACOMPANHAMENTO DE COMPRAS</p>
+        <h1 id="view-title">Visão geral</h1>
+      </div>
+      <div class="top-actions">
+        <span id="mode-badge" class="mode-badge">Simulação</span>
+        <button id="import-button" class="button primary">Importar planilha</button>
+      </div>
+    </header>
+
+    <section id="content" class="content">
+      <div class="loading">Carregando...</div>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" aria-live="polite"></div>
+  <div id="order-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-card">
+      <button id="modal-close" class="modal-close" aria-label="Fechar">×</button>
+      <div id="modal-content"></div>
+    </div>
+  </div>
+  <script src="operational.js"></script>
+  <script src="whatsapp.js"></script>
+  <script src="app.js"></script>
+  <script src="updates.js"></script>
+</body>
+</html>
