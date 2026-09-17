@@ -1,6 +1,6 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "1.2.9",
+  "version": "1.2.10",
   "description": "Controle visual e follow-up autom\u00e1tico de ordens de compra com Electron e motor Python.",
   "main": "electron/main.js",
   "private": true,
