@@ -1,252 +1,218 @@
 <p align="center">
-  <img src="docs/readme/vyzium-banner.jpg" alt="Vyzium — Gestão Operacional & Follow-up" width="100%">
+  <img src="docs/readme/vyzium-banner.svg" alt="Vyzium — Gestão Operacional & Follow-up" width="100%">
 </p>
 
 <p align="center">
-  <img alt="Windows" src="https://img.shields.io/badge/WINDOWS-10%20%7C%2011-0A7FA1?style=for-the-badge&labelColor=0B3554">
-  <img alt="Desktop" src="https://img.shields.io/badge/APLICATIVO-DESKTOP-00A7B1?style=for-the-badge&labelColor=0B3554">
-  <img alt="Gestão operacional" src="https://img.shields.io/badge/GEST%C3%83O-OPERACIONAL-00BFA5?style=for-the-badge&labelColor=0B3554">
-  <img alt="Dados locais" src="https://img.shields.io/badge/DADOS-LOCAIS-007D9C?style=for-the-badge&labelColor=0B3554">
-  <img alt="WhatsApp" src="https://img.shields.io/badge/WHATSAPP-FOLLOW--UP-00BFA5?style=for-the-badge&labelColor=0B3554">
+  <a href="https://github.com/solucionx/Vyzium/releases/latest"><img alt="Download para Windows" src="https://img.shields.io/badge/BAIXAR_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white"></a>
+  <a href="https://github.com/solucionx/Vyzium/releases"><img alt="Releases" src="https://img.shields.io/badge/RELEASES-0B3554?style=for-the-badge&logo=github&logoColor=white"></a>
+  <img alt="Windows 10 e 11" src="https://img.shields.io/badge/WINDOWS-10_%7C_11-007D9C?style=for-the-badge&logo=windows11&logoColor=white">
+  <img alt="Dados locais" src="https://img.shields.io/badge/DADOS-LOCAIS-003B73?style=for-the-badge&logo=sqlite&logoColor=white">
 </p>
 
 <p align="center">
-  <strong>Controle de ordens de compra, acompanhamento de fornecedores e follow-up em uma única operação.</strong><br>
-  Uma solução desktop criada para transformar planilhas de compras em uma rotina visual, organizada e rastreável.
+  <strong>Transforme a rotina de compras em uma operação visual, organizada e acompanhável.</strong><br>
+  O Vyzium centraliza ordens de compra, fornecedores, prazos, entregas e follow-up em uma experiência desktop criada para o dia a dia operacional.
 </p>
+
+---
+
+## ✦ Uma visão clara do que precisa de atenção
+
+O **Vyzium** foi criado para reduzir a dependência de controles espalhados e dar contexto ao acompanhamento de compras. A base importada vira uma visão operacional com prioridade, prazo, fornecedor, atendimento, aprovação, observações e próxima ação.
 
 <p align="center">
-  <a href="https://github.com/solucionx/Vyzium/releases/latest"><strong>Baixar Vyzium para Windows</strong></a>
-  &nbsp;&nbsp;•&nbsp;&nbsp;
-  <a href="https://github.com/solucionx/Vyzium"><strong>Repositório oficial</strong></a>
+  <img src="docs/readme/controle-operacional.png" alt="Controle operacional do Vyzium" width="96%">
 </p>
 
-Vyzium
+> **Foco operacional:** identificar rapidamente o que está atrasado, o que está próximo do prazo e quais fornecedores ainda precisam de acompanhamento.
 
-O Vyzium é uma plataforma desktop de gestão operacional e follow-up de compras criada para centralizar o acompanhamento diário de ordens de compra.
+---
 
-A aplicação organiza prazos, fornecedores, atendimento, aprovações, observações e próximas ações em uma interface única. A partir da base de compras importada, o Vyzium transforma dados dispersos em uma visão operacional clara para que a equipe consiga identificar rapidamente o que precisa de atenção.
+## ✦ O que o Vyzium reúne
 
-O objetivo é simples: reduzir controles manuais, dar visibilidade à operação e tornar o acompanhamento com fornecedores mais consistente.
+<table>
+<tr>
+<td width="33%" valign="top">
 
-Principais recursos
+### ◈ Controle operacional
+Acompanhamento das OCs em uma tabela única, com prioridade visual, filtros persistentes, observações e próxima ação.
 
-Controle operacional
+</td>
+<td width="33%" valign="top">
 
-Visualização central das ordens de compra com informações essenciais para o acompanhamento diário:
+### ◫ Dashboard
+Indicadores para enxergar o cenário da operação sem precisar percorrer toda a base manualmente.
 
-prazo e nível de urgência;
+</td>
+<td width="33%" valign="top">
 
-hotel ou unidade;
+### ✓ Pedidos
+Consulta das ordens e itens com previsão, atendimento, aprovação e contexto do fornecedor.
 
-número da OC;
+</td>
+</tr>
+<tr>
+<td width="33%" valign="top">
 
-fornecedor;
+### ◎ Fornecedores
+Telefones e contatos ficam associados ao fornecedor e podem ser reutilizados nas próximas importações.
 
-previsão de entrega;
+</td>
+<td width="33%" valign="top">
 
-situação de atendimento;
+### ↗ Follow-up
+Mensagens organizadas por fornecedor, prévia antes do envio e execução em lote pelo WhatsApp Web.
 
-aprovação;
+</td>
+<td width="33%" valign="top">
 
-controle e observação manual;
+### ◷ Histórico
+Registro local das tentativas e envios para manter rastreabilidade da rotina de acompanhamento.
 
-próxima ação sugerida.
+</td>
+</tr>
+</table>
 
-Dashboard
+---
 
-Indicadores operacionais para acompanhar rapidamente a situação da base, com cards interativos e acesso direto aos pedidos que exigem atenção.
+## ✦ Dashboard operacional
 
-Pedidos
+O painel resume os pontos que precisam de atenção e mantém a operação ligada aos pedidos que originaram cada indicador.
 
-Consulta detalhada das ordens, com filtros persistentes e visão dos itens, quantidades, recebimentos, saldo e previsão de entrega.
+<p align="center">
+  <img src="docs/readme/dashboard.png" alt="Dashboard operacional do Vyzium" width="96%">
+</p>
 
-Fornecedores
+---
 
-Cadastro local de contatos e telefones, associado ao fornecedor para reutilização automática nas ordens futuras.
+## ✦ Da planilha ao follow-up
 
-Follow-up por WhatsApp
-
-O Vyzium prepara e organiza as mensagens de acompanhamento por fornecedor, permitindo revisão antes do envio e execução em lote.
-
-O fluxo inclui:
-
-agrupamento de ordens do mesmo fornecedor;
-
-prévia das mensagens;
-
-envio em lote;
-
-acompanhamento da conexão em segundo plano;
-
-fila persistente de processamento;
-
-histórico local das tentativas e envios;
-
-proteção contra reenvios indevidos.
-
-A integração utiliza WhatsApp Web. Ela não substitui a API oficial do WhatsApp Business e pode depender de mudanças feitas pelo próprio serviço.
-
-Fluxo operacional
-
-Base de compras
+```text
+BASE DE COMPRAS
       │
       ▼
-Importação e consolidação
+IMPORTAÇÃO E CONSOLIDAÇÃO
       │
-      ├────► Dashboard
+      ├──────────────► Dashboard
+      ├──────────────► Controle operacional
+      ├──────────────► Pedidos
+      └──────────────► Fornecedores
       │
-      ├────► Controle operacional
+      ▼
+IDENTIFICAÇÃO DE PENDÊNCIAS
       │
-      ├────► Pedidos
+      ▼
+FOLLOW-UP POR FORNECEDOR
       │
-      └────► Fornecedores
-                  │
-                  ▼
-           Preparação do follow-up
-                  │
-                  ▼
-             Envio em lote
-                  │
-                  ▼
-               Histórico
+      ▼
+ENVIO EM LOTE + HISTÓRICO LOCAL
+```
 
-Áreas do sistema
+O Vyzium preserva o contexto criado dentro do próprio aplicativo — como contatos, observações, controles e histórico — mesmo quando uma nova base é importada.
 
-Área
+---
 
-Finalidade
+## ✦ Follow-up com menos trabalho repetitivo
 
-Controle operacional
+Em vez de tratar cada OC como uma tarefa isolada, o Vyzium organiza o acompanhamento por fornecedor.
 
-Acompanhamento diário das ordens e prioridades
+- agrupa ordens relacionadas ao mesmo fornecedor;
+- prepara uma prévia da mensagem antes do envio;
+- executa o lote de forma sequencial;
+- mantém a conexão acompanhada em segundo plano;
+- registra o resultado localmente;
+- evita que um problema em um fornecedor impeça o restante do lote.
 
-Dashboard
+> A integração atual utiliza **WhatsApp Web**. O objetivo é apoiar o fluxo operacional dentro do aplicativo sem substituir a API oficial do WhatsApp Business.
 
-Indicadores e visão rápida da operação
+---
 
-Pedidos
+## ✦ Continuidade dos dados
 
-Consulta detalhada e filtrada das OCs
+Os dados de acompanhamento ficam separados da planilha importada. Assim, o Vyzium consegue manter informações que pertencem à operação e não à base original.
 
-Fornecedores
+<table>
+<tr>
+<td width="50%" valign="top">
 
-Telefones e contatos utilizados no follow-up
+**Permanece no Vyzium**
 
-Mensagens
+- observações manuais;
+- controles operacionais;
+- telefones dos fornecedores;
+- configurações;
+- histórico de follow-up;
+- fila de mensagens;
+- sessão local do WhatsApp.
 
-Revisão e execução dos lotes de acompanhamento
+</td>
+<td width="50%" valign="top">
 
-Histórico
+**A nova importação atualiza**
 
-Registro local das cobranças e tentativas
+- ordens de compra;
+- itens;
+- quantidades;
+- recebimentos;
+- previsões;
+- situação operacional vinda da base.
 
-Configurações
+</td>
+</tr>
+</table>
 
-Regras operacionais, automação e conexão do WhatsApp
+---
 
-Dados locais e continuidade da operação
-
-O Vyzium mantém os dados próprios do acompanhamento separados da planilha importada.
-
-Isso permite preservar informações como:
-
-controles manuais;
-
-observações;
-
-telefones dos fornecedores;
-
-configurações;
-
-histórico de follow-up;
-
-fila de mensagens;
-
-sessão local do WhatsApp.
-
-Novas importações atualizam o retrato operacional das ordens sem substituir os dados que pertencem ao acompanhamento realizado dentro do Vyzium.
-
-Privacidade e segurança local
-
-O núcleo da aplicação roda no próprio computador do usuário.
-
-motor de processamento local;
-
-persistência em SQLite;
-
-comunicação interna restrita ao aplicativo;
-
-arquivos de sessão e banco local fora do repositório;
-
-atualização do aplicativo sem substituir os dados operacionais do usuário.
-
-Arquivos reais de operação, banco de dados, sessões do WhatsApp e informações persistentes não devem ser publicados no GitHub.
-
-Tecnologia
+## ✦ Construído para desktop
 
 <p align="center">
-  <img src="build/icon.png" alt="Ícone do aplicativo Vyzium" width="88">
+  <img src="docs/readme/vyzium-mark.svg" alt="Símbolo Vyzium" width="110">
 </p>
 
-Camada
+<table>
+<tr><td><strong>Desktop</strong></td><td>Electron</td></tr>
+<tr><td><strong>Interface</strong></td><td>HTML · CSS · JavaScript</td></tr>
+<tr><td><strong>Motor local</strong></td><td>Python</td></tr>
+<tr><td><strong>Persistência</strong></td><td>SQLite</td></tr>
+<tr><td><strong>Base de compras</strong></td><td>Excel (.xlsx / .xlsm)</td></tr>
+<tr><td><strong>Follow-up</strong></td><td>WhatsApp Web</td></tr>
+<tr><td><strong>Distribuição</strong></td><td>Instalador para Windows</td></tr>
+</table>
 
-Tecnologia
+---
 
-Aplicativo desktop
+## ✦ Estrutura do projeto
 
-Electron
-
-Interface
-
-HTML, CSS e JavaScript
-
-Motor local
-
-Python
-
-Persistência
-
-SQLite
-
-Planilhas
-
-Excel .xlsx / .xlsm
-
-Follow-up
-
-WhatsApp Web
-
-Distribuição
-
-Instalador para Windows
-
-Arquitetura
-
+```text
 Vyzium/
-├── electron/      Aplicativo desktop e integração do sistema
-├── renderer/      Interface e experiência visual
-├── backend/       Motor de regras, importação e persistência
-├── build/         Recursos de empacotamento e identidade
-├── scripts/       Inicialização e build
-└── tests/         Testes automatizados
+├── backend/        # regras, importação, persistência e processamento
+├── electron/       # aplicação desktop e integrações do sistema
+├── renderer/       # interface e experiência visual
+├── build/          # identidade e recursos de empacotamento
+├── scripts/        # build e execução
+├── tests/          # testes automatizados
+└── docs/           # documentação e recursos do projeto
+```
 
-Windows
+---
 
-O Vyzium é distribuído como aplicativo desktop para Windows 10 e Windows 11, 64 bits.
-
-A versão disponível para instalação pode ser encontrada na área oficial de Releases:
+## ✦ Download
 
 <p align="center">
-  <a href="https://github.com/solucionx/Vyzium/releases/latest"><strong>→ Acessar download para Windows</strong></a>
+  <a href="https://github.com/solucionx/Vyzium/releases/latest">
+    <img alt="Baixar Vyzium" src="https://img.shields.io/badge/↓_BAIXAR_VYZIUM_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white">
+  </a>
 </p>
 
 <p align="center">
-  <img src="docs/readme/vyzium-symbol.jpg" alt="Símbolo Vyzium" width="180">
+  <sub>Aplicativo desktop para Windows 10 e Windows 11 · 64 bits</sub>
 </p>
 
+---
+
 <p align="center">
+  <img src="docs/readme/vyzium-mark.svg" alt="Vyzium" width="72"><br><br>
   <strong>Vyzium</strong><br>
-  Gestão Operacional &amp; Follow-up<br><br>
-  Desenvolvido pela <strong>Solucionx</strong>
+  Gestão Operacional & Follow-up<br><br>
+  <sub>Desenvolvido pela <strong>Solucionx</strong></sub>
 </p>
