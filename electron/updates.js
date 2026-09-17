@@ -1,4 +1,5 @@
 'use strict';
+const { ipcMain } = require('electron');
 function createUpdater({app, dialog, getWindow, prepareInstall, platform = process.platform, autoUpdater = require('electron-updater').autoUpdater}) {
   let busy = false, ready = false;
   const notify = message => {
@@ -14,12 +15,35 @@ function createUpdater({app, dialog, getWindow, prepareInstall, platform = proce
   autoUpdater.on('download-progress', p => notify(`Baixando atualização: ${Math.round(p.percent)}%`));
   autoUpdater.on('error', () => notify('Não foi possível atualizar. Verifique a conexão e tente novamente.'));
   async function install() {
-    const {response} = await dialog.showMessageBox(getWindow(), {
-      type: 'info', title: 'Atualizar Vyzium',
-      message: 'Atualização pronta. Reiniciar o Vyzium para instalar?',
-      buttons: ['Reiniciar e instalar', 'Mais tarde'], defaultId: 0, cancelId: 1
-    });
-    if (response !== 0) { notify('Atualização pronta. Clique em Verificar atualizações para instalar.'); return; }
+    const win = getWindow();
+    let installNow = false;
+    if (win && !win.isDestroyed()) {
+      installNow = await new Promise(resolve => {
+        const channel = 'update-prompt-response';
+        const timer = setTimeout(() => {
+          ipcMain.removeAllListeners(channel);
+          resolve(false);
+        }, 300000);
+        ipcMain.once(channel, (_event, action) => {
+          clearTimeout(timer);
+          resolve(action === 'install');
+        });
+        win.webContents.send('update-prompt', {
+          title: 'Atualizar Vyzium',
+          message: 'Atualização pronta. Reiniciar o Vyzium para instalar?',
+          confirmLabel: 'Reiniciar e instalar',
+          cancelLabel: 'Mais tarde'
+        });
+      });
+    } else {
+      const {response} = await dialog.showMessageBox(getWindow(), {
+        type: 'info', title: 'Atualizar Vyzium',
+        message: 'Atualização pronta. Reiniciar o Vyzium para instalar?',
+        buttons: ['Reiniciar e instalar', 'Mais tarde'], defaultId: 0, cancelId: 1
+      });
+      installNow = response === 0;
+    }
+    if (!installNow) { notify('Atualização pronta. Clique em Verificar atualizações para instalar.'); return; }
     await prepareInstall();
     notify('Instalando atualização…');
     autoUpdater.quitAndInstall(false, true);

@@ -8,5 +8,11 @@ contextBridge.exposeInMainWorld('followup', {
     ipcRenderer.on('update-status', listener);
     return () => ipcRenderer.removeListener('update-status', listener);
   },
+  onUpdatePrompt: callback => {
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on('update-prompt', listener);
+    return () => ipcRenderer.removeListener('update-prompt', listener);
+  },
+  respondUpdatePrompt: action => ipcRenderer.send('update-prompt-response', action),
   chooseWorkbook: () => ipcRenderer.invoke('choose-workbook')
 });

@@ -5,10 +5,10 @@ const {createUpdater} = require('../electron/updates');
 function fixture({packaged=true, available=true, response=0, blocked=false}={}) {
   const events=[], updater=new EventEmitter(); let downloads=0, installs=0, prepared=0;
   updater.setFeedURL = feed => assert.deepEqual(feed, {provider:'github',owner:'solucionx',repo:'Vyzium'});
-  updater.checkForUpdates = async () => {events.push('check'); if(available) updater.emit('update-available',{version:'1.2.10'});};
+  updater.checkForUpdates = async () => {events.push('check'); if(available) updater.emit('update-available',{version:'1.3.0'});};
   updater.downloadUpdate = async () => {downloads++; events.push('download');};
   updater.quitAndInstall = (silent,reopen) => {assert.equal(reopen,true); installs++; events.push('install');};
-  const options={app:{isPackaged:packaged,getVersion:()=> '1.2.10'},platform:'win32',autoUpdater:updater,
+  const options={app:{isPackaged:packaged,getVersion:()=> '1.3.0'},platform:'win32',autoUpdater:updater,
     getWindow:()=>({isDestroyed:()=>false,webContents:{send:(_channel,s)=>events.push(s.message)}}),
     dialog:{showMessageBox:async()=>({response})},
     prepareInstall:async()=>{prepared++; if(blocked) throw Error('Envio em andamento');events.push('prepare');}};
