@@ -19,10 +19,6 @@
 </p>
 
 <p align="center">
-  <img src="build/icon.png" alt="Ícone Vyzium" width="74">
-</p>
-
-<p align="center">
   <strong>Seus pedidos. Seus fornecedores. Seu controle.</strong><br>
   Desenvolvido pela <strong>Solucionx</strong>.
 </p>
@@ -208,7 +204,6 @@ O empacotamento utiliza **electron-builder** com instalador NSIS para Windows x6
 <p align="center">
   <img src="renderer/assets/vyzium-mark.svg" alt="Marca Vyzium" width="92">
   &nbsp;&nbsp;&nbsp;&nbsp;
-  <img src="build/icon.png" alt="Ícone Vyzium" width="92">
 </p>
 
 A identidade visual do Vyzium utiliza azul profundo, azul operacional, ciano e turquesa para manter a interface limpa, técnica e confortável durante o acompanhamento diário.
