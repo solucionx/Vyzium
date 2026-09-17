@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/readme/vyzium-banner.jpg" alt="Vyzium — Gestão Operacional & Follow-up" width="100%">
+  <img src="build/icon.png" alt="Ícone do aplicativo Vyzium" width="88">
 </p>
 
 <p align="center">
@@ -186,7 +186,7 @@ Arquivos reais de operação, banco de dados, sessões do WhatsApp e informaçõ
 Tecnologia
 
 <p align="center">
-  <img src="build/icon.png" alt="Ícone do aplicativo Vyzium" width="88">
+<img src="docs/readme/vyzium-banner.jpg" alt="Vyzium — Gestão Operacional & Follow-up" width="100%">
 </p>
 
 Camada
