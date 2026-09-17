@@ -29,7 +29,8 @@ def whatsapp_request(route, body=None):
         "Content-Type": "application/json", "X-FollowUp-Token": os.environ.get("FOLLOWUP_API_TOKEN", "")
     }, method="POST")
     try:
-        with urlopen(request, timeout=130 if route == "/wait" else 75) as response:
+        timeout = 130 if route == "/wait" else (10 if route == "/health" else 75)
+        with urlopen(request, timeout=timeout) as response:
             return json.load(response)
     except HTTPError as exc:
         try:
@@ -382,6 +383,55 @@ class Store:
                     item_key TEXT NOT NULL,
                     urgency TEXT NOT NULL,
                     PRIMARY KEY(followup_id, item_key)
+                );
+                CREATE TABLE IF NOT EXISTS message_batches (
+                    batch_id TEXT PRIMARY KEY,
+                    status TEXT NOT NULL,
+                    simulation INTEGER NOT NULL DEFAULT 0,
+                    request_json TEXT NOT NULL DEFAULT '{}',
+                    selected_count INTEGER NOT NULL DEFAULT 0,
+                    processed_count INTEGER NOT NULL DEFAULT 0,
+                    sent_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    uncertain_count INTEGER NOT NULL DEFAULT 0,
+                    simulated_count INTEGER NOT NULL DEFAULT 0,
+                    current_supplier TEXT,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT
+                );
+                CREATE INDEX IF NOT EXISTS idx_message_batches_status
+                    ON message_batches(status, created_at);
+                CREATE TABLE IF NOT EXISTS message_queue (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    batch_id TEXT NOT NULL REFERENCES message_batches(batch_id) ON DELETE CASCADE,
+                    position INTEGER NOT NULL,
+                    supplier_key TEXT NOT NULL,
+                    supplier_name TEXT NOT NULL,
+                    phone TEXT NOT NULL,
+                    urgency TEXT NOT NULL,
+                    message TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    attempts INTEGER NOT NULL DEFAULT 0,
+                    followup_id INTEGER REFERENCES followups(id),
+                    provider_message_id TEXT,
+                    ack INTEGER,
+                    error TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    UNIQUE(batch_id, supplier_key)
+                );
+                CREATE INDEX IF NOT EXISTS idx_message_queue_batch
+                    ON message_queue(batch_id, position);
+                CREATE INDEX IF NOT EXISTS idx_message_queue_status
+                    ON message_queue(status, batch_id, position);
+                CREATE TABLE IF NOT EXISTS message_queue_items (
+                    queue_id INTEGER NOT NULL REFERENCES message_queue(id) ON DELETE CASCADE,
+                    item_key TEXT NOT NULL,
+                    urgency TEXT NOT NULL,
+                    PRIMARY KEY(queue_id, item_key)
                 );
                 CREATE TABLE IF NOT EXISTS settings (
                     key TEXT PRIMARY KEY,
@@ -808,6 +858,218 @@ class Store:
         return int(followup_id)
 
 
+    def create_message_batch(self, batch_id: str, simulation: bool, request_payload: dict[str, Any]) -> dict[str, Any]:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.lock:
+            self.connection.execute("""
+                INSERT INTO message_batches(
+                    batch_id,status,simulation,request_json,created_at
+                ) VALUES(?,?,?,?,?)
+            """, (batch_id, "preparing", int(bool(simulation)), json.dumps(request_payload, ensure_ascii=False), now))
+            self.connection.commit()
+        return self.message_batch(batch_id)
+
+    def message_batch(self, batch_id: str) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.connection.execute("SELECT * FROM message_batches WHERE batch_id=?", (batch_id,)).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        try:
+            data["request"] = json.loads(data.pop("request_json") or "{}")
+        except Exception:
+            data["request"] = {}
+        data["simulation"] = bool(data.get("simulation"))
+        return data
+
+    def recoverable_message_batch(self) -> dict[str, Any] | None:
+        with self.lock:
+            row = self.connection.execute("""
+                SELECT * FROM message_batches
+                WHERE status IN ('preparing','running','error')
+                ORDER BY created_at DESC LIMIT 1
+            """).fetchone()
+        if not row:
+            return None
+        data = dict(row)
+        try:
+            data["request"] = json.loads(data.pop("request_json") or "{}")
+        except Exception:
+            data["request"] = {}
+        data["simulation"] = bool(data.get("simulation"))
+        return data
+
+    def recover_interrupted_queue(self) -> int:
+        """Conservatively quarantine work that was in-flight during a crash.
+
+        A row in ``sending`` may already have reached WhatsApp. It must never be
+        automatically replayed after a restart. Queued rows remain safe to resume.
+        """
+        now = datetime.now().isoformat(timespec="seconds")
+        note = "Aplicativo interrompido durante o envio. Confira a conversa antes de liberar novo envio."
+        with self.lock:
+            rows = list(self.connection.execute(
+                "SELECT id,followup_id,batch_id FROM message_queue WHERE status='sending'"
+            ))
+            for row in rows:
+                self.connection.execute(
+                    "UPDATE message_queue SET status='uncertain',error=?,finished_at=? WHERE id=?",
+                    (note, now, row["id"])
+                )
+                if row["followup_id"]:
+                    self.connection.execute(
+                        "UPDATE followups SET status='uncertain',error=? WHERE id=?",
+                        (note, row["followup_id"])
+                    )
+            self.connection.commit()
+        return len(rows)
+
+    def plan_message_batch(self, batch_id: str, groups: list[dict[str, Any]]) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.lock:
+            existing = self.connection.execute(
+                "SELECT COUNT(*) FROM message_queue WHERE batch_id=?", (batch_id,)
+            ).fetchone()[0]
+            if existing:
+                return
+            for position, group in enumerate(groups):
+                cursor = self.connection.execute("""
+                    INSERT INTO message_queue(
+                        batch_id,position,supplier_key,supplier_name,phone,urgency,message,status,created_at
+                    ) VALUES(?,?,?,?,?,?,?,?,?)
+                """, (batch_id, position, group["supplier_key"], group["supplier_name"], group["phone"],
+                      group["urgency"], group["message"], "queued", now))
+                queue_id = int(cursor.lastrowid)
+                self.connection.executemany(
+                    "INSERT INTO message_queue_items(queue_id,item_key,urgency) VALUES(?,?,?)",
+                    [(queue_id, item["item_key"], item["urgency"]) for item in group["items"]]
+                )
+            self.connection.execute("""
+                UPDATE message_batches SET status='running',selected_count=?,started_at=COALESCE(started_at,?)
+                WHERE batch_id=?
+            """, (len(groups), now, batch_id))
+            self.connection.commit()
+
+    def queue_rows(self, batch_id: str) -> list[dict[str, Any]]:
+        with self.lock:
+            rows = [dict(row) for row in self.connection.execute(
+                "SELECT * FROM message_queue WHERE batch_id=? ORDER BY position", (batch_id,)
+            )]
+            for row in rows:
+                row["items"] = [dict(item) for item in self.connection.execute(
+                    "SELECT item_key,urgency FROM message_queue_items WHERE queue_id=? ORDER BY item_key",
+                    (row["id"],)
+                )]
+        return rows
+
+    def claim_next_queue_item(self, batch_id: str) -> dict[str, Any] | None:
+        """Atomically mark the next safe row as in-flight and create its guard record."""
+        now = datetime.now().isoformat(timespec="seconds")
+        guard_error = "Envio em andamento ou interrompido. Confira a conversa antes de reenviar."
+        with self.lock:
+            row = self.connection.execute("""
+                SELECT * FROM message_queue
+                WHERE batch_id=? AND status='queued'
+                ORDER BY position LIMIT 1
+            """, (batch_id,)).fetchone()
+            if not row:
+                return None
+            data = dict(row)
+            items = [dict(item) for item in self.connection.execute(
+                "SELECT item_key,urgency FROM message_queue_items WHERE queue_id=? ORDER BY item_key",
+                (data["id"],)
+            )]
+            cursor = self.connection.execute("""
+                INSERT INTO followups(batch_id,supplier_key,supplier_name,phone,urgency,message,status,error,sent_at)
+                VALUES(?,?,?,?,?,?,?,?,?)
+            """, (batch_id, data["supplier_key"], data["supplier_name"], data["phone"], data["urgency"],
+                  data["message"], "uncertain", guard_error, now))
+            followup_id = int(cursor.lastrowid)
+            self.connection.executemany(
+                "INSERT INTO followup_items(followup_id,item_key,urgency) VALUES(?,?,?)",
+                [(followup_id, item["item_key"], item["urgency"]) for item in items]
+            )
+            self.connection.execute("""
+                UPDATE message_queue SET status='sending',attempts=attempts+1,followup_id=?,started_at=?,error=?
+                WHERE id=? AND status='queued'
+            """, (followup_id, now, guard_error, data["id"]))
+            self.connection.execute(
+                "UPDATE message_batches SET status='running',current_supplier=? WHERE batch_id=?",
+                (data["supplier_name"], batch_id)
+            )
+            self._prune_followups()
+            self.connection.commit()
+            data.update({"status": "sending", "followup_id": followup_id, "items": items, "started_at": now})
+            return data
+
+    def finish_queue_item(self, queue_id: int, status: str, error: str | None = None,
+                          provider_message_id: str | None = None, ack: int | None = None) -> None:
+        if status not in {"sent", "failed", "uncertain", "simulated"}:
+            raise ValueError("Status de fila inválido.")
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.lock:
+            row = self.connection.execute(
+                "SELECT followup_id FROM message_queue WHERE id=?", (int(queue_id),)
+            ).fetchone()
+            self.connection.execute("""
+                UPDATE message_queue SET status=?,error=?,provider_message_id=?,ack=?,finished_at=?
+                WHERE id=?
+            """, (status, error, provider_message_id, ack, now, int(queue_id)))
+            if row and row["followup_id"]:
+                self.connection.execute(
+                    "UPDATE followups SET status=?,error=? WHERE id=?",
+                    (status, error, row["followup_id"])
+                )
+            self.connection.commit()
+
+    def finish_simulated_queue_item(self, batch_id: str, queue_id: int) -> int:
+        """Simulation remains visible in history exactly like the previous flow."""
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.lock:
+            row = self.connection.execute("SELECT * FROM message_queue WHERE id=?", (int(queue_id),)).fetchone()
+            items = list(self.connection.execute(
+                "SELECT item_key,urgency FROM message_queue_items WHERE queue_id=?", (int(queue_id),)
+            ))
+            cursor = self.connection.execute("""
+                INSERT INTO followups(batch_id,supplier_key,supplier_name,phone,urgency,message,status,error,sent_at)
+                VALUES(?,?,?,?,?,?,?,?,?)
+            """, (batch_id, row["supplier_key"], row["supplier_name"], row["phone"], row["urgency"],
+                  row["message"], "simulated", None, now))
+            followup_id = int(cursor.lastrowid)
+            self.connection.executemany(
+                "INSERT INTO followup_items(followup_id,item_key,urgency) VALUES(?,?,?)",
+                [(followup_id, item["item_key"], item["urgency"]) for item in items]
+            )
+            self.connection.execute("""
+                UPDATE message_queue SET status='simulated',followup_id=?,started_at=?,finished_at=?,error=NULL
+                WHERE id=?
+            """, (followup_id, now, now, int(queue_id)))
+            self._prune_followups()
+            self.connection.commit()
+            return followup_id
+
+    def refresh_message_batch(self, batch_id: str, *, finalize: bool = False, error: str | None = None) -> dict[str, Any]:
+        now = datetime.now().isoformat(timespec="seconds")
+        with self.lock:
+            counts = {row["status"]: int(row["amount"]) for row in self.connection.execute("""
+                SELECT status,COUNT(*) amount FROM message_queue WHERE batch_id=? GROUP BY status
+            """, (batch_id,))}
+            processed = sum(counts.get(key, 0) for key in ("sent", "failed", "uncertain", "simulated"))
+            terminal = not any(counts.get(key, 0) for key in ("queued", "sending"))
+            status = "done" if finalize or terminal else "running"
+            self.connection.execute("""
+                UPDATE message_batches SET status=?,processed_count=?,sent_count=?,failed_count=?,
+                    uncertain_count=?,simulated_count=?,current_supplier=?,error=?,
+                    finished_at=CASE WHEN ?='done' THEN ? ELSE finished_at END
+                WHERE batch_id=?
+            """, (status, processed, counts.get("sent",0), counts.get("failed",0), counts.get("uncertain",0),
+                  counts.get("simulated",0), None if status == "done" else self.connection.execute(
+                      "SELECT supplier_name FROM message_queue WHERE batch_id=? AND status='sending' LIMIT 1",
+                      (batch_id,)
+                  ).fetchone()[0] if counts.get("sending",0) else None, error, status, now, batch_id))
+            self.connection.commit()
+        return self.message_batch(batch_id) or {}
+
 class WorkbookImporter:
     def __init__(self, store: Store):
         self.store = store
@@ -981,6 +1243,295 @@ class FollowUpService:
     def __init__(self, store: Store):
         self.store = store
         self.send_lock = threading.Lock()
+        self.job_lock = threading.Lock()
+        self.worker_batches: set[str] = set()
+        self.store.recover_interrupted_queue()
+        self.job_state: dict[str, Any] = {
+            "active": False, "job_id": None, "phase": "idle", "total": 0,
+            "processed": 0, "sent": 0, "failed": 0, "uncertain": 0,
+            "simulated": 0, "current_supplier": None, "error": None, "result": None,
+        }
+        recoverable = self.store.recoverable_message_batch()
+        if recoverable:
+            self.job_state = self._state_from_batch(recoverable, active=True)
+            # The WhatsApp bridge already exists before the Python engine starts.
+            # Resume only queued work; any item that was in-flight was quarantined
+            # as uncertain by recover_interrupted_queue() and is never replayed.
+            self._start_persistent_worker(recoverable["batch_id"])
+
+    def _update_job(self, **changes):
+        with self.job_lock:
+            self.job_state.update(changes)
+
+    def _state_from_batch(self, batch: dict[str, Any], active: bool | None = None) -> dict[str, Any]:
+        status = batch.get("status", "preparing")
+        if active is None:
+            active = status in {"preparing", "running"}
+        result = None
+        if not active and status == "done":
+            result = self._batch_result(batch["batch_id"])
+        return {
+            "active": bool(active),
+            "job_id": batch.get("batch_id"),
+            "phase": "preparing" if status == "preparing" else ("done" if status == "done" else ("error" if status == "error" else "sending")),
+            "total": int(batch.get("selected_count") or 0),
+            "processed": int(batch.get("processed_count") or 0),
+            "sent": int(batch.get("sent_count") or 0),
+            "failed": int(batch.get("failed_count") or 0),
+            "uncertain": int(batch.get("uncertain_count") or 0),
+            "simulated": int(batch.get("simulated_count") or 0),
+            "current_supplier": batch.get("current_supplier"),
+            "error": batch.get("error"),
+            "result": result,
+            "started_at": batch.get("started_at") or batch.get("created_at"),
+            "finished_at": batch.get("finished_at"),
+        }
+
+    def _batch_result(self, batch_id: str) -> dict[str, Any]:
+        batch = self.store.message_batch(batch_id) or {}
+        rows = self.store.queue_rows(batch_id)
+        results = [{
+            "id": row.get("followup_id"),
+            "supplier_name": row.get("supplier_name"),
+            "status": row.get("status"),
+            "error": row.get("error"),
+        } for row in rows]
+        return {
+            "batch_id": batch_id,
+            "sent": int(batch.get("sent_count") or 0),
+            "simulated": int(batch.get("simulated_count") or 0),
+            "failed": int(batch.get("failed_count") or 0),
+            "processed": int(batch.get("processed_count") or 0),
+            "selected": int(batch.get("selected_count") or len(rows)),
+            "uncertain": int(batch.get("uncertain_count") or 0),
+            "aborted": False, "aborted_error": None,
+            "results": results,
+        }
+
+    def send_status(self, job_id: str | None = None) -> dict[str, Any]:
+        with self.job_lock:
+            state = dict(self.job_state)
+            if isinstance(state.get("result"), dict):
+                state["result"] = dict(state["result"])
+        persisted = self.store.message_batch(job_id) if job_id else None
+        if job_id and persisted:
+            with self.job_lock:
+                active = job_id in self.worker_batches or (
+                    self.job_state.get("active") and self.job_state.get("job_id") == job_id
+                )
+            state = self._state_from_batch(persisted, active=active)
+            if not active and persisted.get("status") == "done":
+                state["result"] = self._batch_result(job_id)
+            return state
+        if job_id and state.get("job_id") and job_id != state.get("job_id"):
+            raise ValueError("Lote não encontrado.")
+        return state
+
+    @staticmethod
+    def _validate_selection(supplier_keys, message_overrides):
+        if supplier_keys is None:
+            selected = None
+        else:
+            if not isinstance(supplier_keys, list) or len(supplier_keys) > 500:
+                raise ValueError("Seleção de fornecedores inválida.")
+            cleaned = [str(key).strip() for key in supplier_keys if str(key).strip()]
+            if not cleaned:
+                raise ValueError("Nenhum fornecedor selecionado. O envio foi cancelado por segurança.")
+            selected = cleaned
+
+        overrides: dict[str, str] = {}
+        if message_overrides is not None:
+            if not isinstance(message_overrides, dict) or len(message_overrides) > 200:
+                raise ValueError("Edições de mensagem inválidas.")
+            for raw_key, raw_message in message_overrides.items():
+                key = str(raw_key).strip()
+                if not key or len(key) > 256 or not isinstance(raw_message, str):
+                    raise ValueError("Edição de mensagem inválida.")
+                message = raw_message.strip()
+                if not message:
+                    raise ValueError("A mensagem editada não pode ficar vazia.")
+                if len(message) > 60000:
+                    raise ValueError("A mensagem editada é muito grande.")
+                overrides[key] = message
+        return selected, overrides
+
+    def _groups_for_request(self, request: dict[str, Any], simulation: bool) -> list[dict[str, Any]]:
+        selected_list, overrides = self._validate_selection(
+            request.get("supplier_keys"), request.get("message_overrides")
+        )
+        selected = set(selected_list) if selected_list is not None else None
+        groups = [group for group in self.groups() if selected is None or group["supplier_key"] in selected]
+        if groups and not simulation:
+            self._wait_for_connection()
+            # Same established rule as before: after connection becomes ready,
+            # re-read eligibility so a stale snapshot can never be sent.
+            groups = [group for group in self.groups() if selected is None or group["supplier_key"] in selected]
+        for group in groups:
+            edited = overrides.get(group["supplier_key"])
+            if edited is not None:
+                group["message"] = edited
+        return groups
+
+    def _wait_for_connection(self):
+        """Wait silently while the connection manager restores WhatsApp.
+
+        Pausing the connection does not destroy the queue. The worker simply waits
+        until the user explicitly resumes it. This method emits no UI notification;
+        the existing WhatsApp panel remains the only visible status surface.
+        """
+        while True:
+            try:
+                return whatsapp_request("/wait")
+            except RuntimeError:
+                time.sleep(3)
+
+    def _start_persistent_worker(self, batch_id: str):
+        with self.job_lock:
+            if batch_id in self.worker_batches:
+                return
+            self.worker_batches.add(batch_id)
+            self.job_state["active"] = True
+            self.job_state["job_id"] = batch_id
+
+        def worker():
+            last_error = None
+            try:
+                for attempt in range(5):
+                    try:
+                        self._run_persistent_batch(batch_id)
+                        last_error = None
+                        break
+                    except Exception as exc:
+                        last_error = str(exc)
+                        # Queue rows remain persisted. A transient engine/bridge
+                        # problem retries in-place without losing the job. In-flight
+                        # rows are guarded by the followup record and are never replayed.
+                        with self.store.lock:
+                            self.store.connection.execute(
+                                "UPDATE message_batches SET status='running',error=? WHERE batch_id=?",
+                                (last_error, batch_id)
+                            )
+                            self.store.connection.commit()
+                        self._update_job(active=True, error=None, current_supplier=None)
+                        time.sleep(min(30, 3 * (2 ** attempt)))
+                if last_error:
+                    with self.store.lock:
+                        now = datetime.now().isoformat(timespec="seconds")
+                        self.store.connection.execute(
+                            "UPDATE message_batches SET status='error',error=?,current_supplier=NULL,finished_at=? WHERE batch_id=?",
+                            (last_error, now, batch_id)
+                        )
+                        self.store.connection.commit()
+            finally:
+                with self.job_lock:
+                    self.worker_batches.discard(batch_id)
+                batch = self.store.message_batch(batch_id)
+                if batch and batch.get("status") == "done":
+                    self._update_job(**self._state_from_batch(batch, active=False))
+                    self._update_job(result=self._batch_result(batch_id))
+                elif batch:
+                    self._update_job(**self._state_from_batch(batch, active=False))
+
+        threading.Thread(target=worker, name=f"followup-queue-{batch_id[:8]}", daemon=True).start()
+
+    def start_send(self, supplier_keys=None, force_simulation=None, message_overrides=None) -> dict[str, Any]:
+        selected, overrides = self._validate_selection(supplier_keys, message_overrides)
+        settings = self.store.settings()
+        simulation = settings["simulation"] if force_simulation is None else bool(force_simulation)
+        with self.job_lock:
+            if self.job_state.get("active") or self.send_lock.locked() or self.worker_batches:
+                raise ValueError("Já existe um lote em execução ou aguardando conexão.")
+            job_id = str(uuid.uuid4())
+            request_payload = {"supplier_keys": selected, "message_overrides": overrides}
+            batch = self.store.create_message_batch(job_id, simulation, request_payload)
+            self.job_state = self._state_from_batch(batch, active=True)
+        self._start_persistent_worker(job_id)
+        return self.send_status(job_id)
+
+    def _run_persistent_batch(self, batch_id: str) -> dict[str, Any]:
+        if not self.send_lock.acquire(blocking=False):
+            raise ValueError("Já existe um lote em execução ou aguardando conexão.")
+        try:
+            batch = self.store.message_batch(batch_id)
+            if not batch:
+                raise ValueError("Lote não encontrado.")
+            simulation = bool(batch.get("simulation"))
+            rows = self.store.queue_rows(batch_id)
+            if not rows:
+                groups = self._groups_for_request(batch.get("request") or {}, simulation)
+                self.store.plan_message_batch(batch_id, groups)
+                rows = self.store.queue_rows(batch_id)
+            batch = self.store.refresh_message_batch(batch_id)
+            self._update_job(**self._state_from_batch(batch, active=True))
+
+            while True:
+                rows = self.store.queue_rows(batch_id)
+                queued = next((row for row in rows if row.get("status") == "queued"), None)
+                if not queued:
+                    break
+
+                if simulation:
+                    self._update_job(current_supplier=queued.get("supplier_name"), phase="sending")
+                    self.store.finish_simulated_queue_item(batch_id, queued["id"])
+                    batch = self.store.refresh_message_batch(batch_id)
+                    self._update_job(**self._state_from_batch(batch, active=True))
+                    continue
+
+                # Verify the session immediately before every provider. The Node
+                # connection manager performs the actual health checks/reconnects.
+                self._wait_for_connection()
+                item = self.store.claim_next_queue_item(batch_id)
+                if not item:
+                    continue
+                self._update_job(current_supplier=item.get("supplier_name"), phase="sending")
+                status, error, result = "uncertain", None, {}
+                try:
+                    result = whatsapp_request("/send", {"phone": item["phone"], "message": item["message"]})
+                    status = result.get("status", "uncertain")
+                    if status not in {"sent", "failed", "uncertain"}:
+                        status = "uncertain"
+                    error = result.get("error")
+                except Exception:
+                    status = "uncertain"
+                    error = "Resposta interrompida. Confira a conversa no WhatsApp antes de liberar outro envio."
+
+                self.store.finish_queue_item(
+                    item["id"], status, error,
+                    provider_message_id=result.get("message_id"), ack=result.get("ack")
+                )
+                if status == "sent":
+                    resolved_phone = result.get("resolved_phone")
+                    if resolved_phone and resolved_phone != item.get("phone"):
+                        self.store.save_supplier({
+                            "supplier_key": item["supplier_key"],
+                            "display_name": item["supplier_name"],
+                            "phone": resolved_phone,
+                        })
+                    time.sleep(2)
+                self.store.log_event("followup_result", {
+                    "batch_id": batch_id, "supplier_key": item["supplier_key"],
+                    "status": status, "error": error, "simulation": False
+                }, "error" if status in {"failed", "uncertain"} else "info")
+                batch = self.store.refresh_message_batch(batch_id)
+                self._update_job(**self._state_from_batch(batch, active=True))
+
+            batch = self.store.refresh_message_batch(batch_id, finalize=True)
+            result = self._batch_result(batch_id)
+            self._update_job(**self._state_from_batch(batch, active=False))
+            self._update_job(result=result)
+            return result
+        finally:
+            self.send_lock.release()
+
+    def send_persistent_and_wait(self, supplier_keys=None, force_simulation=None, message_overrides=None) -> dict[str, Any]:
+        state = self.start_send(supplier_keys, force_simulation, message_overrides)
+        job_id = state["job_id"]
+        while state.get("active"):
+            time.sleep(0.2)
+            state = self.send_status(job_id)
+        if state.get("phase") == "error":
+            raise RuntimeError(state.get("error") or "O lote foi interrompido.")
+        return state.get("result") or self._batch_result(job_id)
 
     def orders(self, status: str | None = None) -> list[dict[str, Any]]:
         settings = self.store.settings()
@@ -1256,15 +1807,19 @@ class FollowUpService:
             "last_history": self.store.recent_history(8),
         }
 
-    def send(self, supplier_keys: list[str] | None = None, force_simulation: bool | None = None, message_overrides: dict[str, str] | None = None) -> dict[str, Any]:
+    def send(self, supplier_keys: list[str] | None = None, force_simulation: bool | None = None, message_overrides: dict[str, str] | None = None, progress_callback=None, job_id: str | None = None) -> dict[str, Any]:
+        with self.job_lock:
+            active_job = self.job_state.get("job_id") if self.job_state.get("active") else None
+        if active_job and job_id != active_job:
+            raise ValueError("Já existe um lote em execução ou aguardando conexão.")
         if not self.send_lock.acquire(blocking=False):
             raise ValueError("Já existe um lote em execução ou aguardando conexão.")
         try:
-            return self._send(supplier_keys, force_simulation, message_overrides)
+            return self._send(supplier_keys, force_simulation, message_overrides, progress_callback)
         finally:
             self.send_lock.release()
 
-    def _send(self, supplier_keys=None, force_simulation=None, message_overrides=None):
+    def _send(self, supplier_keys=None, force_simulation=None, message_overrides=None, progress_callback=None):
         settings = self.store.settings()
         simulation = settings["simulation"] if force_simulation is None else bool(force_simulation)
         if supplier_keys is None:
@@ -1308,7 +1863,27 @@ class FollowUpService:
         batch_id = str(uuid.uuid4())
         sent = failed = simulated = 0
         results = []
-        for group in groups:
+        aborted_error = None
+        ensure_ready_before_next = False
+        if progress_callback:
+            progress_callback({
+                "phase": "sending", "total": len(groups), "processed": 0,
+                "sent": 0, "failed": 0, "uncertain": 0, "simulated": 0,
+                "current_supplier": None,
+            })
+        for index, group in enumerate(groups):
+            if progress_callback:
+                progress_callback({"current_supplier": group["supplier_name"], "phase": "sending"})
+            # Antes de cada fornecedor, confirme silenciosamente que a sessão segue pronta.
+            # Isso permite que o monitor restaure uma queda entre duas mensagens sem
+            # exigir que o usuário reinicie manualmente o lote.
+            if not simulation and index > 0 and ensure_ready_before_next:
+                try:
+                    whatsapp_request("/wait")
+                    ensure_ready_before_next = False
+                except Exception as exc:
+                    aborted_error = str(exc)
+                    break
             status, error = "simulated", None
             followup_id = None
             if simulation:
@@ -1332,7 +1907,7 @@ class FollowUpService:
                             })
                             group["phone"] = resolved_phone
                         sent += 1
-                        time.sleep(3)
+                        time.sleep(2)
                     else:
                         failed += 1
                 except Exception as exc:
@@ -1347,16 +1922,24 @@ class FollowUpService:
                 "batch_id": batch_id, "supplier_key": group["supplier_key"],
                 "status": status, "error": error, "simulation": simulation
             }, "error" if status in {"failed", "uncertain"} else "info")
-            # failed means the bridge proved that submission never happened
-            # (for example an invalid number), so it is safe to continue.
-            # uncertain may already have reached WhatsApp and must stop the batch
-            # until a person checks the conversation.
-            if status == "uncertain" and not simulation:
-                break
+            uncertain_count = sum(1 for item in results if item["status"] == "uncertain")
+            error_text = normalize(error or "")
+            ensure_ready_before_next = (
+                not simulation and (status == "uncertain" or "CONEX" in error_text or "WHATSAPP NAO CONECT" in error_text)
+            )
+            if progress_callback:
+                progress_callback({
+                    "processed": len(results), "sent": sent, "failed": failed,
+                    "uncertain": uncertain_count, "simulated": simulated,
+                })
+            # Falhas comprovadamente anteriores ao envio e envios incertos ficam
+            # isolados no fornecedor atual. O lote segue para os demais sem repetir
+            # a mensagem incerta. O intervalo anti-spam impede nova tentativa automática.
         return {
             "batch_id": batch_id, "sent": sent, "simulated": simulated, "failed": failed,
             "processed": len(results), "selected": len(groups),
             "uncertain": sum(1 for item in results if item["status"] == "uncertain"),
+            "aborted": bool(aborted_error), "aborted_error": aborted_error,
             "results": results
         }
 
@@ -1400,7 +1983,8 @@ class AutoScheduler(threading.Thread):
             if not workbook_path:
                 raise RuntimeError("Nenhuma planilha foi importada para a execução automática.")
             self.importer.import_file(workbook_path)
-            result = self.service.send(force_simulation=False)
+            sender = getattr(self.service, "send_persistent_and_wait", self.service.send)
+            result = sender(force_simulation=False)
             print(json.dumps({"event": "automatic_run", "result": result}, ensure_ascii=False), flush=True)
             self.store.log_event("automatic_run", result, "error" if result.get("failed") or result.get("uncertain") else "info")
             # Mark the day complete only after a clean run. Failures can be fixed
@@ -1415,6 +1999,31 @@ class AutoScheduler(threading.Thread):
     def run(self):
         while not self.stop_event.is_set():
             self.run_once_if_due()
+            self.stop_event.wait(self.poll_seconds)
+
+
+class WhatsAppSupervisor(threading.Thread):
+    """Silent backend heartbeat for the local WhatsApp bridge.
+
+    The bridge owns reconnection and session state. This supervisor only nudges
+    its health check periodically. It never surfaces popups or changes business
+    rules, and a user pause is respected by the bridge.
+    """
+    def __init__(self, poll_seconds: int = 20):
+        super().__init__(name="whatsapp-backend-supervisor", daemon=True)
+        self.poll_seconds = poll_seconds
+        self.stop_event = threading.Event()
+
+    def run(self):
+        # Give Electron a few seconds to finish the normal application startup.
+        self.stop_event.wait(5)
+        while not self.stop_event.is_set():
+            try:
+                whatsapp_request("/health")
+            except Exception:
+                # The Node-side connection manager owns recovery. A temporary
+                # bridge failure must stay silent and be tried again later.
+                pass
             self.stop_event.wait(self.poll_seconds)
 
 
@@ -1475,6 +2084,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200, {"history": self.store.recent_history(200)})
             if parsed.path == "/settings":
                 return self._json(200, self.store.settings())
+            if parsed.path == "/send-status":
+                query = parse_qs(parsed.query)
+                return self._json(200, self.service.send_status(query.get("job_id", [""])[0] or None))
             return self._json(404, {"error": "Rota não encontrada."})
         except Exception as exc:
             return self._json(500, {"error": str(exc)})
@@ -1484,7 +2096,7 @@ class ApiHandler(BaseHTTPRequestHandler):
             return self._json(401, {"error": "Não autorizado."})
         try:
             if self.path == "/prepare-update":
-                if not self.service.send_lock.acquire(blocking=False):
+                if self.service.send_status().get("active") or not self.service.send_lock.acquire(blocking=False):
                     return self._json(409, {"error": "Envio em andamento."})
                 # Retain the lock until this process exits: scheduler cannot start a new send.
                 return self._json(200, {"ok": True})
@@ -1501,6 +2113,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if self.service.send_lock.locked():
                     raise ValueError("Aguarde o lote terminar antes de revisar o envio.")
                 return self._json(200, self.store.review_followup(body.get("id")))
+            if self.path == "/send-start":
+                return self._json(202, self.service.start_send(
+                    body.get("supplier_keys"), body.get("simulation"), body.get("message_overrides")
+                ))
             if self.path == "/send":
                 return self._json(200, self.service.send(
                     body.get("supplier_keys"), body.get("simulation"), body.get("message_overrides")
@@ -1523,6 +2139,8 @@ def serve(port: int):
         raise RuntimeError("Token local ausente.")
     scheduler = AutoScheduler(store, ApiHandler.importer, ApiHandler.service)
     scheduler.start()
+    whatsapp_supervisor = WhatsAppSupervisor()
+    whatsapp_supervisor.start()
     server = ThreadingHTTPServer(("127.0.0.1", port), ApiHandler)
     print(json.dumps({"event": "ready", "port": server.server_address[1]}), flush=True)
     server.serve_forever()

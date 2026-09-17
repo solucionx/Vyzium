@@ -24,6 +24,18 @@ function findBrowser() {
 
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+function messageIdentity(message) {
+  if (!message) return null;
+  if (typeof message === 'string') return message.trim() || null;
+  const id = message.id ?? message?._data?.id;
+  if (typeof id === 'string') return id.trim() || null;
+  if (id && typeof id._serialized === 'string' && id._serialized) return id._serialized;
+  // Some whatsapp-web.js/WA Web combinations expose the raw id without
+  // _serialized for a short period immediately after sendMessage().
+  if (id && typeof id.id === 'string' && id.id) return id.id;
+  return null;
+}
+
 function phoneCandidates(phone) {
   let digits = String(phone || '').replace(/\D/g, '');
   if (digits.startsWith('00')) digits = digits.slice(2);
@@ -65,20 +77,148 @@ class WhatsAppSession {
     this.sendTimeoutMs = Number(deps.sendTimeoutMs || 45000);
     this.numberTimeoutMs = Number(deps.numberTimeoutMs || 15000);
     this.healthTimeoutMs = Number(deps.healthTimeoutMs || 5000);
+    this.healthIntervalMs = Number(deps.healthIntervalMs || 15000);
+    this.healthFailureThreshold = Number(deps.healthFailureThreshold || 3);
+    this.authenticatedTimeoutMs = Number(deps.authenticatedTimeoutMs || 45000);
+    this.reconnectBaseMs = Number(deps.reconnectBaseMs || 5000);
+    this.reconnectMaxMs = Number(deps.reconnectMaxMs || 60000);
     this.readyAt = 0;
     this.lastHealthCheckAt = 0;
     this.lastAckAt = 0;
     this.ackCache = new Map();
     this.ackWaiters = new Map();
-    this.state = {status:'offline', qr:null, account:null, error:null};
+    this.monitorTimer = null;
+    this.reconnectTimer = null;
+    this.reconnectAttempts = 0;
+    this.consecutiveHealthFailures = 0;
+    this.lastHealthyAt = 0;
+    this.authenticatedAt = 0;
+    this.preferenceFile = path.join(this.dataDir, 'connection-preference.json');
+    this.userPaused = this._loadPausedPreference();
+    this.state = this.userPaused
+      ? {status:'paused', qr:null, account:null, error:null}
+      : {status:'offline', qr:null, account:null, error:null};
   }
 
   status() {
     return {
       ...this.state,
       busy: this.busy,
-      lastAckAt: this.lastAckAt || null
+      monitoring: Boolean(this.monitorTimer) && !this.userPaused,
+      lastHealthCheckAt: this.lastHealthCheckAt || null,
+      lastHealthyAt: this.lastHealthyAt || null,
+      lastAckAt: this.lastAckAt || null,
+      healthFailures: this.consecutiveHealthFailures
     };
+  }
+
+  _loadPausedPreference() {
+    try {
+      const raw = JSON.parse(fs.readFileSync(this.preferenceFile, 'utf8'));
+      return raw?.paused === true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  _savePausedPreference(paused) {
+    try {
+      fs.mkdirSync(this.dataDir, {recursive:true, mode:0o700});
+      const temp = `${this.preferenceFile}.tmp`;
+      fs.writeFileSync(temp, JSON.stringify({paused:Boolean(paused)}), {encoding:'utf8', mode:0o600});
+      fs.renameSync(temp, this.preferenceFile);
+    } catch (_) {
+      // A failure to persist this preference must not break WhatsApp itself.
+    }
+  }
+
+  _clearReconnectTimer() {
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+  }
+
+  _scheduleReconnect(immediate = false) {
+    if (this.userPaused || this.reconnectTimer || this.starting || this.busy) return;
+    if (['starting','qr','authenticated'].includes(this.state.status)) return;
+    const attempt = this.reconnectAttempts++;
+    const wait = immediate ? 0 : Math.min(this.reconnectMaxMs, this.reconnectBaseMs * Math.max(1, 2 ** Math.min(attempt, 4)));
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      if (this.userPaused || this.busy) return;
+      this._connectInternal().catch(() => this._scheduleReconnect(false));
+    }, wait);
+    this.reconnectTimer.unref?.();
+  }
+
+  startMonitoring() {
+    if (this.monitorTimer) return;
+    this.monitorTimer = setInterval(async () => {
+      if (this.userPaused || this.busy || this.starting) return;
+      if (this.state.status === 'qr') return;
+      if (this.state.status === 'authenticated') {
+        if (!this.authenticatedAt) this.authenticatedAt = Date.now();
+        if (Date.now() - this.authenticatedAt < this.authenticatedTimeoutMs) return;
+        // A session can occasionally authenticate but never reach `ready`.
+        // Treat that as a stalled synchronization and renew it silently instead
+        // of leaving a batch waiting forever at the same percentage.
+        try { await this.restartConnection(); }
+        catch (_) { this._scheduleReconnect(false); }
+        return;
+      }
+      if (this.state.status === 'ready') {
+        const healthy = await this.connectionHealthy();
+        if (healthy) {
+          this.consecutiveHealthFailures = 0;
+          this.reconnectAttempts = 0;
+          return;
+        }
+        this.consecutiveHealthFailures += 1;
+        // One delayed getState() is not enough to tear down a healthy-looking
+        // session. Only consecutive failures promote it to offline.
+        if (this.consecutiveHealthFailures < this.healthFailureThreshold) return;
+        this.readyAt = 0;
+        this.state = {status:'offline', qr:null, account:null, error:'Conexão interrompida. O Vyzium está tentando restaurá-la automaticamente.'};
+      }
+      if (['offline','error'].includes(this.state.status)) this._scheduleReconnect(false);
+    }, this.healthIntervalMs);
+    this.monitorTimer.unref?.();
+  }
+
+  async backgroundHealthCheck() {
+    this.startMonitoring();
+    if (this.userPaused) return {healthy:false, paused:true, status:'paused'};
+    if (this.busy || this.starting || ['qr','starting'].includes(this.state.status)) {
+      return {healthy:false, paused:false, status:this.state.status};
+    }
+    if (this.state.status === 'authenticated') {
+      if (!this.authenticatedAt) this.authenticatedAt = Date.now();
+      if (Date.now() - this.authenticatedAt >= this.authenticatedTimeoutMs) {
+        try { await this.restartConnection(); }
+        catch (_) { this._scheduleReconnect(false); }
+      }
+      return {healthy:false, paused:false, status:this.state.status};
+    }
+    if (this.state.status === 'ready') {
+      const healthy = await this.connectionHealthy();
+      if (healthy) {
+        this.consecutiveHealthFailures = 0;
+        this.reconnectAttempts = 0;
+        return {healthy:true, paused:false, status:'ready'};
+      }
+      this.consecutiveHealthFailures += 1;
+      if (this.consecutiveHealthFailures >= this.healthFailureThreshold) {
+        this.readyAt = 0;
+        this.state = {status:'offline', qr:null, account:null, error:'Conexão interrompida. O Vyzium está tentando restaurá-la automaticamente.'};
+      }
+    }
+    if (['offline','error'].includes(this.state.status)) this._scheduleReconnect(false);
+    return {healthy:false, paused:false, status:this.state.status};
+  }
+
+  autoStart() {
+    this.startMonitoring();
+    if (!this.userPaused) this._scheduleReconnect(true);
+    return this.status();
   }
 
   _clearAckWaiters(errorMessage = 'Conexão do WhatsApp encerrada antes da confirmação do envio.') {
@@ -90,7 +230,7 @@ class WhatsAppSession {
   }
 
   _rememberAck(message, ack) {
-    const id = message?.id?._serialized;
+    const id = messageIdentity(message);
     if (!id || typeof ack !== 'number') return;
 
     const now = Date.now();
@@ -162,9 +302,41 @@ class WhatsAppSession {
     }
   }
 
+  async _waitForAckWithoutStableId(message, timeout) {
+    const deadline = Date.now() + timeout;
+    let current = message;
+    while (Date.now() < deadline) {
+      const ack = Number(current?.ack);
+      if (Number.isFinite(ack)) {
+        if (ack >= 1) { this.lastAckAt = Date.now(); return ack; }
+        if (ack < 0) throw new Error('O WhatsApp rejeitou o envio.');
+      }
+      try {
+        const remaining = Math.max(250, deadline - Date.now());
+        if (typeof current?.reload === 'function') {
+          const refreshed = await bounded(
+            current.reload(),
+            Math.min(2500, remaining),
+            'Tempo limite ao atualizar o status da mensagem.'
+          );
+          if (refreshed) current = refreshed;
+          const refreshedAck = Number(current?.ack);
+          if (Number.isFinite(refreshedAck)) {
+            if (refreshedAck >= 1) { this.lastAckAt = Date.now(); return refreshedAck; }
+            if (refreshedAck < 0) throw new Error('O WhatsApp rejeitou o envio.');
+          }
+        }
+      } catch (_) {
+        // Keep waiting. A temporary cache failure is not proof of delivery
+        // failure and must not force a healthy session to restart.
+      }
+      await delay(Math.min(750, Math.max(100, deadline - Date.now())));
+    }
+    throw new Error('O WhatsApp não confirmou o envio ao servidor dentro do prazo.');
+  }
+
   waitForServerAck(message, timeout = 45000) {
-    const messageId = typeof message === 'string' ? message : message?.id?._serialized;
-    if (!messageId) return Promise.reject(new Error('Mensagem sem identificador para confirmação.'));
+    const messageId = messageIdentity(message);
 
     const directAck = Number(typeof message === 'string' ? NaN : message?.ack);
     if (Number.isFinite(directAck)) {
@@ -173,6 +345,17 @@ class WhatsAppSession {
         return Promise.resolve(directAck);
       }
       if (directAck < 0) return Promise.reject(new Error('O WhatsApp rejeitou o envio.'));
+    }
+
+    if (!messageId) {
+      if (typeof message === 'string' || !message) {
+        return Promise.reject(new Error('Mensagem sem identificador para confirmação.'));
+      }
+      // sendMessage() did return a Message object, so the submission may be
+      // real even when WA Web omits _serialized temporarily. Confirm it by
+      // polling the Message itself instead of immediately tearing down the
+      // connection and stalling the remaining queue.
+      return this._waitForAckWithoutStableId(message, timeout);
     }
 
     const cached = this.ackCache.get(messageId);
@@ -194,22 +377,39 @@ class WhatsAppSession {
   }
 
   connect() {
-    if (this.starting || ['starting','qr','authenticated','ready'].includes(this.state.status)) return this.status();
+    this.userPaused = false;
+    this.consecutiveHealthFailures = 0;
+    this._savePausedPreference(false);
+    this.startMonitoring();
+    this._clearReconnectTimer();
+    this._connectInternal().catch(() => {});
+    return this.status();
+  }
+
+  async _connectInternal() {
+    if (this.userPaused || this.starting || ['starting','qr','authenticated','ready'].includes(this.state.status)) return this.status();
     this.state = {status:'starting', qr:null, account:null, error:null};
     const generation = ++this.generation;
     this.starting = this.initialize(generation)
       .catch(error => {
-        if (generation === this.generation) {
+        if (generation === this.generation && !this.userPaused) {
           this.state = {
             status:'error',
             qr:null,
             account:null,
-            error: error?.message || 'Falha ao conectar. Confira a internet e se Edge ou Chrome está instalado; depois tente reconectar.'
+            error: error?.message || 'Falha ao conectar. Confira a internet e se Edge ou Chrome está instalado.'
           };
         }
+        throw error;
       })
       .finally(() => { this.starting = null; });
-    return this.status();
+    try {
+      await this.starting;
+      return this.status();
+    } catch (error) {
+      if (!this.userPaused) this._scheduleReconnect(false);
+      throw error;
+    }
   }
 
   async initialize(generation) {
@@ -251,13 +451,21 @@ class WhatsAppSession {
     });
 
     client.on('authenticated', () => {
-      if (this.client === client) this.state = {status:'authenticated', qr:null, account:null, error:null};
+      if (this.client === client) {
+        this.authenticatedAt = Date.now();
+        this.state = {status:'authenticated', qr:null, account:null, error:null};
+      }
     });
 
     client.on('ready', () => {
       if (this.client === client) {
         this.readyAt = Date.now();
+        this.authenticatedAt = 0;
         this.lastHealthCheckAt = Date.now();
+        this.lastHealthyAt = Date.now();
+        this.consecutiveHealthFailures = 0;
+        this.reconnectAttempts = 0;
+        this._clearReconnectTimer();
         this.state = {status:'ready', qr:null, account:client.info?.wid?.user || null, error:null};
       }
     });
@@ -268,22 +476,26 @@ class WhatsAppSession {
 
     client.on('auth_failure', () => {
       if (this.client === client) {
+        this.authenticatedAt = 0;
         this._clearAckWaiters('A sessão do WhatsApp perdeu a autorização durante o envio.');
-        this.state = {status:'error',qr:null,account:null,error:'Sessão não autorizada. Reconecte e leia um novo QR Code.'};
+        this.state = {status:'error',qr:null,account:null,error:'Sessão não autorizada. Um novo QR Code pode ser necessário.'};
+        this._scheduleReconnect(false);
       }
     });
 
     client.on('disconnected', reason => {
       if (this.client === client) {
         this.readyAt = 0;
+        this.authenticatedAt = 0;
         this.lastHealthCheckAt = 0;
         this._clearAckWaiters('O WhatsApp desconectou antes de confirmar o envio.');
         this.state = {
           status:'offline',
           qr:null,
           account:null,
-          error:`WhatsApp desconectado${reason ? ` (${String(reason)})` : ''}. Clique em Conectar para restaurar a sessão.`
+          error:`WhatsApp desconectado${reason ? ` (${String(reason)})` : ''}. O Vyzium tentará restaurar a sessão automaticamente.`
         };
+        this._scheduleReconnect(false);
       }
     });
 
@@ -295,7 +507,9 @@ class WhatsAppSession {
     const oldClient = this.client;
     this.client = null;
     this.readyAt = 0;
+    this.authenticatedAt = 0;
     this.lastHealthCheckAt = 0;
+    this.consecutiveHealthFailures = 0;
     this._clearAckWaiters('A conexão foi renovada antes da confirmação do envio.');
     this.generation++;
     const generation = this.generation;
@@ -327,7 +541,8 @@ class WhatsAppSession {
         'Tempo limite ao verificar a conexão do WhatsApp.'
       );
       const healthy = String(state || '').toUpperCase() === 'CONNECTED';
-      if (healthy) this.lastHealthCheckAt = Date.now();
+      this.lastHealthCheckAt = Date.now();
+      if (healthy) this.lastHealthyAt = this.lastHealthCheckAt;
       return healthy;
     } catch (_) {
       return false;
@@ -335,11 +550,10 @@ class WhatsAppSession {
   }
 
   async waitReady(timeout = 120000) {
-    if (this.state.status === 'paused') throw new Error('Conexão pausada. Clique em Conectar para continuar.');
+    if (this.userPaused || this.state.status === 'paused') throw new Error('Conexão pausada. Clique em Retomar conexão para continuar.');
 
-    // Do not recycle a healthy session merely because it has been open for a
-    // while. Ask WhatsApp Web for its real connection state and reconnect only
-    // when that health check fails.
+    // Reuse a healthy session. If it is degraded, restart it once and let the
+    // monitor keep it alive in the background from then on.
     if (this.state.status === 'ready') {
       if (!(await this.connectionHealthy())) await this.restartConnection();
     } else {
@@ -368,6 +582,7 @@ class WhatsAppSession {
     this.busy = true;
     let submitted = false;
     let messageId = null;
+    let reconnectAfterSend = false;
     const client = this.client;
 
     try {
@@ -407,48 +622,59 @@ class WhatsAppSession {
         'O WhatsApp não concluiu a chamada de envio dentro do prazo.'
       );
 
-      messageId = result?.id?._serialized || null;
-      if (!messageId) {
-        throw new Error('O WhatsApp não retornou um identificador confiável para confirmar a mensagem.');
-      }
+      messageId = messageIdentity(result);
 
-      // IMPORTANT: sendMessage() returning a message object is only a local success.
-      // We only mark the follow-up as sent after ACK >= 1, confirmed either by
-      // the event stream or by reloading the sent message from WhatsApp Web.
-      const ack = await this.waitForServerAck(result, this.ackTimeoutMs);
-      return {status:'sent', message_id:messageId, ack, resolved_phone:resolvedPhone};
+      // For the current WhatsApp Web integration, a completed sendMessage() call
+      // is treated as a successful send. Some WA Web builds do not expose a
+      // reliable ACK/message id even though the message was actually sent.
+      return {status:'sent', message_id:messageId, resolved_phone:resolvedPhone};
     } catch (error) {
       if (submitted) {
-        const staleClient = this.client;
-        this.client = null;
-        this.readyAt = 0;
-        this.lastHealthCheckAt = 0;
-        this._clearAckWaiters('A confirmação do envio não chegou.');
-        this.state = {
-          status:'error',
-          qr:null,
-          account:null,
-          error:'Envio não confirmado pelo servidor do WhatsApp. A conexão foi encerrada para evitar falso positivo. Reconecte antes de tentar novamente.'
-        };
-        if (staleClient) await bounded(staleClient.destroy(), 10000).catch(() => {});
+        // An ACK timeout means the delivery is uncertain, not that the whole
+        // WhatsApp session is broken. Destroying a healthy client here caused
+        // the old 2/N stall: one uncertain message forced a full resync before
+        // the next supplier. Keep a healthy session alive and only reconnect
+        // when the transport itself is demonstrably down.
+        let healthy = false;
+        try { healthy = this.client === client && await this.connectionHealthy(); }
+        catch (_) { healthy = false; }
+        if (!healthy) {
+          this.readyAt = 0;
+          this.authenticatedAt = 0;
+          this.lastHealthCheckAt = 0;
+          this.state = {
+            status:'offline',
+            qr:null,
+            account:null,
+            error:'A conexão do WhatsApp ficou indisponível após um envio sem confirmação. O Vyzium tentará restaurá-la automaticamente.'
+          };
+          reconnectAfterSend = true;
+        }
       }
 
       return submitted
         ? {
             status:'uncertain',
+            message_id:messageId,
             error:`Envio não confirmado pelo servidor do WhatsApp${messageId ? ` (${messageId})` : ''}. Confira a conversa antes de liberar um novo envio. Detalhe: ${error?.message || 'sem confirmação.'}`
           }
         : {status:'failed', error:error?.message || 'Falha ao verificar o contato. Nenhuma mensagem enviada.'};
     } finally {
       this.busy = false;
+      if (reconnectAfterSend) this._scheduleReconnect(false);
     }
   }
 
   async pause(force = false) {
     if (this.busy && !force) throw new Error('Aguarde o envio terminar antes de pausar.');
+    this.userPaused = true;
+    this._savePausedPreference(true);
+    this._clearReconnectTimer();
     this.generation++;
     this.readyAt = 0;
+    this.authenticatedAt = 0;
     this.lastHealthCheckAt = 0;
+    this.consecutiveHealthFailures = 0;
     this.state = {status:'paused',qr:null,account:null,error:null};
     this._clearAckWaiters('Conexão pausada antes da confirmação do envio.');
     const client = this.client;
@@ -458,6 +684,18 @@ class WhatsAppSession {
     this.state = {status:'paused',qr:null,account:null,error:null};
     return this.status();
   }
+
+  async shutdown() {
+    this._clearReconnectTimer();
+    if (this.monitorTimer) clearInterval(this.monitorTimer);
+    this.monitorTimer = null;
+    this.generation++;
+    this._clearAckWaiters('Aplicativo encerrado antes da confirmação do envio.');
+    const client = this.client;
+    this.client = null;
+    if (client) await bounded(client.destroy(), 10000).catch(() => {});
+  }
+
 }
 
 async function startBridge(session, token) {
@@ -471,6 +709,10 @@ async function startBridge(session, token) {
       return;
     }
     try {
+      if (req.method === 'POST' && req.url === '/health') {
+        reply(200, await session.backgroundHealthCheck());
+        return;
+      }
       if (req.method === 'POST' && req.url === '/wait') {
         reply(200, await session.waitReady());
         return;

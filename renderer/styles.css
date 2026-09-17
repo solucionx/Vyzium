@@ -568,3 +568,38 @@ body.compact-ui .compact-table th,
 body.compact-ui .compact-table td { padding: 7px 8px; }
 body.compact-ui .loading { padding: 30px; font-size: 12px; }
 body.compact-ui .toast { font-size: 12px; padding: 10px 12px; }
+
+/* Progresso do lote de mensagens */
+.batch-progress {
+  margin-top: 10px;
+  padding: 11px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--surface) 92%, var(--cyan) 8%);
+}
+.batch-progress.hidden { display: none; }
+.batch-progress-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.batch-progress-head span { font-weight: 750; color: var(--ink); }
+.batch-progress-head strong { font-variant-numeric: tabular-nums; }
+.batch-progress progress {
+  display: block;
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  background: #e7ebee;
+}
+.batch-progress progress::-webkit-progress-bar { background: #e7ebee; }
+.batch-progress progress::-webkit-progress-value {
+  background: linear-gradient(90deg, var(--brown), var(--cyan));
+  border-radius: 999px;
+}
+.batch-progress small { display: block; margin-top: 7px; }

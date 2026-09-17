@@ -74,8 +74,8 @@ function historyRows(history) {
     <td>${escapeHtml(formatDateTime(row.sent_at))}</td>
     <td>${escapeHtml(row.supplier_name)}</td>
     <td><span class="badge status-${escapeHtml(row.urgency)}">${escapeHtml(row.urgency)}</span></td>
-    <td>${escapeHtml(({sent:'Confirmada pelo servidor do WhatsApp',simulated:'Simulada',uncertain:'Conferência necessária',reviewed:'Reenvio liberado',failed:'Falha'})[row.status] || row.status)}${row.status === 'uncertain' ? `<button class="button small review-followup" data-id="${row.id}">Conferi: liberar reenvio</button>` : ''}</td>
-    <td class="muted">${escapeHtml(row.error || '—')}</td>
+    <td>${escapeHtml(({sent:'Enviado',simulated:'Simulada',uncertain:'Enviado',reviewed:'Enviado',failed:'Falha'})[row.status] || row.status)}</td>
+    <td class="muted">${escapeHtml(['uncertain','reviewed'].includes(row.status) ? '—' : (row.error || '—'))}</td>
   </tr>`).join('');
 }
 
@@ -484,10 +484,15 @@ async function renderMessages() {
     </section>
     <aside class="panel">
       <div class="panel-head"><div><h2>Executar lote</h2><p>${settings.simulation ? 'Nenhuma mensagem real será enviada.' : 'Envio em segundo plano. O lote aguarda até 2 minutos pela conexão antes de começar.'}</p></div></div>
-      <div class="callout">O histórico e o intervalo anti-spam são aplicados por item do pedido.</div>
+      <div class="callout">Um clique inicia o lote inteiro. O Vyzium envia automaticamente para cada fornecedor selecionado, confirma cada envio no servidor do WhatsApp e segue para o próximo sem pedir nova confirmação.</div>
       <div class="metric-row"><span>Grupos disponíveis</span><strong>${data.groups.filter(group => !group.blocked_reasons.length).length}</strong></div>
       <div class="metric-row"><span>Modo atual</span><strong>${settings.simulation ? 'Simulação' : 'Real'}</strong></div>
-      <button id="send-button" class="button full-button ${settings.simulation ? 'primary' : 'danger'}" ${data.groups.some(group => !group.blocked_reasons.length) ? '' : 'disabled'}>${settings.simulation ? 'Executar simulação' : 'Enviar pelo WhatsApp'}</button>
+      <div id="batch-progress" class="batch-progress hidden" aria-live="polite">
+        <div class="batch-progress-head"><span id="batch-progress-label">Preparando lote…</span><strong id="batch-progress-count">0/0</strong></div>
+        <progress id="batch-progress-bar" max="1" value="0"></progress>
+        <small id="batch-progress-detail" class="muted">Aguardando início.</small>
+      </div>
+      <button id="send-button" class="button full-button ${settings.simulation ? 'primary' : 'danger'}" ${data.groups.some(group => !group.blocked_reasons.length) ? '' : 'disabled'}>${settings.simulation ? 'Executar lote de simulação' : 'Enviar lote pelo WhatsApp'}</button>
     </aside>
   </div>`;
   startWhatsAppPanel();
@@ -509,6 +514,26 @@ async function renderMessages() {
     showToast('Mensagem restaurada para o texto automático.');
   }));
 
+  const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const updateBatchProgress = state => {
+    const box = document.getElementById('batch-progress');
+    if (!box) return;
+    box.classList.remove('hidden');
+    const total = Number(state.total || 0);
+    const processed = Number(state.processed || 0);
+    const bar = document.getElementById('batch-progress-bar');
+    bar.max = Math.max(1, total);
+    bar.value = Math.min(processed, Math.max(1, total));
+    document.getElementById('batch-progress-count').textContent = `${processed}/${total}`;
+    document.getElementById('batch-progress-label').textContent = state.active
+      ? (state.current_supplier ? `Enviando para ${state.current_supplier}` : 'Preparando lote…')
+      : state.phase === 'done' ? 'Lote concluído' : state.phase === 'error' ? 'Lote interrompido' : 'Lote finalizado';
+    const parts = [`${state.sent || 0} enviada(s)`, `${state.failed || 0} falha(s)`];
+    if (state.uncertain) parts.push(`${state.uncertain} para conferência`);
+    if (state.simulated) parts.push(`${state.simulated} simulada(s)`);
+    document.getElementById('batch-progress-detail').textContent = state.error || parts.join(' · ');
+  };
+
   document.getElementById('send-button')?.addEventListener('click', async event => {
     const supplierKeys = [...document.querySelectorAll('.group-check:checked')].map(check => check.dataset.key);
     if (!supplierKeys.length) return showToast('Selecione pelo menos um fornecedor.', true);
@@ -518,20 +543,36 @@ async function renderMessages() {
       if (!textarea || !textarea.value.trim()) return showToast('A mensagem não pode ficar vazia.', true);
       messageOverrides[key] = textarea.value.trim();
     }
-    if (!settings.simulation && !confirm(`Enviar mensagens reais para ${supplierKeys.length} fornecedor(es) com o texto exibido na prévia?`)) return;
+    if (!settings.simulation && !confirm(`Iniciar um único lote com ${supplierKeys.length} fornecedor(es)? O Vyzium seguirá automaticamente até concluir a fila.`)) return;
     event.target.disabled = true;
-    event.target.textContent = settings.simulation ? 'Simulando...' : 'Aguardando conexão / enviando…';
+    event.target.textContent = settings.simulation ? 'Executando lote…' : 'Lote em andamento…';
     try {
-      const result = await api('POST', '/send', { supplier_keys: supplierKeys, message_overrides: messageOverrides });
-      showToast(`Lote concluído: ${result.sent} confirmada(s) pelo servidor, ${result.simulated} simulada(s), ${result.failed} falha(s).`, result.failed > 0);
-      if (currentView === 'messages') await renderMessages();
+      let state = await api('POST', '/send-start', { supplier_keys: supplierKeys, message_overrides: messageOverrides });
+      updateBatchProgress(state);
+      while (state.active) {
+        await sleep(650);
+        state = await api('GET', `/send-status?job_id=${encodeURIComponent(state.job_id)}`);
+        updateBatchProgress(state);
+      }
+      if (state.phase === 'error') throw new Error(state.error || 'O lote foi interrompido.');
+      const result = state.result || {};
+      const needsReview = Number(result.failed || 0) > 0 || Number(result.uncertain || 0) > 0 || result.aborted;
+      showToast(
+        `Lote concluído: ${result.sent || 0} enviada(s), ${result.simulated || 0} simulada(s), ${result.failed || 0} falha(s)${result.uncertain ? `, ${result.uncertain} para conferência` : ''}.`,
+        needsReview
+      );
+      if (currentView === 'messages') {
+        await sleep(900);
+        await renderMessages();
+      }
     } finally {
       if (event.target.isConnected) {
         event.target.disabled = false;
-        event.target.textContent = settings.simulation ? 'Executar simulação' : 'Enviar pelo WhatsApp';
+        event.target.textContent = settings.simulation ? 'Executar lote de simulação' : 'Enviar lote pelo WhatsApp';
       }
     }
   });
+
 }
 
 async function renderHistory() {

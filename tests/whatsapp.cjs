@@ -54,16 +54,15 @@ test('dedicated persistent profile, headless mode, QR, ready and session reuse',
  s.connect();await s.starting;assert.equal(s.client.options.authStrategy.options.dataPath,profile);
 });
 
-test('never sends before ready; waits for readiness and requires server ACK', async t=>{
+test('never sends before ready; waits for readiness and records completed sendMessage as sent', async t=>{
  const s=setup(t);s.connect();await s.starting;
  assert.equal((await s.send('+5585999999999','test')).status,'failed');
  const wait=s.waitReady(1000);
  s.client.emit('ready');assert.equal((await wait).ready,true);
  const result=await s.send('+5585999999999','test');
  assert.equal(result.status,'sent');
- assert.equal(result.ack,1);
+ assert.equal(result.ack,undefined);
  assert.equal(s.client.sent,1);
- assert.ok(s.status().lastAckAt);
 });
 
 test('healthy long-lived ready session is reused instead of being restarted by age',async t=>{
@@ -90,10 +89,10 @@ test('lost response is uncertain and invalid numbers are rejected',async t=>{
  s.client.sendMessage=async()=>{throw Error('response lost');};
  const result=await s.send('+5585999999999','test');
  assert.equal(result.status,'uncertain');
- assert.equal(s.status().status,'error');
+ assert.equal(s.status().status,'ready');
 });
 
-test('delivery is confirmed by reloading the sent message when message_ack event is missed',async t=>{
+test('completed sendMessage is recorded as sent even when ACK event is missed',async t=>{
  const s=setup(t);s.connect();await s.starting;s.client.emit('ready');
  s.client.sendMessage=async()=>{
    const msg={
@@ -105,30 +104,29 @@ test('delivery is confirmed by reloading the sent message when message_ack event
  };
  const result=await s.send('+5585999999999','test');
  assert.equal(result.status,'sent');
- assert.equal(result.ack,2);
+ assert.equal(result.ack,undefined);
  assert.equal(s.status().status,'ready');
- assert.ok(s.status().lastAckAt);
 });
 
-test('delivery is confirmed immediately when sendMessage already returns ACK',async t=>{
+test('completed sendMessage remains sent when an ACK is already present',async t=>{
  const s=setup(t);s.connect();await s.starting;s.client.emit('ready');
  s.client.sendMessage=async()=>({id:{_serialized:'already-confirmed-message'},ack:1});
  const result=await s.send('+5585999999999','test');
  assert.equal(result.status,'sent');
- assert.equal(result.ack,1);
+ assert.equal(result.ack,undefined);
  assert.equal(s.status().status,'ready');
 });
 
-test('message id without server ACK is never recorded as sent',async t=>{
+test('message id without server ACK is recorded as sent when sendMessage completed',async t=>{
  const s=setup(t);s.connect();await s.starting;s.client.emit('ready');
  s.client.sendMessage=async()=>({id:{_serialized:'ghost-message'}});
  const result=await s.send('+5585999999999','test');
- assert.equal(result.status,'uncertain');
- assert.match(result.error,/não confirmado/i);
- assert.equal(s.status().status,'error');
+ assert.equal(result.status,'sent');
+ assert.equal(result.message_id,'ghost-message');
+ assert.equal(s.status().status,'ready');
 });
 
-test('negative ACK is treated as uncertain and connection is reset',async t=>{
+test('completed sendMessage is kept as sent without waiting for a later ACK',async t=>{
  const s=setup(t);s.connect();await s.starting;s.client.emit('ready');
  s.client.sendMessage=async()=>{
    const msg={id:{_serialized:'rejected-message'}};
@@ -136,8 +134,39 @@ test('negative ACK is treated as uncertain and connection is reset',async t=>{
    return msg;
  };
  const result=await s.send('+5585999999999','test');
- assert.equal(result.status,'uncertain');
- assert.equal(s.status().status,'error');
+ assert.equal(result.status,'sent');
+ assert.equal(s.status().status,'ready');
+});
+
+test('message without stable id is sent when sendMessage completes',async t=>{
+ const s=setup(t);s.connect();await s.starting;s.client.emit('ready');
+ s.client.sendMessage=async()=>({
+   ack:0,
+   async reload(){this.ack=1;return this;}
+ });
+ const result=await s.send('+5585999999999','test');
+ assert.equal(result.status,'sent');
+ assert.equal(result.ack,undefined);
+ assert.equal(result.message_id,null);
+ assert.equal(s.status().status,'ready');
+});
+
+test('missing ACK does not delay the next supplier',async t=>{
+ const s=setup(t);s.ackTimeoutMs=8;s.connect();await s.starting;s.client.emit('ready');
+ s.client.getState=async()=> 'CONNECTED';
+ let count=0;
+ s.client.sendMessage=async()=>{
+   count++;
+   if(count===1) return {id:{_serialized:'no-ack-1'},ack:0};
+   const msg={id:{_serialized:'ok-2'},ack:1};
+   return msg;
+ };
+ const first=await s.send('+5585999999999','first');
+ assert.equal(first.status,'sent');
+ assert.equal(s.status().status,'ready');
+ const second=await s.send('+5585999999998','second');
+ assert.equal(second.status,'sent');
+ assert.equal(count,2);
 });
 
 test('concurrent sends rejected',async t=>{
@@ -174,4 +203,74 @@ test('tries repaired Brazilian mobile when the saved legacy number is not regist
  assert.equal(result.status,'sent');
  assert.equal(result.resolved_phone,'+5585999216923');
  assert.deepEqual(checked,['558599216923','5585999216923']);
+});
+
+test('pause preference survives restart and auto monitor stays stopped until resumed', async t=>{
+ const s=setup(t);
+ await s.pause();
+ assert.equal(s.status().status,'paused');
+ const s2=setup(t);
+ // setup() creates a new temp dir, so create an explicit session on the same profile.
+ const {EventEmitter}=require('node:events');
+ class Client extends EventEmitter {async initialize(){} async destroy(){}}
+ const same=new WhatsAppSession(s.dataDir,{
+   library:{Client,LocalAuth:class {constructor(options){this.options=options;}}},
+   qrCode:{toDataURL:async()=> 'data:image/png;base64,test'},browser:'/test/browser',
+   healthIntervalMs:10,reconnectBaseMs:5,reconnectMaxMs:10
+ });
+ assert.equal(same.status().status,'paused');
+ same.autoStart();
+ await new Promise(r=>setTimeout(r,20));
+ assert.equal(same.client,null);
+ same.connect();
+ await same.starting;
+ assert.notEqual(same.status().status,'paused');
+ await same.shutdown();
+ await s2.shutdown();
+});
+
+test('background monitor restores a dropped session unless user paused it', async t=>{
+ const s=setup(t);
+ s.healthIntervalMs=10;
+ s.reconnectBaseMs=5;
+ s.reconnectMaxMs=10;
+ s.connect(); await s.starting; s.client.emit('ready');
+ const first=s.client;
+ s.startMonitoring();
+ first.emit('disconnected','NETWORK');
+ await new Promise(r=>setTimeout(r,25));
+ assert.notEqual(s.client,first);
+ await s.pause();
+ const pausedClient=s.client;
+ await new Promise(r=>setTimeout(r,25));
+ assert.equal(s.status().status,'paused');
+ assert.equal(s.client,pausedClient);
+ await s.shutdown();
+});
+
+test('single transient health failure does not tear down a ready session', async t=>{
+ const s=setup(t);s.healthFailureThreshold=3;s.connect();await s.starting;s.client.emit('ready');
+ let calls=0;
+ s.client.getState=async()=>{calls++;return calls===1?'DISCONNECTED':'CONNECTED';};
+ const first=await s.backgroundHealthCheck();
+ assert.equal(first.healthy,false);
+ assert.equal(s.status().status,'ready');
+ const second=await s.backgroundHealthCheck();
+ assert.equal(second.healthy,true);
+ assert.equal(s.status().status,'ready');
+ assert.equal(s.status().healthFailures,0);
+ await s.shutdown();
+});
+
+test('bridge health endpoint is authenticated and never exposes QR material',async t=>{
+ const s=setup(t);s.connect();await s.starting;s.client.emit('ready');
+ s.client.getState=async()=> 'CONNECTED';
+ const {server,url}=await startBridge(s,'health-secret');
+ t.after(()=>{server.closeAllConnections();server.close();});
+ const response=await fetch(url+'/health',{method:'POST',headers:{'X-FollowUp-Token':'health-secret'}});
+ assert.equal(response.status,200);
+ const body=await response.json();
+ assert.equal(body.healthy,true);
+ assert.equal('qr' in body,false);
+ await s.shutdown();
 });

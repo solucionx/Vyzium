@@ -87,8 +87,8 @@ async function apiRequest(method, route, body) {
   const normalizedMethod = String(method || '').toUpperCase();
   const routePath = String(route || '').split('?')[0];
   const allowed = {
-    GET: new Set(['/health', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings']),
-    POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/followup-reviewed'])
+    GET: new Set(['/health', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status']),
+    POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed'])
   };
   if (!allowed[normalizedMethod]?.has(routePath)) throw new Error('Operação local não permitida.');
   const response = await fetch(`${engineUrl}${route}`, {
@@ -164,7 +164,7 @@ app.whenReady().then(async () => {
           if (!response.ok) throw new Error('Existe um envio em andamento. Aguarde e tente novamente.');
         } catch (error) { updating = false; throw error; }
         app.isQuitting = true;
-        await Promise.resolve(whatsapp?.pause(true)).catch(() => {});
+        await Promise.resolve(whatsapp?.shutdown()).catch(() => {});
         whatsappBridge?.server.close();
         if (engine && engine.exitCode === null) {
           if (process.platform === 'win32') {
@@ -184,8 +184,9 @@ app.whenReady().then(async () => {
       }
     });
     await createWindow();
-    // Reuse the dedicated local profile on every app launch.
-    whatsapp.connect();
+    // Mantém a sessão do WhatsApp viva em segundo plano. A preferência de
+    // pausa é persistida: se o usuário pausou, o app respeita isso no próximo início.
+    whatsapp.autoStart();
   } catch (error) {
     dialog.showErrorBox('Falha ao iniciar', `${error.message}\n\nInstale as dependências do motor e tente novamente.`);
     app.quit();
@@ -198,7 +199,7 @@ app.on('before-quit', event => {
   app.isQuitting = true;
   if (engine && !engine.killed) engine.kill();
   whatsappBridge?.server.close();
-  Promise.resolve(whatsapp?.pause(true)).catch(() => {}).finally(() => {quitting = true; app.quit();});
+  Promise.resolve(whatsapp?.shutdown()).catch(() => {}).finally(() => {quitting = true; app.quit();});
 });
 
 app.on('window-all-closed', () => {

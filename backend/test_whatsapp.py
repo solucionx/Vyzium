@@ -133,3 +133,127 @@ class WhatsAppFlowTests(unittest.TestCase):
                 self.service.send()
         finally:
             self.service.send_lock.release()
+
+class WhatsAppBatchQueueTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.store = Store(Path(self.temp.name) / 'test.db')
+        self.service = FollowUpService(self.store)
+
+    def tearDown(self):
+        self.store.connection.close()
+        self.temp.cleanup()
+
+    @patch('engine.time.sleep')
+    @patch('engine.whatsapp_request')
+    def test_uncertain_supplier_does_not_stop_remaining_queue(self, bridge, _sleep):
+        groups = [
+            dict(supplier_key='one', supplier_name='One', phone='+5585111111111', urgency='overdue', message='One', items=[dict(item_key='one-item', urgency='overdue')]),
+            dict(supplier_key='two', supplier_name='Two', phone='+5585222222222', urgency='overdue', message='Two', items=[dict(item_key='two-item', urgency='overdue')]),
+        ]
+        self.service.groups = lambda: groups
+        bridge.side_effect = [
+            {'ready': True},
+            {'status': 'uncertain', 'error': 'Envio sem confirmação'},
+            {'ready': True},
+            {'status': 'sent', 'message_id': 'two-message'},
+        ]
+        result = self.service.send(force_simulation=False)
+        self.assertEqual(result['processed'], 2)
+        self.assertEqual(result['uncertain'], 1)
+        self.assertEqual(result['sent'], 1)
+        self.assertEqual([call.args[0] for call in bridge.call_args_list], ['/wait', '/send', '/wait', '/send'])
+
+    @patch('engine.time.sleep')
+    @patch('engine.whatsapp_request')
+    def test_async_job_reports_progress_and_completes_whole_batch(self, bridge, _sleep):
+        groups = [
+            dict(supplier_key='one', supplier_name='One', phone='+5585111111111', urgency='overdue', message='One', items=[dict(item_key='one-item', urgency='overdue')]),
+            dict(supplier_key='two', supplier_name='Two', phone='+5585222222222', urgency='overdue', message='Two', items=[dict(item_key='two-item', urgency='overdue')]),
+        ]
+        self.service.groups = lambda: groups
+        bridge.side_effect = [
+            {'ready': True},
+            {'ready': True},
+            {'status': 'sent', 'message_id': 'one-message', 'ack': 1},
+            {'ready': True},
+            {'status': 'sent', 'message_id': 'two-message', 'ack': 1},
+        ]
+        state = self.service.start_send(['one', 'two'], False, None)
+        for _ in range(100):
+            state = self.service.send_status(state['job_id'])
+            if not state['active']:
+                break
+            import threading as _threading
+            _threading.Event().wait(0.005)
+        self.assertFalse(state['active'])
+        self.assertEqual(state['phase'], 'done')
+        self.assertEqual(state['processed'], 2)
+        self.assertEqual(state['sent'], 2)
+        self.assertEqual(state['result']['selected'], 2)
+
+    @patch('engine.time.sleep')
+    @patch('engine.whatsapp_request')
+    def test_persistent_batch_keeps_queue_and_provider_confirmation(self, bridge, _sleep):
+        groups = [
+            dict(supplier_key='one', supplier_name='One', phone='+5585111111111', urgency='overdue', message='One', items=[dict(item_key='one-item', urgency='overdue')]),
+            dict(supplier_key='two', supplier_name='Two', phone='+5585222222222', urgency='critical', message='Two', items=[dict(item_key='two-item', urgency='critical')]),
+        ]
+        self.service.groups = lambda: groups
+        bridge.side_effect = [
+            {'ready': True}, {'ready': True},
+            {'status': 'sent', 'message_id': 'msg-one', 'ack': 2},
+            {'ready': True},
+            {'status': 'sent', 'message_id': 'msg-two', 'ack': 1},
+        ]
+        state = self.service.start_send(['one', 'two'], False, None)
+        for _ in range(200):
+            state = self.service.send_status(state['job_id'])
+            if not state['active']:
+                break
+            import threading as _threading
+            _threading.Event().wait(0.005)
+        self.assertEqual(state['phase'], 'done')
+        rows = self.store.queue_rows(state['job_id'])
+        self.assertEqual([row['status'] for row in rows], ['sent', 'sent'])
+        self.assertEqual(rows[0]['provider_message_id'], 'msg-one')
+        self.assertEqual(rows[0]['ack'], 2)
+        self.assertEqual(rows[1]['provider_message_id'], 'msg-two')
+
+    @patch('engine.time.sleep')
+    @patch('engine.whatsapp_request')
+    def test_restart_quarantines_inflight_and_resumes_only_queued_messages(self, bridge, _sleep):
+        batch_id = 'resume-test'
+        groups = [
+            dict(supplier_key='one', supplier_name='One', phone='+5585111111111', urgency='overdue', message='One', items=[dict(item_key='one-item', urgency='overdue')]),
+            dict(supplier_key='two', supplier_name='Two', phone='+5585222222222', urgency='overdue', message='Two', items=[dict(item_key='two-item', urgency='overdue')]),
+        ]
+        self.store.create_message_batch(batch_id, False, {'supplier_keys':['one','two'], 'message_overrides':{}})
+        self.store.plan_message_batch(batch_id, groups)
+        first = self.store.claim_next_queue_item(batch_id)
+        self.assertEqual(first['supplier_key'], 'one')
+        # Simulate a process crash after the first item became in-flight.
+        self.store.connection.close()
+        resumed_store = Store(Path(self.temp.name) / 'test.db')
+        bridge.side_effect = [
+            {'ready': True},
+            {'status': 'sent', 'message_id': 'second-only', 'ack': 1},
+        ]
+        resumed = FollowUpService(resumed_store)
+        for _ in range(200):
+            state = resumed.send_status(batch_id)
+            if not state['active']:
+                break
+            import threading as _threading
+            _threading.Event().wait(0.005)
+        rows = resumed_store.queue_rows(batch_id)
+        self.assertEqual(rows[0]['status'], 'uncertain')
+        self.assertEqual(rows[1]['status'], 'sent')
+        self.assertEqual(rows[1]['provider_message_id'], 'second-only')
+        sends = [call for call in bridge.call_args_list if call.args and call.args[0] == '/send']
+        self.assertEqual(len(sends), 1)
+        self.assertEqual(sends[0].args[1]['phone'], '+5585222222222')
+        resumed_store.connection.close()
+        # Prevent tearDown from closing the already-closed original connection twice.
+        self.store = Store(Path(self.temp.name) / 'throwaway.db')
+
