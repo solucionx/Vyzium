@@ -1,0 +1,124 @@
+name: Windows Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag da versão (opcional). Ex.: v1.2.9. Se vazio, usa a versão do package.json."
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Resolver versão e tag
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+
+          if ($env:GITHUB_EVENT_NAME -eq "push") {
+            $tag = $env:GITHUB_REF_NAME
+          } elseif ($env:INPUT_TAG) {
+            $tag = $env:INPUT_TAG.Trim()
+          } else {
+            $tag = "v$version"
+          }
+
+          if ($tag -ne "v$version") {
+            throw "A tag '$tag' não corresponde à versão '$version' do package.json. Use v$version."
+          }
+
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Versão: $version"
+          Write-Host "Release: $tag"
+
+      - name: Instalar dependências Node
+        run: npm ci
+
+      - name: Instalar dependências Python
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Executar testes
+        run: npm test
+
+      - name: Compilar motor Python
+        run: python -m PyInstaller --noconfirm --clean --onefile --name followup-engine --distpath dist-engine --workpath build/pyinstaller backend/engine.py
+
+      - name: Gerar instalador Windows
+        run: npm run build
+
+      - name: Guardar instalador como artefato do Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-Windows-${{ env.APP_VERSION }}
+          path: |
+            dist/Vyzium-Setup.exe
+            dist/Vyzium-Setup.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
+
+      - name: Criar ou atualizar Release em rascunho
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:RELEASE_TAG
+
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag `
+              --target $env:GITHUB_SHA `
+              --draft `
+              --title "Vyzium $tag" `
+              --notes "Instalador Windows e arquivos de atualização automática do Vyzium $tag."
+
+            if ($LASTEXITCODE -ne 0) {
+              throw "Falha ao criar a Release $tag."
+            }
+          } else {
+            $release = gh release view $tag --json isDraft | ConvertFrom-Json
+            if (-not $release.isDraft) {
+              throw "A Release $tag já foi publicada. Aumente a versão antes de gerar outra."
+            }
+          }
+
+          gh release upload $tag `
+            dist/Vyzium-Setup.exe `
+            dist/Vyzium-Setup.exe.blockmap `
+            dist/latest.yml `
+            --clobber
+
+          if ($LASTEXITCODE -ne 0) {
+            throw "Falha ao enviar os arquivos para a Release $tag."
+          }
