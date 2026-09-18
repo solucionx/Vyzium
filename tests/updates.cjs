@@ -11,6 +11,7 @@ function fixture({packaged=true, available=true, response=0, blocked=false}={}) 
   const options={app:{isPackaged:packaged,getVersion:()=> '2.1.0'},platform:'win32',autoUpdater:updater,
     getWindow:()=>({isDestroyed:()=>false,webContents:{send:(_channel,s)=>events.push(s.message)}}),
     dialog:{showMessageBox:async()=>({response})},
+    promptInstall:async()=>response===0,
     prepareInstall:async()=>{prepared++; if(blocked) throw Error('Envio em andamento');events.push('prepare');}};
   return {client:createUpdater(options),updater,events,counts:()=>({downloads,installs,prepared})};
 }

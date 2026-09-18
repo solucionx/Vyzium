@@ -1,6 +1,5 @@
 'use strict';
-const { ipcMain } = require('electron');
-function createUpdater({app, dialog, getWindow, prepareInstall, platform = process.platform, autoUpdater = require('electron-updater').autoUpdater}) {
+function createUpdater({app, dialog, getWindow, prepareInstall, promptInstall, platform = process.platform, autoUpdater = require('electron-updater').autoUpdater}) {
   let busy = false, ready = false;
   const notify = message => {
     const win = getWindow();
@@ -17,7 +16,10 @@ function createUpdater({app, dialog, getWindow, prepareInstall, platform = proce
   async function install() {
     const win = getWindow();
     let installNow = false;
-    if (win && !win.isDestroyed()) {
+    if (typeof promptInstall === 'function') {
+      installNow = await promptInstall();
+    } else if (win && !win.isDestroyed()) {
+      const { ipcMain } = require('electron');
       installNow = await new Promise(resolve => {
         const channel = 'update-prompt-response';
         const timer = setTimeout(() => {
