@@ -222,6 +222,45 @@ class WhatsAppBatchQueueTests(unittest.TestCase):
 
     @patch('engine.time.sleep')
     @patch('engine.whatsapp_request')
+    def test_internal_failure_after_claim_quarantines_item_before_retry(self, bridge, _sleep):
+        groups = [
+            dict(supplier_key='one', supplier_name='One', phone='+5585111111111', urgency='overdue', message='One', items=[dict(item_key='one-item', urgency='overdue')]),
+            dict(supplier_key='two', supplier_name='Two', phone='+5585222222222', urgency='overdue', message='Two', items=[dict(item_key='two-item', urgency='overdue')]),
+        ]
+        self.service.groups = lambda: groups
+        bridge.side_effect = [
+            {'ready': True}, {'ready': True},
+            {'status': 'sent', 'message_id': 'first-call', 'ack': 1},
+            {'ready': True},
+            {'status': 'sent', 'message_id': 'second-call', 'ack': 1},
+        ]
+        original_finish = self.store.finish_queue_item
+        calls = {'count': 0}
+        def fail_once(*args, **kwargs):
+            calls['count'] += 1
+            if calls['count'] == 1:
+                raise RuntimeError('falha local após envio')
+            return original_finish(*args, **kwargs)
+        self.store.finish_queue_item = fail_once
+
+        state = self.service.start_send(['one', 'two'], False, None)
+        for _ in range(200):
+            state = self.service.send_status(state['job_id'])
+            if not state['active']:
+                break
+            import threading as _threading
+            _threading.Event().wait(0.005)
+
+        rows = self.store.queue_rows(state['job_id'])
+        self.assertEqual(rows[0]['status'], 'uncertain')
+        self.assertEqual(rows[1]['status'], 'sent')
+        sends = [call for call in bridge.call_args_list if call.args and call.args[0] == '/send']
+        self.assertEqual(len(sends), 2)
+        self.assertEqual(sends[0].args[1]['phone'], '+5585111111111')
+        self.assertEqual(sends[1].args[1]['phone'], '+5585222222222')
+
+    @patch('engine.time.sleep')
+    @patch('engine.whatsapp_request')
     def test_restart_quarantines_inflight_and_resumes_only_queued_messages(self, bridge, _sleep):
         batch_id = 'resume-test'
         groups = [

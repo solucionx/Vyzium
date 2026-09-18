@@ -1475,6 +1475,10 @@ class FollowUpService:
                         break
                     except Exception as exc:
                         last_error = str(exc)
+                        # If an unexpected failure happened after an item was claimed,
+                        # its delivery state is no longer provable. Quarantine it as
+                        # uncertain before retrying so it can never be replayed.
+                        self.store.recover_interrupted_queue()
                         # Queue rows remain persisted. A transient engine/bridge
                         # problem retries in-place without losing the job. In-flight
                         # rows are guarded by the followup record and are never replayed.
@@ -1690,9 +1694,14 @@ class FollowUpService:
         return "pending"
 
     def order_summaries(self, buyer: str = "", company: str = "", urgency: str = "", search: str = "",
-                        control_status: str = "all", attendance_status: str = "all") -> list[dict[str, Any]]:
+                        control_status: str = "all", attendance_status: str | list[str] | tuple[str, ...] = "all") -> list[dict[str, Any]]:
         self._sync_read_cache()
-        cache_key = (str(buyer), str(company), str(urgency), str(search), str(control_status), str(attendance_status))
+        attendance_values = attendance_status if isinstance(attendance_status, (list, tuple, set)) else [attendance_status]
+        attendance_filters = tuple(sorted({
+            str(value).strip() for value in attendance_values
+            if str(value).strip() not in {"", "all"}
+        }))
+        cache_key = (str(buyer), str(company), str(urgency), str(search), str(control_status), attendance_filters)
         with self.cache_lock:
             cached = self.summary_cache.get(cache_key)
         if cached is not None:
@@ -1715,7 +1724,7 @@ class FollowUpService:
                 continue
             if urgency and urgency not in {"all", "open"} and state != urgency:
                 continue
-            if attendance_status not in {"", "all"} and attendance != attendance_status:
+            if attendance_filters and attendance not in attendance_filters:
                 continue
             first = items[0]
             control = controls.get((oc, supplier_key), {})
@@ -2163,6 +2172,17 @@ class ApiHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/health":
                 return self._json(200, {"ok": True, "app": APP_NAME})
+            if parsed.path == "/overview":
+                dashboard = self.service.dashboard("")
+                return self._json(200, {
+                    "counts": dashboard["counts"],
+                    "total_items": dashboard["total_items"],
+                    "open_orders": dashboard["open_orders"],
+                    "total_value_open": dashboard["total_value_open"],
+                    "ready_messages": dashboard["ready_messages"],
+                    "suppliers_without_phone": dashboard["suppliers_without_phone"],
+                    "last_import": dashboard["last_import"],
+                })
             if parsed.path == "/dashboard":
                 query = parse_qs(parsed.query)
                 return self._json(200, self.service.dashboard(query.get("buyer", [""])[0]))
@@ -2172,7 +2192,7 @@ class ApiHandler(BaseHTTPRequestHandler):
                     buyer=query.get("buyer", [""])[0], company=query.get("company", [""])[0],
                     urgency=query.get("urgency", [""])[0], search=query.get("search", [""])[0],
                     control_status=query.get("control_status", ["all"])[0],
-                    attendance_status=query.get("attendance_status", ["all"])[0],
+                    attendance_status=query.get("attendance_status", ["all"]),
                 )})
             if parsed.path == "/order":
                 query = parse_qs(parsed.query)

@@ -6,41 +6,18 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
   <title>Vyzium</title>
   <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="home.css">
 </head>
-<body>
+<body class="home-view home-screenshot-style">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
-      <div><strong>Vyzium</strong><span>v2.1</span></div>
+      <div><strong>Vyzium</strong><span>v3.0</span></div>
     </div>
     <nav id="navigation">
-      <button class="nav-item active" data-view="operational">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3.5h6a1 1 0 0 1 1 1V6H8V4.5a1 1 0 0 1 1-1Z"/><path d="M8.5 12h7M8.5 15.5h7M8.5 8.5h3"/></svg>
-        <span>Controle operacional</span>
-      </button>
-      <button class="nav-item" data-view="dashboard">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="3.5" width="7.5" height="4.5" rx="1.6"/><rect x="13" y="10" width="7.5" height="10.5" rx="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.6"/></svg>
-        <span>Dashboard</span>
-      </button>
-      <button class="nav-item" data-view="orders">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5v-7Z"/><path d="M4 8.5 12 13l8-4.5M12 13v7"/></svg>
-        <span>Pedidos</span>
-      </button>
-      <button class="nav-item" data-view="suppliers">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 16V6.5a1.5 1.5 0 0 1 1.5-1.5H13v11"/><path d="M13 9.5h4.2L20 12.7V16h-2M13 16H3"/><circle cx="7" cy="18" r="1.8"/><circle cx="17" cy="18" r="1.8"/></svg>
-        <span>Fornecedores</span>
-      </button>
-      <button class="nav-item" data-view="messages">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5.5h16v10.5H8.5L4 20V5.5Z"/><path d="M8 9.5h8M8 12.5h5"/></svg>
-        <span>Mensagens</span>
-      </button>
-      <button class="nav-item" data-view="history">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12.5" r="8"/><path d="M12 8v4.5l3 2"/><path d="M9 3.5h6"/></svg>
-        <span>Histórico</span>
-      </button>
-      <button class="nav-item" data-view="settings">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="2.6"/><path d="M12 3.5v2.2M12 18.3v2.2M20.5 12h-2.2M5.7 12H3.5M17.8 6.2l-1.6 1.6M7.8 16.2l-1.6 1.6M17.8 17.8l-1.6-1.6M7.8 7.8 6.2 6.2"/></svg>
-        <span>Configurações</span>
+      <button class="nav-item active" type="button">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 11.2 12 4l8.5 7.2"/><path d="M5.5 10v9h13v-9M9.5 19v-5h5v5"/></svg>
+        <span>Visão geral</span>
       </button>
     </nav>
     <button id="check-updates" class="button secondary" type="button">
@@ -48,48 +25,69 @@
       <span>Verificar atualizações</span>
     </button>
     <small id="update-status" role="status" aria-live="polite"></small>
-    <div class="sidebar-note">
-      <span class="dot"></span>
-      Desenvolvido por Solucionx
-    </div>
+    <div class="sidebar-note"><span class="dot"></span>Desenvolvido por Solucionx</div>
   </aside>
 
   <main>
-    <header class="topbar">
-      <div>
-        <p class="eyebrow">ACOMPANHAMENTO DE COMPRAS</p>
-        <h1 id="view-title">Visão geral</h1>
+    <header class="topbar home-topbar clean-home-topbar">
+      <div class="hero-copy">
+        <p class="eyebrow">VYZIUM · EXPERIÊNCIA EXECUTIVA</p>
+        <h1>Visão geral</h1>
       </div>
-      <div class="top-actions">
-        <span id="mode-badge" class="mode-badge">Simulação</span>
-        <button id="import-button" class="button primary">Importar planilha</button>
+      <div class="top-actions home-module-actions">
+        <span class="mode-badge">Versão 3.0</span>
       </div>
     </header>
 
-    <section id="content" class="content">
-      <div class="loading">Carregando...</div>
+    <section class="content home-content screenshot-home-content">
+      <section class="hero-highlight-strip">
+        <div class="hero-highlight-left">
+          <div class="hero-logo-card">
+            <img src="assets/vyzium-mark-white.svg" alt="Vyzium">
+          </div>
+          <div class="hero-highlight-copy">
+            <h2>Transforme planilhas em uma operação guiada, visual e confiável</h2>
+            <p>O Vyzium reduz ruído operacional, organiza o acompanhamento com fornecedores e dá mais contexto às decisões de compra.</p>
+          </div>
+        </div>
+        <div class="hero-system-badge"><span></span>Sistema operacional</div>
+      </section>
+
+      <section class="module-selection-head">
+        <p class="section-kicker">MÓDULOS</p>
+        <h2>Escolha para onde ir</h2>
+        <p>Selecione um módulo para continuar a operação.</p>
+      </section>
+
+      <section class="module-selection-grid">
+        <article class="module-select-card">
+          <div class="module-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+          </div>
+          <h3>Acompanhamento</h3>
+          <p>Controle operacional de pedidos, fornecedores e mensagens de follow-up.</p>
+          <div id="followup-status" class="module-summary-box">Carregando resumo do módulo…</div>
+          <button class="button primary module-open-button" type="button" data-switch-module="followup">Abrir Acompanhamento</button>
+        </article>
+
+        <article class="module-select-card">
+          <div class="module-icon-box">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 19 7 12 11 5 7 12 3Z"/><path d="M5 7v8l7 4 7-4V7"/><path d="M12 11v8"/></svg>
+          </div>
+          <h3>Cotação &amp; Mapas</h3>
+          <p>Cotações, mapas comparativos e decisões de compra em um só lugar.</p>
+          <div id="compras-status" class="module-summary-box">Carregando resumo do módulo…</div>
+          <button class="button primary module-open-button" type="button" data-switch-module="compras">Abrir Cotação &amp; Mapas</button>
+        </article>
+      </section>
     </section>
   </main>
 
   <div id="toast" class="toast" aria-live="polite"></div>
-  <div id="order-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="modal-title">
-    <div class="modal-card">
-      <button id="modal-close" class="modal-close" aria-label="Fechar">×</button>
-      <div id="modal-content"></div>
-    </div>
-  </div>
   <div id="update-modal" class="update-modal hidden" role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
     <div class="update-modal-card">
       <button id="update-modal-close" class="update-modal-close" aria-label="Fechar">×</button>
-      <div class="update-modal-hero">
-        <div class="update-modal-brand">
-          <img src="assets/vyzium-mark-white.svg" alt="">
-          <div>
-            <strong>Vyzium</strong>
-            <span>Atualização pronta</span>
-          </div>
-        </div>
-      </div>
+      <div class="update-modal-hero"><div class="update-modal-brand"><img src="assets/vyzium-mark-white.svg" alt=""><div><strong>Vyzium</strong><span>Atualização pronta</span></div></div></div>
       <div class="update-modal-body">
         <h2 id="update-modal-title">Atualização pronta</h2>
         <p id="update-modal-message">Reiniciar o Vyzium para instalar?</p>
@@ -100,9 +98,8 @@
       </div>
     </div>
   </div>
-  <script src="operational.js"></script>
-  <script src="whatsapp.js"></script>
-  <script src="app.js"></script>
+  <script src="home.js"></script>
   <script src="updates.js"></script>
+  <script src="module-switch.js"></script>
 </body>
 </html>

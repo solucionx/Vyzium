@@ -218,16 +218,23 @@ async function renderOrders() {
     ['no_due_date', 'Sem previsão'], ['completed', 'Concluídos ou cancelados']
   ];
   const attendanceOptions = [
-    ['all', 'Todos os atendimentos'], ['pending', 'Pendente'], ['partial', 'Atendida parcialmente'],
+    ['pending', 'Pendente'], ['partial', 'Atendida parcialmente'],
     ['attended', 'Atendida'], ['canceled', 'Cancelada']
   ];
+  let attendanceValues = normalizeMultiFilterState(persisted.attendance_status);
   content.innerHTML = `<section class="panel orders-panel">
     <div class="panel-head"><div><p class="section-kicker">ACOMPANHAMENTO SCI</p><h2>Controle de ordens de compra</h2><p>Clique em qualquer linha para mostrar os itens da ordem.</p></div></div>
     <div class="toolbar">
       <input id="order-search" class="search" placeholder="Buscar OC, fornecedor ou item">
       <select id="buyer-filter"><option value="">Todos os compradores</option>${filters.buyers.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>
       <select id="company-filter"><option value="">Todas as empresas</option>${filters.companies.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>
-      <select id="attendance-filter">${attendanceOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select>
+      <details id="attendance-filter" class="multi-filter">
+        <summary aria-label="Filtrar por atendimento"><span class="multi-filter-title">Atendimento</span><strong id="attendance-filter-label"></strong></summary>
+        <div class="multi-filter-menu" role="group" aria-label="Status de atendimento">
+          ${attendanceOptions.map(([value,label]) => `<label class="multi-filter-option"><input type="checkbox" value="${escapeHtml(value)}" ${attendanceValues.includes(value) ? 'checked' : ''}><span>${escapeHtml(label)}</span></label>`).join('')}
+          <button id="attendance-filter-all" type="button" class="multi-filter-clear">Mostrar todos</button>
+        </div>
+      </details>
       <select id="order-status">${options.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select>
       <select id="control-filter"><option value="all">Todos os controles</option><option value="blank">Sem marcação</option>${controlOptions.filter(([value]) => value).map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`).join('')}</select>
       <span class="muted" id="order-count"></span>
@@ -240,7 +247,6 @@ async function renderOrders() {
     'order-search': persisted.search ?? '',
     'buyer-filter': Object.prototype.hasOwnProperty.call(persisted, 'buyer') ? persisted.buyer : '',
     'company-filter': persisted.company ?? '',
-    'attendance-filter': persisted.attendance_status ?? 'all',
     'order-status': persisted.urgency ?? 'all',
     'control-filter': persisted.control_status ?? 'all'
   };
@@ -249,16 +255,21 @@ async function renderOrders() {
     if (!input) continue;
     input.value = value;
     if (input.tagName === 'SELECT' && input.selectedIndex < 0) {
-      input.value = ['attendance-filter','order-status','control-filter'].includes(id) ? 'all' : '';
+      input.value = ['order-status','control-filter'].includes(id) ? 'all' : '';
     }
   }
+  const updateAttendanceFilterLabel = () => {
+    const label = document.getElementById('attendance-filter-label');
+    if (label) label.textContent = multiFilterLabel(attendanceValues, attendanceOptions, 'Todos');
+  };
+  updateAttendanceFilterLabel();
 
   const saveOrderFilters = () => {
     const snapshot = {...readOperationalState(),
       search: document.getElementById('order-search').value,
       buyer: document.getElementById('buyer-filter').value,
       company: document.getElementById('company-filter').value,
-      attendance_status: document.getElementById('attendance-filter').value,
+      attendance_status: [...attendanceValues],
       urgency: document.getElementById('order-status').value,
       control_status: document.getElementById('control-filter').value
     };
@@ -309,9 +320,11 @@ async function renderOrders() {
     const buyer = document.getElementById('buyer-filter').value;
     const company = document.getElementById('company-filter').value;
     const status = document.getElementById('order-status').value;
-    const attendanceStatus = document.getElementById('attendance-filter').value;
     const controlStatus = document.getElementById('control-filter').value;
-    const response = await api('GET', `/orders?buyer=${encodeURIComponent(buyer)}&company=${encodeURIComponent(company)}&urgency=${encodeURIComponent(status)}&attendance_status=${encodeURIComponent(attendanceStatus)}&control_status=${encodeURIComponent(controlStatus)}&search=${encodeURIComponent(query)}`);
+    const params = new URLSearchParams({buyer, company, urgency: status, control_status: controlStatus, search: query});
+    if (attendanceValues.length) attendanceValues.forEach(value => params.append('attendance_status', value));
+    else params.set('attendance_status', 'all');
+    const response = await api('GET', `/orders?${params}`);
     if (seq !== request || currentView !== 'orders' || !body.isConnected) return;
     const rows = response.orders;
     document.getElementById('order-count').textContent = `${rows.length} OC(s)`;
@@ -356,10 +369,22 @@ async function renderOrders() {
   };
   let searchTimer;
   document.getElementById('order-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 250); });
-  ['buyer-filter', 'company-filter', 'attendance-filter', 'order-status', 'control-filter'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+  ['buyer-filter', 'company-filter', 'order-status', 'control-filter'].forEach(id => document.getElementById(id).addEventListener('change', () => {
     if (id === 'buyer-filter') persistActiveBuyer(document.getElementById(id).value);
     load();
   }));
+  document.querySelectorAll('#attendance-filter input[type="checkbox"]').forEach(input => input.addEventListener('change', () => {
+    attendanceValues = [...document.querySelectorAll('#attendance-filter input[type="checkbox"]:checked')].map(el => el.value);
+    updateAttendanceFilterLabel();
+    load();
+  }));
+  document.getElementById('attendance-filter-all').addEventListener('click', () => {
+    attendanceValues = [];
+    document.querySelectorAll('#attendance-filter input[type="checkbox"]').forEach(input => { input.checked = false; });
+    updateAttendanceFilterLabel();
+    document.getElementById('attendance-filter').removeAttribute('open');
+    load();
+  });
   refreshCurrentOrders = load;
   await load();
 }

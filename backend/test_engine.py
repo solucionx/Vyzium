@@ -229,9 +229,26 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(summary["attendance_status"], "partial")
         self.assertEqual(summary["attendance_label"], "Atendida parcialmente")
         self.assertEqual(len(service.order_summaries(attendance_status="partial")), 1)
+        self.assertEqual(len(service.order_summaries(attendance_status=["pending", "partial"])), 1)
         self.assertEqual(service.order_summaries(attendance_status="attended"), [])
         detail = service.order_detail("321", summary["supplier_key"])
         self.assertEqual(len(detail["items"][0]["receipts"]), 2)
+
+    def test_attendance_filter_accepts_multiple_statuses(self):
+        path = self.root / "attendance-multi.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["OC", "EMPRESA", "DESCRICAOARTIGO", "DATAPREVISTAENTREGAOC", "RAZAOSOCIALFORNECEDOR", "QUANTIDADEOC", "STATUSITEMDAORDEMDECOMPRA"])
+        sheet.append([1001, "Hotel A", "Item pendente", date.today(), "Fornecedor A", 1, "0 - Solicitado"])
+        sheet.append([1002, "Hotel B", "Item parcial", date.today(), "Fornecedor B", 2, "1 - Recebido Parcialmente"])
+        workbook.save(path)
+        WorkbookImporter(self.store).import_file(str(path))
+        service = FollowUpService(self.store)
+        self.assertEqual(len(service.order_summaries(attendance_status="pending")), 1)
+        self.assertEqual(len(service.order_summaries(attendance_status="partial")), 1)
+        combined = service.order_summaries(attendance_status=["pending", "partial"])
+        self.assertEqual({row["attendance_status"] for row in combined}, {"pending", "partial"})
+        self.assertEqual(len(combined), 2)
 
     def test_attendance_summary_states(self):
         service = FollowUpService(self.store)

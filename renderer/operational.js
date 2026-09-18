@@ -42,6 +42,19 @@ function readOperationalState() {
   catch (_) { return {}; }
 }
 
+function normalizeMultiFilterState(value) {
+  if (Array.isArray(value)) return [...new Set(value.filter(Boolean).filter(v => v !== 'all'))];
+  if (!value || value === 'all') return [];
+  return [value];
+}
+
+function multiFilterLabel(values, options, allLabel) {
+  if (!values.length) return allLabel;
+  const labels = values.map(value => options.find(([id]) => id === value)?.[1] || value);
+  if (labels.length <= 2) return labels.join(' + ');
+  return `${labels.length} selecionados`;
+}
+
 async function renderOperational() {
   const filters = await api('GET', '/filters');
   if (currentView !== 'operational') return;
@@ -50,28 +63,41 @@ async function renderOperational() {
   let direction = state.direction === 'desc' ? 'desc' : 'asc';
   let rows = [], request = 0;
   const option = (value, label) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+  const attendanceOptions = [['pending','Pendente'],['partial','Atendida parcialmente'],['attended','Atendida'],['canceled','Cancelada']];
+  let attendanceValues = normalizeMultiFilterState(state.attendance_status);
   content.innerHTML = `<section class="panel operational-workspace">
     <div class="panel-head"><div><p class="section-kicker">ACOMPANHAMENTO DAS ORDENS</p><h2>Controle operacional</h2><p>Clique nos títulos para ordenar e nas bolhas para editar o controle.</p></div><span id="op-count" class="badge"></span></div>
     <div class="toolbar">
       <input id="op-search" class="search" aria-label="Buscar ordens" placeholder="Buscar OC, fornecedor, hotel ou observação">
       <select id="op-buyer" aria-label="Comprador">${option('', 'Todos os compradores')}${filters.buyers.map(v => option(v, v)).join('')}</select>
       <select id="op-company" aria-label="Hotel">${option('', 'Todos os hotéis')}${filters.companies.map(v => option(v, v)).join('')}</select>
-      <select id="op-attendance_status" aria-label="Atendimento">${[['all','Todos os atendimentos'],['pending','Pendente'],['partial','Atendida parcialmente'],['attended','Atendida'],['canceled','Cancelada']].map(v => option(...v)).join('')}</select>
+      <details id="op-attendance-filter" class="multi-filter">
+        <summary aria-label="Filtrar por atendimento"><span class="multi-filter-title">Atendimento</span><strong id="op-attendance-label"></strong></summary>
+        <div class="multi-filter-menu" role="group" aria-label="Status de atendimento">
+          ${attendanceOptions.map(([value,label]) => `<label class="multi-filter-option"><input type="checkbox" value="${escapeHtml(value)}" ${attendanceValues.includes(value) ? 'checked' : ''}><span>${escapeHtml(label)}</span></label>`).join('')}
+          <button id="op-attendance-all" type="button" class="multi-filter-clear">Mostrar todos</button>
+        </div>
+      </details>
       <select id="op-urgency" aria-label="Prazo">${[['all','Todos os prazos'],['open','Em aberto'],['critical','Atraso crítico'],['overdue','Atrasados'],['due_soon','Próximos do prazo'],['scheduled','Programados'],['no_due_date','Sem previsão'],['completed','Concluídos']].map(v => option(...v)).join('')}</select>
       <select id="op-control_status" aria-label="Controle">${option('all','Todos os controles')}${option('blank','Sem marcação')}${controlOptions.filter(([id]) => id).map(v => option(...v)).join('')}</select>
       <button id="op-clear" class="button secondary">Limpar filtros</button>
     </div>
     <div class="table-wrap operational-full"><table><thead><tr>${OperationalSort.columns.map(([key,label]) => `<th data-key="${key}"><button type="button" class="sort-heading" data-sort="${key}">${label}<span aria-hidden="true"></span></button></th>`).join('')}</tr></thead><tbody id="op-body"></tbody></table></div>
   </section>`;
-  const keys = ['search','buyer','company','attendance_status','urgency','control_status'];
+  const keys = ['search','buyer','company','urgency','control_status'];
   for (const key of keys) {
     const input = document.getElementById(`op-${key}`);
-    const fallback = ['attendance_status','urgency','control_status'].includes(key) ? 'all' : '';
+    const fallback = ['urgency','control_status'].includes(key) ? 'all' : '';
     input.value = state[key] ?? fallback;
     if (input.tagName === 'SELECT' && input.selectedIndex < 0) input.value = fallback;
   }
+  const updateAttendanceLabel = () => {
+    const label = document.getElementById('op-attendance-label');
+    if (label) label.textContent = multiFilterLabel(attendanceValues, attendanceOptions, 'Todos');
+  };
+  updateAttendanceLabel();
   const save = () => {
-    const snapshot = {sortKey, direction};
+    const snapshot = {sortKey, direction, attendance_status: [...attendanceValues]};
     keys.forEach(key => snapshot[key] = document.getElementById(`op-${key}`).value);
     try { localStorage.setItem('vyzium.operational', JSON.stringify(snapshot)); }
     catch (_) { showToast('Não foi possível guardar os filtros neste dispositivo.', true); }
@@ -105,6 +131,8 @@ async function renderOperational() {
     save();
     const seq = ++request;
     const params = new URLSearchParams(keys.map(key => [key, document.getElementById(`op-${key}`).value]));
+    if (attendanceValues.length) attendanceValues.forEach(value => params.append('attendance_status', value));
+    else params.set('attendance_status', 'all');
     const response = await api('GET', `/orders?${params}`);
     if (seq !== request || currentView !== 'operational') return;
     rows = response.orders;
@@ -124,8 +152,24 @@ async function renderOperational() {
       load();
     }
   }));
+  document.querySelectorAll('#op-attendance-filter input[type="checkbox"]').forEach(input => input.addEventListener('change', () => {
+    attendanceValues = [...document.querySelectorAll('#op-attendance-filter input[type="checkbox"]:checked')].map(el => el.value);
+    updateAttendanceLabel();
+    load();
+  }));
+  document.getElementById('op-attendance-all').addEventListener('click', () => {
+    attendanceValues = [];
+    document.querySelectorAll('#op-attendance-filter input[type="checkbox"]').forEach(input => { input.checked = false; });
+    updateAttendanceLabel();
+    document.getElementById('op-attendance-filter').removeAttribute('open');
+    load();
+  });
   document.getElementById('op-clear').addEventListener('click', () => {
-    keys.forEach(key => document.getElementById(`op-${key}`).value = ['attendance_status','urgency','control_status'].includes(key) ? 'all' : '');
+    keys.forEach(key => document.getElementById(`op-${key}`).value = ['urgency','control_status'].includes(key) ? 'all' : '');
+    attendanceValues = [];
+    document.querySelectorAll('#op-attendance-filter input[type="checkbox"]').forEach(input => { input.checked = false; });
+    updateAttendanceLabel();
+    document.getElementById('op-attendance-filter').removeAttribute('open');
     persistActiveBuyer('');
     load();
   });
