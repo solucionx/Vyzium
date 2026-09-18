@@ -30,6 +30,20 @@ const formatDateTime = value => value ? new Date(value).toLocaleString('pt-BR') 
 const formatPhone = value => value || 'Não cadastrado';
 const formatCurrency = value => Number(value || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 
+
+const APP_ZOOM_KEY = 'vyzium.interfaceZoom';
+const DEFAULT_APP_ZOOM = 85;
+const getSavedZoom = () => {
+  const value = Number(localStorage.getItem(APP_ZOOM_KEY) || DEFAULT_APP_ZOOM);
+  return Number.isFinite(value) && value >= 70 && value <= 120 ? value : DEFAULT_APP_ZOOM;
+};
+async function applyAppZoom(percent, persist = true) {
+  const value = Math.max(70, Math.min(120, Number(percent) || DEFAULT_APP_ZOOM));
+  await window.followup.setZoom(value);
+  if (persist) localStorage.setItem(APP_ZOOM_KEY, String(value));
+  return value;
+}
+
 function showToast(message, error = false) {
   toastElement.textContent = message;
   toastElement.className = `toast show${error ? ' error' : ''}`;
@@ -52,6 +66,13 @@ async function api(method, route, body) {
 function setMode() {
   modeBadge.textContent = settings.simulation ? 'Simulação' : 'Envio real';
   modeBadge.classList.toggle('real', !settings.simulation);
+}
+
+function persistActiveBuyer(value) {
+  // O comprador ativo nasce exclusivamente do filtro escolhido pelo usuário.
+  // A cópia no backend existe apenas para que a automação diária respeite a
+  // mesma escolha, sem criar um comprador padrão no código.
+  window.followup.api('POST', '/settings', { buyer_filter: String(value || '') }).catch(() => {});
 }
 
 async function navigate(view) {
@@ -96,7 +117,9 @@ function orderRowClass(row) {
 }
 
 async function renderDashboard() {
-  const data = await api('GET', '/dashboard');
+  const persisted = readOperationalState();
+  const activeBuyer = persisted.buyer || '';
+  const data = await api('GET', `/dashboard?buyer=${encodeURIComponent(activeBuyer)}`);
   const importedAt = data.last_import?.imported_at ? formatDateTime(data.last_import.imported_at) : 'Nenhuma base importada';
   const sourceFile = data.last_import?.source_file || 'Importe a BASE SCI.xlsx para começar';
   const priorityRows = data.priority_orders?.length ? data.priority_orders.map(row => `<tr class="${orderRowClass(row)}">
@@ -189,7 +212,6 @@ async function renderOrders() {
   const filters = await api('GET', '/filters');
   if (currentView !== 'orders') return;
   const persisted = readOperationalState();
-  const configuredBuyerToken = String(settings.buyer_filter || '').trim().toUpperCase().split(/\s+/)[0];
   const options = [
     ['all', 'Todos os prazos'], ['open', 'Somente em aberto'], ['critical', 'Atraso crítico'],
     ['overdue', 'Atrasados'], ['due_soon', 'Próximos do prazo'], ['scheduled', 'Programados'],
@@ -203,7 +225,7 @@ async function renderOrders() {
     <div class="panel-head"><div><p class="section-kicker">ACOMPANHAMENTO SCI</p><h2>Controle de ordens de compra</h2><p>Clique em qualquer linha para mostrar os itens da ordem.</p></div></div>
     <div class="toolbar">
       <input id="order-search" class="search" placeholder="Buscar OC, fornecedor ou item">
-      <select id="buyer-filter"><option value="">Todos os compradores</option>${filters.buyers.map(value => `<option value="${escapeHtml(value)}" ${configuredBuyerToken && value.toUpperCase().split(/\s+/)[0] === configuredBuyerToken ? 'selected' : ''}>${escapeHtml(value)}</option>`).join('')}</select>
+      <select id="buyer-filter"><option value="">Todos os compradores</option>${filters.buyers.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>
       <select id="company-filter"><option value="">Todas as empresas</option>${filters.companies.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>
       <select id="attendance-filter">${attendanceOptions.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select>
       <select id="order-status">${options.map(([value, label]) => `<option value="${value}">${label}</option>`).join('')}</select>
@@ -222,12 +244,6 @@ async function renderOrders() {
     'order-status': persisted.urgency ?? 'all',
     'control-filter': persisted.control_status ?? 'all'
   };
-  // Preserve the historical default buyer only when no shared filter has ever
-  // been stored. Once the user changes/clears it, that choice persists.
-  if (!Object.prototype.hasOwnProperty.call(persisted, 'buyer') && configuredBuyerToken) {
-    const buyer = filters.buyers.find(value => value.toUpperCase().split(/\s+/)[0] === configuredBuyerToken);
-    if (buyer) persistedFields['buyer-filter'] = buyer;
-  }
   for (const [id, value] of Object.entries(persistedFields)) {
     const input = document.getElementById(id);
     if (!input) continue;
@@ -340,7 +356,10 @@ async function renderOrders() {
   };
   let searchTimer;
   document.getElementById('order-search').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(load, 250); });
-  ['buyer-filter', 'company-filter', 'attendance-filter', 'order-status', 'control-filter'].forEach(id => document.getElementById(id).addEventListener('change', load));
+  ['buyer-filter', 'company-filter', 'attendance-filter', 'order-status', 'control-filter'].forEach(id => document.getElementById(id).addEventListener('change', () => {
+    if (id === 'buyer-filter') persistActiveBuyer(document.getElementById(id).value);
+    load();
+  }));
   refreshCurrentOrders = load;
   await load();
 }
@@ -464,7 +483,9 @@ async function renderSuppliers() {
 }
 
 async function renderMessages() {
-  const data = await api('GET', '/preview');
+  const persisted = readOperationalState();
+  const activeBuyer = persisted.buyer || '';
+  const data = await api('GET', `/preview?buyer=${encodeURIComponent(activeBuyer)}`);
   content.innerHTML = `${whatsappPanel()}<div class="split">
     <section class="panel">
       <div class="panel-head"><div><h2>Prévia das mensagens</h2><p>Confira antes de iniciar. Pedidos do mesmo fornecedor já estão agrupados.</p></div></div>
@@ -547,7 +568,7 @@ async function renderMessages() {
     event.target.disabled = true;
     event.target.textContent = settings.simulation ? 'Executando lote…' : 'Lote em andamento…';
     try {
-      let state = await api('POST', '/send-start', { supplier_keys: supplierKeys, message_overrides: messageOverrides });
+      let state = await api('POST', '/send-start', { supplier_keys: supplierKeys, message_overrides: messageOverrides, buyer: activeBuyer });
       updateBatchProgress(state);
       while (state.active) {
         await sleep(650);
@@ -595,18 +616,26 @@ async function renderSettings() {
       <div class="field"><label>Dias para alertar antes do vencimento</label><input name="warning_days" type="number" min="0" max="30" value="${data.warning_days}"></div>
       <div class="field"><label>Atraso crítico depois de quantos dias</label><input name="critical_after_days" type="number" min="1" max="365" value="${data.critical_after_days}"></div>
       <div class="field"><label>Intervalo anti-spam (horas)</label><input name="cooldown_hours" type="number" min="1" max="8760" value="${data.cooldown_hours}"></div>
-      <div class="field"><label>Filtrar por comprador (opcional)</label><input name="buyer_filter" value="${escapeHtml(data.buyer_filter)}" placeholder="Ex.: DOUGLAS"></div>
       <div class="field full"><label>Identificação do remetente</label><input name="sender_name" value="${escapeHtml(data.sender_name)}"></div>
       <div class="field full"><label>Assinatura da mensagem</label><textarea name="message_signature" rows="3">${escapeHtml(data.message_signature)}</textarea></div>
       <label class="switch-line field full"><input name="simulation" type="checkbox" ${data.simulation ? 'checked' : ''}><span>Modo simulação (recomendado durante a configuração)</span></label>
       <div class="field"><label>Horário da execução diária</label><input name="schedule_time" type="time" value="${escapeHtml(data.schedule_time)}"></div>
       <label class="switch-line field"><input name="automatic_enabled" type="checkbox" ${data.automatic_enabled ? 'checked' : ''}><span>Ativar envio automático diário</span></label>
+      <div class="field full"><label>Zoom da interface</label><select id="app-zoom" aria-label="Zoom da interface">${[70,75,80,85,90,95,100,105,110,115,120].map(value => `<option value="${value}" ${value === getSavedZoom() ? 'selected' : ''}>${value}%</option>`).join('')}</select></div>
       <div class="field full"><div class="callout">O envio diário exige modo simulação desligado, aplicativo aberto, computador ligado e com internet, e WhatsApp conectado. Antes do disparo, o motor relê a última planilha importada. Não funciona com o computador suspenso.</div></div>
       <div class="field full"><button class="button primary" type="submit">Salvar configurações</button></div>
     </form>
   </section><section class="panel"><div class="panel-head"><div><h2>Recomendações de controle</h2><p>Edite o nome, a cor e a regra da próxima ação. Remover oculta a sugestão, sem apagar marcações anteriores.</p></div><button type="button" class="button secondary" id="add-preset">Adicionar recomendação</button></div><div id="preset-editor"></div><button type="button" id="save-presets" class="button primary">Salvar recomendações</button></section>`;
   setupPresetEditor(data.control_presets);
   startWhatsAppPanel();
+  document.getElementById('app-zoom')?.addEventListener('change', async event => {
+    try {
+      await applyAppZoom(event.currentTarget.value);
+      showToast(`Zoom ajustado para ${event.currentTarget.value}%.`);
+    } catch (_) {
+      showToast('Não foi possível ajustar o zoom.', true);
+    }
+  });
   document.getElementById('settings-form').addEventListener('submit', async event => {
     event.preventDefault();
     const form = new FormData(event.target);
@@ -614,7 +643,6 @@ async function renderSettings() {
       warning_days: Number(form.get('warning_days')),
       critical_after_days: Number(form.get('critical_after_days')),
       cooldown_hours: Number(form.get('cooldown_hours')),
-      buyer_filter: form.get('buyer_filter'),
       sender_name: form.get('sender_name'),
       message_signature: form.get('message_signature'),
       simulation: event.target.elements.simulation.checked,
@@ -643,6 +671,7 @@ document.getElementById('import-button').addEventListener('click', async event =
 
 (async () => {
   document.body.classList.add('compact-ui');
+  try { await applyAppZoom(getSavedZoom(), false); } catch (_) {}
   settings = await api('GET', '/settings');
   syncControlOptions();
   setMode();

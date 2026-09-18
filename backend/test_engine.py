@@ -118,9 +118,9 @@ class ImportTests(unittest.TestCase):
 
     def test_normalization(self):
         self.assertEqual(normalize("Razão Social - LTDA"), "RAZAO SOCIAL LTDA")
-        self.assertTrue(person_matches("DOUGLAS", "DOUGLAS TORQUATO"))
-        self.assertTrue(person_matches("DOUGLAS TORQUATO", "DOUGLAS"))
-        self.assertFalse(person_matches("MARIANA PEIXOTO", "DOUGLAS TORQUATO"))
+        self.assertTrue(person_matches("COMPRADOR", "COMPRADOR TESTE"))
+        self.assertTrue(person_matches("COMPRADOR TESTE", "COMPRADOR"))
+        self.assertFalse(person_matches("MARIANA PEIXOTO", "COMPRADOR TESTE"))
 
     def test_brazilian_legacy_mobile_gets_ninth_digit(self):
         self.assertEqual(phone_value("+558599216923"), "+5585999216923")
@@ -211,8 +211,8 @@ class ImportTests(unittest.TestCase):
         ])
         common = [321, 7, "Hotel A", 100, 9001, "ABC", "Filtro", date.today(), "Fornecedor A", 55,
                   10, "1 - Recebido Parcialmente", 1, "3 - Aprovado", 3]
-        sheet.append(common + [4, date.today(), "NF1", "UN", "DOUGLAS TORQUATO", "Não"])
-        sheet.append(common + [6, date.today(), "NF2", "UN", "DOUGLAS TORQUATO", "Sim"])
+        sheet.append(common + [4, date.today(), "NF1", "UN", "COMPRADOR TESTE", "Não"])
+        sheet.append(common + [6, date.today(), "NF2", "UN", "COMPRADOR TESTE", "Sim"])
         workbook.save(path)
 
         result = WorkbookImporter(self.store).import_file(str(path))
@@ -224,7 +224,7 @@ class ImportTests(unittest.TestCase):
         self.assertEqual(item["urgent"], 1)
 
         service = FollowUpService(self.store)
-        summary = service.order_summaries(buyer="DOUGLAS TORQUATO", urgency="open")[0]
+        summary = service.order_summaries(buyer="COMPRADOR TESTE", urgency="open")[0]
         self.assertEqual(summary["warning_count"], 1)
         self.assertEqual(summary["attendance_status"], "partial")
         self.assertEqual(summary["attendance_label"], "Atendida parcialmente")

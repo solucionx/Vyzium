@@ -7,7 +7,7 @@ if (-not (Test-Path $Python)) {
 }
 & $Python -m pip install -r (Join-Path $ProjectRoot "backend\requirements.txt")
 if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar dependências Python." }
-& $Python -m PyInstaller --noconfirm --clean --onefile --name followup-engine `
+& $Python -m PyInstaller --noconfirm --clean --onefile --name followup-engine --collect-all openpyxl `
     --workpath (Join-Path $ProjectRoot "build\pyinstaller") `
     --distpath (Join-Path $ProjectRoot "dist-engine") `
     (Join-Path $ProjectRoot "backend\engine.py")

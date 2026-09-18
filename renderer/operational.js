@@ -67,7 +67,7 @@ async function renderOperational() {
   for (const key of keys) {
     const input = document.getElementById(`op-${key}`);
     const fallback = ['attendance_status','urgency','control_status'].includes(key) ? 'all' : '';
-    input.value = state[key] ?? (key === 'buyer' ? settings.buyer_filter || '' : fallback);
+    input.value = state[key] ?? fallback;
     if (input.tagName === 'SELECT' && input.selectedIndex < 0) input.value = fallback;
   }
   const save = () => {
@@ -114,9 +114,19 @@ async function renderOperational() {
     direction = sortKey === button.dataset.sort && direction === 'asc' ? 'desc' : 'asc';
     sortKey = button.dataset.sort; save(); draw();
   }));
-  keys.forEach(key => document.getElementById(`op-${key}`).addEventListener(key === 'search' ? 'input' : 'change', load));
+  let searchTimer = null;
+  keys.forEach(key => document.getElementById(`op-${key}`).addEventListener(key === 'search' ? 'input' : 'change', () => {
+    if (key === 'buyer') persistActiveBuyer(document.getElementById('op-buyer').value);
+    if (key === 'search') {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(load, 180);
+    } else {
+      load();
+    }
+  }));
   document.getElementById('op-clear').addEventListener('click', () => {
     keys.forEach(key => document.getElementById(`op-${key}`).value = ['attendance_status','urgency','control_status'].includes(key) ? 'all' : '');
+    persistActiveBuyer('');
     load();
   });
   refreshCurrentOrders = load;

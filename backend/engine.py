@@ -16,6 +16,8 @@ from datetime import date, datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
+from openpyxl import load_workbook
+from openpyxl.utils.datetime import from_excel
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
@@ -178,7 +180,6 @@ def iso_date(value: Any) -> str | None:
         return value.isoformat()
     if isinstance(value, (int, float)):
         try:
-            from openpyxl.utils.datetime import from_excel
             return from_excel(value).date().isoformat()
         except Exception:
             return None
@@ -322,6 +323,9 @@ class Store:
                 );
                 CREATE INDEX IF NOT EXISTS idx_orders_due ON orders(due_date);
                 CREATE INDEX IF NOT EXISTS idx_orders_supplier ON orders(supplier_key);
+                CREATE INDEX IF NOT EXISTS idx_orders_oc_supplier ON orders(oc,supplier_key);
+                CREATE INDEX IF NOT EXISTS idx_orders_buyer ON orders(buyer);
+                CREATE INDEX IF NOT EXISTS idx_orders_company ON orders(company);
                 CREATE TABLE IF NOT EXISTS suppliers (
                     supplier_key TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
@@ -384,6 +388,7 @@ class Store:
                     urgency TEXT NOT NULL,
                     PRIMARY KEY(followup_id, item_key)
                 );
+                CREATE INDEX IF NOT EXISTS idx_followup_items_item ON followup_items(item_key,followup_id);
                 CREATE TABLE IF NOT EXISTS message_batches (
                     batch_id TEXT PRIMARY KEY,
                     status TEXT NOT NULL,
@@ -468,7 +473,7 @@ class Store:
                 "last_workbook_path": "",
                 "last_auto_run": "",
                 "last_auto_attempt": "",
-                "buyer_filter": "DOUGLAS TORQUATO",
+                "buyer_filter": "",
                 "sender_name": "Compras",
                 "message_signature": "Agradecemos desde já e aguardamos seu retorno."
             }
@@ -544,6 +549,17 @@ class Store:
     def current_order_count(self) -> int:
         with self.lock:
             return int(self.connection.execute("SELECT COUNT(*) FROM orders").fetchone()[0])
+
+    @property
+    def revision(self) -> int:
+        """Monotonic in-process database revision used only for safe read caches.
+
+        ``sqlite3.Connection.total_changes`` increments on every write made by
+        this process, so cached operational views are automatically discarded
+        whenever imports, controls, suppliers, settings or follow-up history change.
+        """
+        with self.lock:
+            return int(self.connection.total_changes)
 
     def latest_import(self) -> dict[str, Any] | None:
         with self.lock:
@@ -648,29 +664,31 @@ class Store:
                 }
                 self.connection.execute("DELETE FROM receipts")
                 self.connection.execute("DELETE FROM orders")
+                columns = [
+                    "item_key", "oc", "company", "purchase_type", "sci", "quantity", "unit", "description",
+                    "buyer", "due_date", "received_date", "order_status", "request_status", "supplier_key",
+                    "supplier_name", "supplier_doc", "value_total", "company_id", "source_item_id", "process_id",
+                    "article_code", "buyer_id", "order_date", "order_status_code", "order_bpm_status",
+                    "order_bpm_status_code", "supplier_id", "value_unit", "received_qty", "remaining_qty",
+                    "urgent", "source_row_count"
+                ]
+                order_sql = f"INSERT INTO orders({','.join(columns)},source_file,imported_at) VALUES({','.join('?' for _ in columns)},?,?)"
+                self.connection.executemany(
+                    order_sql,
+                    [tuple(row.get(column) for column in columns) + (source_file, now) for row in rows],
+                )
+                supplier_records: dict[str, tuple[Any, ...]] = {}
                 for row in rows:
-                    columns = [
-                        "item_key", "oc", "company", "purchase_type", "sci", "quantity", "unit", "description",
-                        "buyer", "due_date", "received_date", "order_status", "request_status", "supplier_key",
-                        "supplier_name", "supplier_doc", "value_total", "company_id", "source_item_id", "process_id",
-                        "article_code", "buyer_id", "order_date", "order_status_code", "order_bpm_status",
-                        "order_bpm_status_code", "supplier_id", "value_unit", "received_qty", "remaining_qty",
-                        "urgent", "source_row_count"
-                    ]
-                    values = [row.get(column) for column in columns]
-                    self.connection.execute(
-                        f"INSERT INTO orders({','.join(columns)},source_file,imported_at) VALUES({','.join('?' for _ in columns)},?,?)",
-                        (*values, source_file, now),
-                    )
                     supplier_key = row["supplier_key"]
                     old = existing_suppliers.get(normalize(row["supplier_name"]))
                     phone = old.get("phone", "") if old else ""
                     contact = old.get("contact_name", "") if old else ""
-                    self.connection.execute("""
-                        INSERT INTO suppliers(supplier_key,display_name,phone,contact_name,active,updated_at)
-                        VALUES(?,?,?,?,1,?) ON CONFLICT(supplier_key) DO UPDATE SET
-                        display_name=excluded.display_name,updated_at=excluded.updated_at
-                    """, (supplier_key, row["supplier_name"], phone, contact, now))
+                    supplier_records[supplier_key] = (supplier_key, row["supplier_name"], phone, contact, now)
+                self.connection.executemany("""
+                    INSERT INTO suppliers(supplier_key,display_name,phone,contact_name,active,updated_at)
+                    VALUES(?,?,?,?,1,?) ON CONFLICT(supplier_key) DO UPDATE SET
+                    display_name=excluded.display_name,updated_at=excluded.updated_at
+                """, supplier_records.values())
                 self.connection.executemany("""
                     INSERT INTO receipts(receipt_key,item_key,receipt_date,invoice,quantity,unit)
                     VALUES(:receipt_key,:item_key,:receipt_date,:invoice,:quantity,:unit)
@@ -829,6 +847,38 @@ class Store:
                 ORDER BY f.id DESC LIMIT 1
             """, (item_key,)).fetchone()
         return dict(row) if row else None
+
+    def last_successes(self, item_keys: list[str]) -> dict[str, dict[str, Any]]:
+        """Return the latest sent/uncertain follow-up for many items in bulk.
+
+        This replaces the historical N+1 lookup used while preparing WhatsApp
+        groups without changing the anti-spam rules.
+        """
+        unique = list(dict.fromkeys(str(key) for key in item_keys if key))
+        if not unique:
+            return {}
+        result: dict[str, dict[str, Any]] = {}
+        # Stay below SQLite's conservative parameter limit on older builds.
+        for offset in range(0, len(unique), 800):
+            chunk = unique[offset:offset + 800]
+            placeholders = ",".join("?" for _ in chunk)
+            sql = f"""
+                SELECT fi.item_key,f.sent_at,fi.urgency,f.status,f.id
+                FROM followup_items fi
+                JOIN followups f ON f.id=fi.followup_id
+                WHERE fi.item_key IN ({placeholders})
+                  AND f.status IN ('sent','uncertain')
+                ORDER BY f.id DESC
+            """
+            with self.lock:
+                rows = self.connection.execute(sql, chunk).fetchall()
+            for row in rows:
+                key = row["item_key"]
+                if key not in result:
+                    data = dict(row)
+                    data.pop("id", None)
+                    result[key] = data
+        return result
 
     def finish_followup(self, followup_id, status, error=None):
         with self.lock:
@@ -1108,7 +1158,6 @@ class WorkbookImporter:
             return self._import_file(path_value)
 
     def _import_file(self, path_value: str) -> dict[str, Any]:
-        from openpyxl import load_workbook
         path = Path(path_value).expanduser().resolve()
         if path.suffix.lower() not in {".xlsx", ".xlsm"} or not path.is_file():
             raise ValueError("Selecione um arquivo .xlsx ou .xlsm válido.")
@@ -1242,6 +1291,10 @@ URGENCY_LABEL = {
 class FollowUpService:
     def __init__(self, store: Store):
         self.store = store
+        self.cache_lock = threading.RLock()
+        self.cache_revision = -1
+        self.orders_cache: list[dict[str, Any]] | None = None
+        self.summary_cache: dict[tuple[str, str, str, str, str, str], list[dict[str, Any]]] = {}
         self.send_lock = threading.Lock()
         self.job_lock = threading.Lock()
         self.worker_batches: set[str] = set()
@@ -1258,6 +1311,16 @@ class FollowUpService:
             # Resume only queued work; any item that was in-flight was quarantined
             # as uncertain by recover_interrupted_queue() and is never replayed.
             self._start_persistent_worker(recoverable["batch_id"])
+
+    def _sync_read_cache(self) -> int:
+        """Invalidate derived read caches after any database write."""
+        revision = self.store.revision
+        with self.cache_lock:
+            if revision != self.cache_revision:
+                self.cache_revision = revision
+                self.orders_cache = None
+                self.summary_cache.clear()
+        return revision
 
     def _update_job(self, **changes):
         with self.job_lock:
@@ -1355,17 +1418,26 @@ class FollowUpService:
                 overrides[key] = message
         return selected, overrides
 
+    def _groups_for_buyer(self, buyer: str = "", include_blocked: bool = False) -> list[dict[str, Any]]:
+        buyer = str(buyer or "").strip()
+        # Keep compatibility with tests/custom integrations that monkey-patch
+        # groups() using the historical zero-argument signature.
+        if not buyer and not include_blocked:
+            return self.groups()
+        return self.groups(include_blocked=include_blocked, buyer=buyer)
+
     def _groups_for_request(self, request: dict[str, Any], simulation: bool) -> list[dict[str, Any]]:
         selected_list, overrides = self._validate_selection(
             request.get("supplier_keys"), request.get("message_overrides")
         )
         selected = set(selected_list) if selected_list is not None else None
-        groups = [group for group in self.groups() if selected is None or group["supplier_key"] in selected]
+        buyer = str(request.get("buyer") or "").strip()
+        groups = [group for group in self._groups_for_buyer(buyer) if selected is None or group["supplier_key"] in selected]
         if groups and not simulation:
             self._wait_for_connection()
             # Same established rule as before: after connection becomes ready,
             # re-read eligibility so a stale snapshot can never be sent.
-            groups = [group for group in self.groups() if selected is None or group["supplier_key"] in selected]
+            groups = [group for group in self._groups_for_buyer(buyer) if selected is None or group["supplier_key"] in selected]
         for group in groups:
             edited = overrides.get(group["supplier_key"])
             if edited is not None:
@@ -1434,7 +1506,7 @@ class FollowUpService:
 
         threading.Thread(target=worker, name=f"followup-queue-{batch_id[:8]}", daemon=True).start()
 
-    def start_send(self, supplier_keys=None, force_simulation=None, message_overrides=None) -> dict[str, Any]:
+    def start_send(self, supplier_keys=None, force_simulation=None, message_overrides=None, buyer: str = "") -> dict[str, Any]:
         selected, overrides = self._validate_selection(supplier_keys, message_overrides)
         settings = self.store.settings()
         simulation = settings["simulation"] if force_simulation is None else bool(force_simulation)
@@ -1442,7 +1514,7 @@ class FollowUpService:
             if self.job_state.get("active") or self.send_lock.locked() or self.worker_batches:
                 raise ValueError("Já existe um lote em execução ou aguardando conexão.")
             job_id = str(uuid.uuid4())
-            request_payload = {"supplier_keys": selected, "message_overrides": overrides}
+            request_payload = {"supplier_keys": selected, "message_overrides": overrides, "buyer": str(buyer or "").strip()}
             batch = self.store.create_message_batch(job_id, simulation, request_payload)
             self.job_state = self._state_from_batch(batch, active=True)
         self._start_persistent_worker(job_id)
@@ -1523,8 +1595,8 @@ class FollowUpService:
         finally:
             self.send_lock.release()
 
-    def send_persistent_and_wait(self, supplier_keys=None, force_simulation=None, message_overrides=None) -> dict[str, Any]:
-        state = self.start_send(supplier_keys, force_simulation, message_overrides)
+    def send_persistent_and_wait(self, supplier_keys=None, force_simulation=None, message_overrides=None, buyer: str = "") -> dict[str, Any]:
+        state = self.start_send(supplier_keys, force_simulation, message_overrides, buyer)
         job_id = state["job_id"]
         while state.get("active"):
             time.sleep(0.2)
@@ -1534,26 +1606,36 @@ class FollowUpService:
         return state.get("result") or self._batch_result(job_id)
 
     def orders(self, status: str | None = None) -> list[dict[str, Any]]:
-        settings = self.store.settings()
-        output = []
-        for row in self.store.order_rows():
-            state = classify(row["due_date"], row["received_date"], row["order_status"], row["request_status"],
-                             settings["warning_days"], settings["critical_after_days"],
-                             order_status_code=row.get("order_status_code"),
-                             received_qty=row.get("received_qty"), remaining_qty=row.get("remaining_qty"),
-                             quantity=row.get("quantity"))
-            data_warning = ""
-            if row.get("order_status_code") == 1 and (row.get("remaining_qty") or 0) <= 0:
-                data_warning = "Status parcial, mas a quantidade recebida já cobre o pedido. Confira a base."
-            row.update({"urgency": state.urgency, "urgency_label": URGENCY_LABEL[state.urgency], "days": state.days,
-                        "eligible": state.eligible, "data_warning": data_warning})
-            if status and status != "all" and row["urgency"] != status:
-                continue
-            output.append(row)
-        return output
+        self._sync_read_cache()
+        with self.cache_lock:
+            cached = self.orders_cache
+        if cached is None:
+            settings = self.store.settings()
+            built: list[dict[str, Any]] = []
+            for source in self.store.order_rows():
+                row = dict(source)
+                state = classify(row["due_date"], row["received_date"], row["order_status"], row["request_status"],
+                                 settings["warning_days"], settings["critical_after_days"],
+                                 order_status_code=row.get("order_status_code"),
+                                 received_qty=row.get("received_qty"), remaining_qty=row.get("remaining_qty"),
+                                 quantity=row.get("quantity"))
+                data_warning = ""
+                if row.get("order_status_code") == 1 and (row.get("remaining_qty") or 0) <= 0:
+                    data_warning = "Status parcial, mas a quantidade recebida já cobre o pedido. Confira a base."
+                row.update({"urgency": state.urgency, "urgency_label": URGENCY_LABEL[state.urgency], "days": state.days,
+                            "eligible": state.eligible, "data_warning": data_warning})
+                built.append(row)
+            # Cache only if no write happened while the snapshot was being built.
+            if self.store.revision == self.cache_revision:
+                with self.cache_lock:
+                    self.orders_cache = built
+            cached = built
+        if status and status != "all":
+            return [dict(row) for row in cached if row["urgency"] == status]
+        return [dict(row) for row in cached]
 
     def filters(self) -> dict[str, list[str]]:
-        rows = self.store.order_rows()
+        rows = self.orders()
         return {
             "buyers": sorted({row["buyer"] for row in rows if row.get("buyer")}),
             "companies": sorted({row["company"] for row in rows if row.get("company")}),
@@ -1609,6 +1691,12 @@ class FollowUpService:
 
     def order_summaries(self, buyer: str = "", company: str = "", urgency: str = "", search: str = "",
                         control_status: str = "all", attendance_status: str = "all") -> list[dict[str, Any]]:
+        self._sync_read_cache()
+        cache_key = (str(buyer), str(company), str(urgency), str(search), str(control_status), str(attendance_status))
+        with self.cache_lock:
+            cached = self.summary_cache.get(cache_key)
+        if cached is not None:
+            return [dict(row) for row in cached]
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
         buyer_key, company_key, search_key = normalize(buyer), normalize(company), normalize(search)
         controls = self.store.order_controls()
@@ -1667,7 +1755,13 @@ class FollowUpService:
             row["approval_status"], row["approval_label"] = approval_summary(items)
             row["next_action"], row["action_priority"] = next_action(row, preset.get("rule", "none"))
         rank = {"critical": 0, "overdue": 1, "due_soon": 2, "scheduled": 3, "no_due_date": 4, "completed": 5}
-        return sorted(summaries, key=lambda row: (rank[row["urgency"]], row.get("due_date") or "9999", row["oc"]))
+        result = sorted(summaries, key=lambda row: (rank[row["urgency"]], row.get("due_date") or "9999", row["oc"]))
+        if self.store.revision == self.cache_revision:
+            with self.cache_lock:
+                if len(self.summary_cache) >= 32:
+                    self.summary_cache.clear()
+                self.summary_cache[cache_key] = result
+        return [dict(row) for row in result]
 
     def order_detail(self, oc: str, supplier_key: str = "") -> dict[str, Any]:
         items = [item for item in self.orders() if item["oc"] == str(oc) and (not supplier_key or item["supplier_key"] == supplier_key)]
@@ -1723,12 +1817,14 @@ class FollowUpService:
         lines.extend(["Por favor, confirme a data atualizada de entrega e informe qualquer impedimento.", "", settings["message_signature"]])
         return "\n".join(lines).strip()
 
-    def groups(self, include_blocked: bool = False) -> list[dict[str, Any]]:
+    def groups(self, include_blocked: bool = False, buyer: str = "") -> list[dict[str, Any]]:
         settings = self.store.settings()
         grouped: dict[str, dict[str, Any]] = {}
-        for item in self.orders():
-            buyer_filter = normalize(settings.get("buyer_filter", ""))
-            if buyer_filter and not person_matches(item.get("buyer"), settings.get("buyer_filter", "")):
+        buyer_filter = str(buyer or "").strip()
+        order_items = self.orders()
+        last_successes = self.store.last_successes([item["item_key"] for item in order_items])
+        for item in order_items:
+            if buyer_filter and not person_matches(item.get("buyer"), buyer_filter):
                 continue
             bpm_code = item.get("order_bpm_status_code")
             bpm_label = normalize(item.get("order_bpm_status", ""))
@@ -1744,8 +1840,15 @@ class FollowUpService:
             blocked_reason = ""
             if not item.get("phone"):
                 blocked_reason = "Telefone não cadastrado"
-            elif not self._can_send(item, settings["cooldown_hours"]):
-                blocked_reason = "Aguardando intervalo anti-spam"
+            else:
+                last = last_successes.get(item["item_key"])
+                if last:
+                    if last.get("status") == "uncertain":
+                        blocked_reason = "Aguardando intervalo anti-spam"
+                    elif last["urgency"] == item["urgency"]:
+                        then = datetime.fromisoformat(last["sent_at"])
+                        if (datetime.now() - then).total_seconds() < settings["cooldown_hours"] * 3600:
+                            blocked_reason = "Aguardando intervalo anti-spam"
             if blocked_reason and not include_blocked:
                 continue
             group = grouped.setdefault(item["supplier_key"], {
@@ -1770,18 +1873,19 @@ class FollowUpService:
             result.append(group)
         return sorted(result, key=lambda group: (-URGENCY_RANK[group["urgency"]], group["supplier_name"]))
 
-    def dashboard(self) -> dict[str, Any]:
-        buyer = self.store.settings().get("buyer_filter", "")
+    def dashboard(self, buyer: str = "") -> dict[str, Any]:
+        buyer = str(buyer or "").strip()
         orders = [item for item in self.orders() if not buyer or person_matches(item.get("buyer"), buyer)]
         summaries = self.order_summaries(buyer=buyer)
-        open_summaries = self.order_summaries(buyer=buyer, urgency="open")
+        open_summaries = [order for order in summaries if order["urgency"] != "completed"]
         counts = {key: 0 for key in URGENCY_LABEL}
         for order in summaries:
             counts[order["urgency"]] += 1
-        all_groups = self.groups(include_blocked=True)
+        all_groups = self.groups(include_blocked=True, buyer=buyer)
         ready = [group for group in all_groups if not group["blocked_reasons"]]
         current_supplier_keys = {item["supplier_key"] for item in orders if item["urgency"] != "completed"}
         suppliers = {supplier["supplier_key"]: supplier for supplier in self.store.suppliers()}
+        settings = self.store.settings()
         return {
             "counts": counts,
             "total_items": len(orders),
@@ -1790,7 +1894,7 @@ class FollowUpService:
             "partial_items": sum(1 for item in orders if self._item_attendance(item) == "partial"),
             "total_value_open": sum(item.get("value_total") or 0 for item in orders if item["urgency"] != "completed"),
             "buyer_filter": buyer,
-            "critical_after_days": self.store.settings()["critical_after_days"],
+            "critical_after_days": settings["critical_after_days"],
             "ready_messages": len(ready),
             "suppliers_without_phone": sum(1 for key in current_supplier_keys if not suppliers.get(key, {}).get("phone")),
             "control_counts": {
@@ -1807,7 +1911,7 @@ class FollowUpService:
             "last_history": self.store.recent_history(8),
         }
 
-    def send(self, supplier_keys: list[str] | None = None, force_simulation: bool | None = None, message_overrides: dict[str, str] | None = None, progress_callback=None, job_id: str | None = None) -> dict[str, Any]:
+    def send(self, supplier_keys: list[str] | None = None, force_simulation: bool | None = None, message_overrides: dict[str, str] | None = None, progress_callback=None, job_id: str | None = None, buyer: str = "") -> dict[str, Any]:
         with self.job_lock:
             active_job = self.job_state.get("job_id") if self.job_state.get("active") else None
         if active_job and job_id != active_job:
@@ -1815,11 +1919,11 @@ class FollowUpService:
         if not self.send_lock.acquire(blocking=False):
             raise ValueError("Já existe um lote em execução ou aguardando conexão.")
         try:
-            return self._send(supplier_keys, force_simulation, message_overrides, progress_callback)
+            return self._send(supplier_keys, force_simulation, message_overrides, progress_callback, buyer=buyer)
         finally:
             self.send_lock.release()
 
-    def _send(self, supplier_keys=None, force_simulation=None, message_overrides=None, progress_callback=None):
+    def _send(self, supplier_keys=None, force_simulation=None, message_overrides=None, progress_callback=None, buyer: str = ""):
         settings = self.store.settings()
         simulation = settings["simulation"] if force_simulation is None else bool(force_simulation)
         if supplier_keys is None:
@@ -1854,11 +1958,11 @@ class FollowUpService:
                     group["message"] = edited
             return groups_to_update
 
-        groups = [group for group in self.groups() if selected is None or group["supplier_key"] in selected]
+        groups = [group for group in self._groups_for_buyer(buyer) if selected is None or group["supplier_key"] in selected]
         if groups and not simulation:
             whatsapp_request("/wait")
             # Re-check eligibility after the user connects; never send an outdated snapshot.
-            groups = [group for group in self.groups() if selected is None or group["supplier_key"] in selected]
+            groups = [group for group in self._groups_for_buyer(buyer) if selected is None or group["supplier_key"] in selected]
         groups = apply_overrides(groups)
         batch_id = str(uuid.uuid4())
         sent = failed = simulated = 0
@@ -1984,7 +2088,7 @@ class AutoScheduler(threading.Thread):
                 raise RuntimeError("Nenhuma planilha foi importada para a execução automática.")
             self.importer.import_file(workbook_path)
             sender = getattr(self.service, "send_persistent_and_wait", self.service.send)
-            result = sender(force_simulation=False)
+            result = sender(force_simulation=False, buyer=settings.get("buyer_filter", ""))
             print(json.dumps({"event": "automatic_run", "result": result}, ensure_ascii=False), flush=True)
             self.store.log_event("automatic_run", result, "error" if result.get("failed") or result.get("uncertain") else "info")
             # Mark the day complete only after a clean run. Failures can be fixed
@@ -2060,7 +2164,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             if parsed.path == "/health":
                 return self._json(200, {"ok": True, "app": APP_NAME})
             if parsed.path == "/dashboard":
-                return self._json(200, self.service.dashboard())
+                query = parse_qs(parsed.query)
+                return self._json(200, self.service.dashboard(query.get("buyer", [""])[0]))
             if parsed.path == "/orders":
                 query = parse_qs(parsed.query)
                 return self._json(200, {"orders": self.service.order_summaries(
@@ -2079,7 +2184,8 @@ class ApiHandler(BaseHTTPRequestHandler):
             if parsed.path == "/suppliers":
                 return self._json(200, {"suppliers": self.store.suppliers()})
             if parsed.path == "/preview":
-                return self._json(200, {"groups": self.service.groups(include_blocked=True)})
+                query = parse_qs(parsed.query)
+                return self._json(200, {"groups": self.service.groups(include_blocked=True, buyer=query.get("buyer", [""])[0])})
             if parsed.path == "/history":
                 return self._json(200, {"history": self.store.recent_history(200)})
             if parsed.path == "/settings":
@@ -2115,11 +2221,11 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.store.review_followup(body.get("id")))
             if self.path == "/send-start":
                 return self._json(202, self.service.start_send(
-                    body.get("supplier_keys"), body.get("simulation"), body.get("message_overrides")
+                    body.get("supplier_keys"), body.get("simulation"), body.get("message_overrides"), body.get("buyer", "")
                 ))
             if self.path == "/send":
                 return self._json(200, self.service.send(
-                    body.get("supplier_keys"), body.get("simulation"), body.get("message_overrides")
+                    body.get("supplier_keys"), body.get("simulation"), body.get("message_overrides"), buyer=body.get("buyer", "")
                 ))
             return self._json(404, {"error": "Rota não encontrada."})
         except ValueError as exc:

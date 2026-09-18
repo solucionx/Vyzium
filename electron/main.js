@@ -138,6 +138,12 @@ ipcMain.handle('api', async (_event, { method, route, body }) => {
   finally { activeRequests--; }
 });
 ipcMain.handle('check-updates', () => updater.check());
+ipcMain.handle('set-zoom', (_event, percent) => {
+  const value = Number(percent);
+  if (!Number.isFinite(value) || value < 70 || value > 120) throw new Error('Zoom inválido.');
+  if (window && !window.isDestroyed()) window.webContents.setZoomFactor(value / 100);
+  return value;
+});
 ipcMain.handle('choose-workbook', async () => {
   const result = await dialog.showOpenDialog(window, {
     title: 'Selecionar base de acompanhamento',

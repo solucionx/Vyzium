@@ -29,7 +29,7 @@ Os códigos confirmados na própria base são:
 
 Para follow-up, somente o status BPM `3 - Integrado e Aprovado` é elegível. Os estados integrado, reprovado e cancelado continuam disponíveis para consulta, mas não geram cobrança.
 
-Com o filtro padrão `DOUGLAS TORQUATO`, o retrato validado contém 767 OCs/fornecedores para consulta, das quais 84 estão abertas. Destas, 17 estão em atraso crítico, 4 atrasadas, 8 próximas do prazo e 55 programadas. As regras de aprovação e prazo resultaram em 37 itens de 28 OCs, agrupados em 18 fornecedores potenciais para follow-up. Nenhuma mensagem fica liberada até o telefone do fornecedor ser confirmado.
+Não existe comprador padrão no aplicativo. O comprador ativo é definido pelo usuário nos filtros e essa escolha é reaproveitada nas demais áreas operacionais e no follow-up. Nenhuma mensagem fica liberada até o telefone do fornecedor ser confirmado.
 
 ## Planilha de acompanhamento antiga
 

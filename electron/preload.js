@@ -14,5 +14,6 @@ contextBridge.exposeInMainWorld('followup', {
     return () => ipcRenderer.removeListener('update-prompt', listener);
   },
   respondUpdatePrompt: action => ipcRenderer.send('update-prompt-response', action),
-  chooseWorkbook: () => ipcRenderer.invoke('choose-workbook')
+  chooseWorkbook: () => ipcRenderer.invoke('choose-workbook'),
+  setZoom: percent => ipcRenderer.invoke('set-zoom', percent)
 });
