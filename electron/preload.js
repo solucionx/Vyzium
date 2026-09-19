@@ -6,6 +6,7 @@ contextBridge.exposeInMainWorld('followup', {
   chooseWorkbook: () => ipcRenderer.invoke('choose-workbook'),
   exportMap: id => ipcRenderer.invoke('save-export', id),
   setZoom: percent => ipcRenderer.invoke('set-zoom', percent),
+  openBackupFolder: () => ipcRenderer.invoke('open-backup-folder'),
   switchModule: moduleName => ipcRenderer.invoke('switch-module', moduleName),
   goHome: () => ipcRenderer.invoke('go-home'),
   getOverview: () => ipcRenderer.invoke('get-overview'),

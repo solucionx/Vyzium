@@ -55,3 +55,13 @@ test('release workflow verifies both engines before publishing', () => {
     'O workflow de Windows deve compilar e validar os dois motores antes de publicar.'
   );
 });
+
+test('data safety layer is included and app version is 3.0.2', () => {
+  assert.equal(pkg.version, '3.0.2');
+  assert.equal(fs.existsSync(path.join(root, 'backend', 'data_safety.py')), true);
+
+  const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
+  assert.match(main, /\/data-safety\/backup/);
+  assert.match(main, /pre-update-/);
+  assert.match(main, /open-backup-folder/);
+});

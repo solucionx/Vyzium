@@ -633,9 +633,62 @@ async function renderHistory() {
   }));
 }
 
+function dataSafetyPanelHtml() {
+  return `<section class="panel narrow" id="data-safety-panel">
+    <div class="panel-head"><div><h2>Segurança dos dados</h2><p>Backups SQLite consistentes e verificação de integridade da base em uso.</p></div></div>
+    <div id="data-safety-status" class="callout">Verificando banco de dados…</div>
+    <div class="toolbar" style="margin-top:12px">
+      <button id="create-db-backup" class="button primary" type="button">Criar backup agora</button>
+      <button id="open-db-backups" class="button secondary" type="button">Abrir pasta de backups</button>
+    </div>
+    <p class="muted">O Vyzium cria backups automáticos antes de importações, mudanças de versão e atualizações. Backups automáticos antigos são limitados; backups manuais não são removidos automaticamente.</p>
+  </section>`;
+}
+
+async function refreshDataSafetyPanel() {
+  const target = document.getElementById('data-safety-status');
+  if (!target) return;
+  try {
+    const state = await api('GET', '/data-safety');
+    const ok = state.integrity?.ok;
+    const last = state.last_backup;
+    const when = last?.created_at ? new Date(last.created_at).toLocaleString('pt-BR') : 'Nenhum backup registrado';
+    const backupWarning = last && last.valid_now === false ? '<br><small>⚠ O último backup não passou na revalidação atual. Crie um novo backup antes de operações críticas.</small>' : '';
+    target.innerHTML = `<strong>${ok ? '✓ Banco íntegro' : '⚠ Verificação requer atenção'}</strong><br>` +
+      `Schema ${escapeHtml(state.schema_version ?? '—')} · ${escapeHtml(state.backup_count ?? 0)} backup(s)<br>` +
+      `<small>Último backup: ${escapeHtml(when)}${last?.reason ? ` · ${escapeHtml(last.reason)}` : ''}</small>${backupWarning}`;
+    target.classList.toggle('notice', !ok || Boolean(last && last.valid_now === false));
+  } catch (error) {
+    target.textContent = `Não foi possível verificar a segurança do banco: ${String(error.message || error)}`;
+  }
+}
+
+function wireDataSafetyPanel() {
+  document.getElementById('create-db-backup')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    const previous = button.textContent;
+    button.textContent = 'Criando backup…';
+    try {
+      const result = await api('POST', '/data-safety/backup', { reason: 'manual', automatic: false });
+      showToast(result.created ? `Backup criado: ${result.filename}` : (result.reason || 'Backup não necessário.'));
+      await refreshDataSafetyPanel();
+    } catch (error) {
+      showToast(`Falha ao criar backup: ${String(error.message || error)}`, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = previous;
+    }
+  });
+  document.getElementById('open-db-backups')?.addEventListener('click', async () => {
+    try { await window.followup.openBackupFolder(); }
+    catch (error) { showToast(`Não foi possível abrir os backups: ${String(error.message || error)}`, true); }
+  });
+}
+
 async function renderSettings() {
   const data = await api('GET', '/settings');
-  content.innerHTML = `${whatsappPanel()}<section class="panel narrow">
+  content.innerHTML = `${whatsappPanel()}${dataSafetyPanelHtml()}<section class="panel narrow">
     <div class="panel-head"><div><h2>Regras do motor</h2><p>Os ajustes passam a valer na próxima análise.</p></div></div>
     <form id="settings-form" class="form-grid">
       <div class="field"><label>Dias para alertar antes do vencimento</label><input name="warning_days" type="number" min="0" max="30" value="${data.warning_days}"></div>
@@ -653,6 +706,8 @@ async function renderSettings() {
   </section><section class="panel"><div class="panel-head"><div><h2>Recomendações de controle</h2><p>Edite o nome, a cor e a regra da próxima ação. Remover oculta a sugestão, sem apagar marcações anteriores.</p></div><button type="button" class="button secondary" id="add-preset">Adicionar recomendação</button></div><div id="preset-editor"></div><button type="button" id="save-presets" class="button primary">Salvar recomendações</button></section>`;
   setupPresetEditor(data.control_presets);
   startWhatsAppPanel();
+  wireDataSafetyPanel();
+  await refreshDataSafetyPanel();
   document.getElementById('app-zoom')?.addEventListener('change', async event => {
     try {
       await applyAppZoom(event.currentTarget.value);

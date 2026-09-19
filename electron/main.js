@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -128,6 +128,7 @@ function startEngine(moduleName) {
     state.process = child;
 
     let buffer = '';
+    let startupStderr = '';
     let settled = false;
     const timeout = setTimeout(() => {
       if (settled) return;
@@ -163,7 +164,11 @@ function startEngine(moduleName) {
         }
       }
     });
-    child.stderr.on('data', chunk => console.error(`[${moduleName}-engine]`, chunk.toString()));
+    child.stderr.on('data', chunk => {
+      const text = chunk.toString();
+      startupStderr = (startupStderr + text).slice(-12000);
+      console.error(`[${moduleName}-engine]`, text);
+    });
     child.once('error', error => {
       clearTimeout(timeout);
       if (state.process === child) {
@@ -185,7 +190,8 @@ function startEngine(moduleName) {
       }
       if (!settled) {
         settled = true;
-        reject(new Error(`O motor de ${moduleName === 'compras' ? 'Cotação & Mapas' : 'Acompanhamento'} encerrou antes de iniciar.`));
+        const integrityMatch = startupStderr.match(/VYZIUM_DATA_INTEGRITY:\s*([^\r\n]+)/i);
+        reject(new Error(integrityMatch?.[1]?.trim() || `O motor de ${moduleName === 'compras' ? 'Cotação & Mapas' : 'Acompanhamento'} encerrou antes de iniciar.`));
       } else if (wasCurrentProcess && !app.isQuitting && !updating && window && !window.isDestroyed() && activeModule === moduleName) {
         dialog.showErrorBox('Motor encerrado', `O motor do módulo foi encerrado (código ${code}).`);
       }
@@ -239,12 +245,12 @@ async function stopAllEngines() {
 
 const ROUTES = {
   followup: {
-    GET: new Set(['/health', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status']),
-    POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed'])
+    GET: new Set(['/health', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
+    POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed', '/data-safety/backup'])
   },
   compras: {
-    GET: new Set(['/health', '/overview', '/items', '/maps', '/map', '/preview', '/history', '/settings', '/export']),
-    POST: new Set(['/import', '/maps/create', '/maps/save', '/maps/archive', '/settings', '/send', '/review'])
+    GET: new Set(['/health', '/overview', '/items', '/maps', '/map', '/preview', '/history', '/settings', '/export', '/data-safety']),
+    POST: new Set(['/import', '/maps/create', '/maps/save', '/maps/archive', '/settings', '/send', '/review', '/data-safety/backup'])
   }
 };
 
@@ -253,6 +259,7 @@ function engineRequestTimeout(moduleName, method, routePath) {
   // waits for WhatsApp readiness before sending, so it also needs a larger window.
   if (routePath === '/import') return 300000;
   if (routePath === '/export') return 120000;
+  if (routePath === '/data-safety/backup') return 120000;
   if (moduleName === 'compras' && String(method).toUpperCase() === 'POST' && routePath === '/send') return 240000;
   return 45000;
 }
@@ -447,6 +454,15 @@ ipcMain.handle('set-zoom', (_event, percent) => {
   if (window && !window.isDestroyed()) window.webContents.setZoomFactor(value / 100);
   return value;
 });
+ipcMain.handle('open-backup-folder', async () => {
+  if (!['followup', 'compras'].includes(activeModule)) throw new Error('Entre em um módulo para abrir os backups.');
+  const moduleFolder = activeModule === 'compras' ? 'compras' : 'followup';
+  const folder = path.join(moduleDataDir(activeModule), 'backups', moduleFolder);
+  await fs.promises.mkdir(folder, { recursive: true });
+  const error = await shell.openPath(folder);
+  if (error) throw new Error(error);
+  return true;
+});
 ipcMain.handle('choose-workbook', async () => {
   if (updating) throw new Error('Atualização em instalação. Aguarde a reabertura do Vyzium.');
   const isCompras = activeModule === 'compras';
@@ -489,8 +505,27 @@ app.whenReady().then(async () => {
         if (navigationBusy) throw new Error('Aguarde a troca de tela terminar e tente novamente.');
         updating = true;
         try {
-          // O follow-up pode executar lotes em segundo plano mesmo quando a tela
-          // de Compras está aberta. Sempre pedir ao motor principal para validar.
+          // First perform a non-locking status check. The final /prepare-update
+          // call below is the race-free gate that actually retains the send lock.
+          if (followupEngineUrl) {
+            const state = await requestEngine('followup', 'GET', '/send-status');
+            if (state?.active) throw new Error('Existe um envio em andamento. Aguarde e tente novamente.');
+          }
+
+          // Data-safety gate: the installer is allowed to continue only after
+          // both operational databases have produced verified SQLite snapshots.
+          await requestEngine('followup', 'POST', '/data-safety/backup', {
+            reason: `pre-update-${app.getVersion()}`,
+            automatic: true
+          });
+          await requestEngine('compras', 'POST', '/data-safety/backup', {
+            reason: `pre-update-${app.getVersion()}`,
+            automatic: true
+          });
+
+          // Acquire the final update lock only after backups are complete. If a
+          // scheduled send started during the backups this returns 409 and the
+          // update is cancelled without leaving the application half-shut down.
           if (followupEngineUrl) {
             const response = await fetch(`${followupEngineUrl}/prepare-update`, {
               method: 'POST',

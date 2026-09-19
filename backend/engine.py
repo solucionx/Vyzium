@@ -21,6 +21,7 @@ from openpyxl.utils.datetime import from_excel
 from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
+from data_safety import DataIntegrityError, DataSafetyManager
 
 
 def whatsapp_request(route, body=None):
@@ -46,6 +47,8 @@ def whatsapp_request(route, body=None):
         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
 
 APP_NAME = "Vyzium"
+APP_VERSION = "3.0.2"
+DB_SCHEMA_VERSION = 1
 DEFAULT_CONTROL_PRESETS = [
     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
     {"id": "card_payment", "label": "Pedido aguardando pagamento no cartão", "color": "#8756A5", "rule": "card_payment", "active": True},
@@ -276,14 +279,32 @@ def classify(due_date: str | None, received_date: str | None, order_status: str,
 
 class Store:
     def __init__(self, path: Path):
+        path = Path(path).expanduser().resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
-        self.connection = sqlite3.connect(path, check_same_thread=False)
+        self.path = path
+        self.safety = DataSafetyManager(path, "followup", APP_VERSION, auto_retention=10)
+        had_existing_database = self.safety.has_existing_database
+        # Critical safety rule: validate the user's existing database read-only
+        # before this version is allowed to create tables, migrate columns or repair data.
+        self.safety.assert_existing_integrity()
+        if had_existing_database:
+            # Create a verified snapshot using a read-only source connection before
+            # this version opens the operational database for writes.
+            self.safety.ensure_version_backup()
+            existing_schema = self.safety.existing_schema_version()
+            if existing_schema > DB_SCHEMA_VERSION:
+                raise DataIntegrityError(
+                    f"Este banco usa o schema {existing_schema}, mais novo que o suportado por esta versão ({DB_SCHEMA_VERSION}). "
+                    "O Vyzium bloqueou a abertura para evitar que uma versão antiga altere dados mais novos."
+                )
+        self.connection = sqlite3.connect(path, timeout=10, check_same_thread=False)
         self.connection.row_factory = sqlite3.Row
         self.lock = threading.RLock()
         with self.lock:
-            self.connection.execute("PRAGMA journal_mode=WAL")
+            self.connection.execute("PRAGMA busy_timeout=10000")
             self.connection.execute("PRAGMA foreign_keys=ON")
-            self.connection.execute("PRAGMA busy_timeout=5000")
+            self.connection.execute("PRAGMA journal_mode=WAL")
+            self.connection.execute("PRAGMA synchronous=FULL")
             self.connection.executescript("""
                 CREATE TABLE IF NOT EXISTS orders (
                     item_key TEXT PRIMARY KEY,
@@ -450,7 +471,16 @@ class Store:
                     created_at TEXT NOT NULL
                 );
                 CREATE INDEX IF NOT EXISTS idx_app_logs_created ON app_logs(id DESC);
+                CREATE TABLE IF NOT EXISTS schema_migrations (
+                    version INTEGER PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    applied_at TEXT NOT NULL
+                );
             """)
+            self.connection.execute(
+                "INSERT OR IGNORE INTO schema_migrations(version,name,applied_at) VALUES(?,?,?)",
+                (DB_SCHEMA_VERSION, "data_safety_v1", datetime.now().isoformat(timespec="seconds")),
+            )
             existing_order_columns = {row[1] for row in self.connection.execute("PRAGMA table_info(orders)")}
             order_migrations = {
                 "company_id": "TEXT", "source_item_id": "TEXT", "process_id": "TEXT",
@@ -482,6 +512,22 @@ class Store:
             )
             self.connection.commit()
             self._repair_supplier_aliases()
+
+    def data_safety_status(self) -> dict[str, Any]:
+        with self.lock:
+            result = self.safety.status()
+            row = self.connection.execute(
+                "SELECT MAX(version) FROM schema_migrations"
+            ).fetchone()
+            result["schema_version"] = int(row[0] or 0)
+            result["app_version"] = APP_VERSION
+            return result
+
+    def create_backup(self, reason: str = "manual", automatic: bool = False) -> dict[str, Any]:
+        with self.lock:
+            return self.safety.backup(
+                reason=reason, source_connection=self.connection, automatic=automatic
+            )
 
     def _repair_supplier_aliases(self):
         """Merge supplier rows accidentally created with a normalized key.
@@ -656,6 +702,9 @@ class Store:
             raise ValueError("A nova base tem menos de 50% dos itens anteriores. A base anterior foi preservada para evitar perda acidental.")
         now = datetime.now().isoformat(timespec="seconds")
         with self.lock:
+            # The operational DB is already in production use. Every import gets
+            # a verified SQLite snapshot before replacing the imported snapshot.
+            self.safety.backup(reason="pre-import", source_connection=self.connection, automatic=True)
             try:
                 self.connection.execute("BEGIN IMMEDIATE")
                 existing_suppliers = {
@@ -697,6 +746,9 @@ class Store:
                     INSERT INTO import_batches(source_file,source_rows,order_items,duplicate_rows,imported_at)
                     VALUES(?,?,?,?,?)
                 """, (source_file, source_rows, len(rows), duplicate_rows, now))
+                check = [str(row[0]) for row in self.connection.execute("PRAGMA quick_check").fetchall()]
+                if check != ["ok"]:
+                    raise DataIntegrityError("A nova importação não passou na verificação interna; alterações revertidas.")
                 self.connection.commit()
             except Exception:
                 self.connection.rollback()
@@ -2210,6 +2262,8 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200, {"history": self.store.recent_history(200)})
             if parsed.path == "/settings":
                 return self._json(200, self.store.settings())
+            if parsed.path == "/data-safety":
+                return self._json(200, self.store.data_safety_status())
             if parsed.path == "/send-status":
                 query = parse_qs(parsed.query)
                 return self._json(200, self.service.send_status(query.get("job_id", [""])[0] or None))
@@ -2235,6 +2289,10 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.store.save_order_control(body))
             if self.path == "/settings":
                 return self._json(200, self.store.save_settings(body))
+            if self.path == "/data-safety/backup":
+                return self._json(200, self.store.create_backup(
+                    reason=body.get("reason", "manual"), automatic=bool(body.get("automatic", False))
+                ))
             if self.path == "/followup-reviewed":
                 if self.service.send_lock.locked():
                     raise ValueError("Aguarde o lote terminar antes de revisar o envio.")
@@ -2279,7 +2337,11 @@ def main():
     serve_parser.add_argument("--port", type=int, default=0)
     args = parser.parse_args()
     if args.command == "serve":
-        serve(args.port)
+        try:
+            serve(args.port)
+        except DataIntegrityError as exc:
+            print(f"VYZIUM_DATA_INTEGRITY: {exc}", file=sys.stderr, flush=True)
+            raise SystemExit(3)
 
 
 if __name__ == "__main__":

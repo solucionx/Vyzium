@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import threading
 import unicodedata
 import uuid
@@ -23,7 +24,11 @@ from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from openpyxl import load_workbook
 from workbook_formats import open_book, REPORT_REQUIRED, adapt_report, approval_deadline
+from data_safety import DataIntegrityError, DataSafetyManager
 
+
+APP_VERSION = '3.0.2'
+DB_SCHEMA_VERSION = 1
 
 def norm(value):
     return ''.join(c for c in unicodedata.normalize('NFKD', str(value or '').upper()) if not unicodedata.combining(c)).strip()
@@ -225,15 +230,33 @@ def whatsapp_request(route, body=None):
 
 class Store:
     def __init__(self, directory):
-        Path(directory).mkdir(parents=True, exist_ok=True)
-        self.path = str(Path(directory) / 'compras.sqlite3')
+        directory = Path(directory).expanduser().resolve()
+        directory.mkdir(parents=True, exist_ok=True)
+        self.path = str(directory / 'compras.sqlite3')
+        self.safety = DataSafetyManager(self.path, 'compras', APP_VERSION, auto_retention=10)
+        had_existing_database = self.safety.has_existing_database
+        self.safety.assert_existing_integrity()
         self.lock = threading.RLock()
         self.send_lock = threading.Lock()
+        if had_existing_database:
+            # Snapshot through a read-only source before journal/schema maintenance.
+            self.safety.ensure_version_backup()
+            existing_schema = self.safety.existing_schema_version()
+            if existing_schema > DB_SCHEMA_VERSION:
+                raise DataIntegrityError(
+                    f"Este banco usa o schema {existing_schema}, mais novo que o suportado por esta versão ({DB_SCHEMA_VERSION}). "
+                    "O Vyzium bloqueou a abertura para evitar que uma versão antiga altere dados mais novos."
+                )
         with self.db() as con:
             con.executescript('''CREATE TABLE IF NOT EXISTS items(id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS maps(id TEXT PRIMARY KEY, data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS settings(id TEXT PRIMARY KEY, data TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, data TEXT NOT NULL);''')
+            CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY, data TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS schema_migrations(
+                version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL
+            );''')
+            con.execute('INSERT OR IGNORE INTO schema_migrations(version,name,applied_at) VALUES (?,?,?)',
+                        (DB_SCHEMA_VERSION, 'data_safety_v1', now()))
             for mid, raw in con.execute('SELECT id,data FROM messages').fetchall():
                 msg = json.loads(raw)
                 if msg['status'] == 'sending':
@@ -244,11 +267,26 @@ class Store:
     def db(self):
         con = sqlite3.connect(self.path, timeout=30)
         try:
+            con.execute('PRAGMA busy_timeout=10000')
+            con.execute('PRAGMA foreign_keys=ON')
             con.execute('PRAGMA journal_mode=WAL')
+            con.execute('PRAGMA synchronous=FULL')
             with con:
                 yield con
         finally:
             con.close()
+
+    def data_safety_status(self):
+        with self.lock, self.db() as con:
+            result = self.safety.status()
+            row = con.execute('SELECT MAX(version) FROM schema_migrations').fetchone()
+            result['schema_version'] = int((row or [0])[0] or 0)
+            result['app_version'] = APP_VERSION
+            return result
+
+    def create_backup(self, reason='manual', automatic=False):
+        with self.lock, self.db() as con:
+            return self.safety.backup(reason=reason, source_connection=con, automatic=automatic)
 
     def all(self, table):
         with self.db() as con:
@@ -274,10 +312,14 @@ class Store:
             raise ValueError('Escolha um arquivo XLS, XLSX ou XLSM.')
         items, report = load_items(path)
         with self.lock, self.db() as con:
+            self.safety.backup(reason='pre-import', source_connection=con, automatic=True)
             con.execute('DELETE FROM items')
             con.executemany('INSERT INTO items VALUES (?,?)', [(i['id'], json.dumps(i, ensure_ascii=False)) for i in items])
             report.update(id='import', at=now(), filename=Path(path).name)
             con.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('import', json.dumps(report)))
+            check = [str(row[0]) for row in con.execute('PRAGMA quick_check').fetchall()]
+            if check != ['ok']:
+                raise DataIntegrityError('A nova importação não passou na verificação interna; alterações revertidas.')
         return report
 
     def catalog(self):
@@ -519,6 +561,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, s.detail(query['id']))
                 if parsed.path == '/settings':
                     return self.reply(200, s.settings())
+                if parsed.path == '/data-safety':
+                    return self.reply(200, s.data_safety_status())
                 if parsed.path == '/preview':
                     return self.reply(200, s.preview(query['id'], query['supplier']))
                 if parsed.path == '/history':
@@ -546,6 +590,10 @@ class Handler(BaseHTTPRequestHandler):
                     body['id'] = 'ui'
                     s.put('settings', 'ui', body)
                     return self.reply(200, body)
+                if parsed.path == '/data-safety/backup':
+                    return self.reply(200, s.create_backup(
+                        reason=body.get('reason', 'manual'), automatic=bool(body.get('automatic', False))
+                    ))
                 if parsed.path == '/send':
                     return self.reply(200, s.send(body))
                 if parsed.path == '/review':
@@ -563,7 +611,11 @@ if __name__ == '__main__':
     parser.add_argument('command', choices=['serve', 'summary'])
     parser.add_argument('--port', type=int, default=0)
     args = parser.parse_args()
-    store = Store(os.environ.get('FOLLOWUP_DATA_DIR', str(Path.home() / '.vyzium-compras')))
+    try:
+        store = Store(os.environ.get('FOLLOWUP_DATA_DIR', str(Path.home() / '.vyzium-compras')))
+    except DataIntegrityError as exc:
+        print(f'VYZIUM_DATA_INTEGRITY: {exc}', file=sys.stderr, flush=True)
+        raise SystemExit(3)
     if args.command == 'summary':
         print(json.dumps(store.overview(), ensure_ascii=False), flush=True)
     else:
