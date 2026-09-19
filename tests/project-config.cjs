@@ -33,7 +33,25 @@ test('release packages both Python engines as extraResources', () => {
 });
 
 test('release workflow verifies both engines before publishing', () => {
-  const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'release-windows.yml'), 'utf8');
-  assert.match(workflow, /verify-engines\.ps1/);
-  assert.match(workflow, /verify-packaged-engines\.ps1/);
+  const workflowsDir = path.join(root, '.github', 'workflows');
+  const workflowFiles = fs.readdirSync(workflowsDir)
+    .filter(name => /\.ya?ml$/i.test(name));
+
+  assert.ok(workflowFiles.length > 0, 'Nenhum workflow de release foi encontrado.');
+
+  const workflows = workflowFiles.map(name =>
+    fs.readFileSync(path.join(workflowsDir, name), 'utf8')
+  );
+
+  const releaseWorkflow = workflows.find(content =>
+    /compras-engine/.test(content) &&
+    /followup-engine/.test(content) &&
+    /verify-engines\.ps1/.test(content) &&
+    /verify-packaged-engines\.ps1/.test(content)
+  );
+
+  assert.ok(
+    releaseWorkflow,
+    'O workflow de Windows deve compilar e validar os dois motores antes de publicar.'
+  );
 });
