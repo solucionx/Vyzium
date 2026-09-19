@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Tag da versão (opcional). Ex.: v1.2.9. Se vazio, usa a versão do package.json."
+        description: "Tag da versão (opcional). Ex.: v3.0.1. Se vazio, usa a versão do package.json."
         required: false
         type: string
   push:
@@ -72,11 +72,42 @@ jobs:
       - name: Executar testes
         run: npm test
 
-      - name: Compilar motor Python
-        run: python -m PyInstaller --noconfirm --clean --onefile --name followup-engine --distpath dist-engine --workpath build/pyinstaller backend/engine.py
+      - name: Compilar motor de Acompanhamento
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name followup-engine
+          --collect-all openpyxl
+          --distpath dist-engine
+          --workpath build/pyinstaller-followup
+          backend/engine.py
+
+      - name: Compilar motor de Cotação & Mapas
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name compras-engine
+          --collect-all openpyxl
+          --hidden-import xlrd
+          --hidden-import xlwt
+          --distpath dist-engine
+          --workpath build/pyinstaller-compras
+          backend/compras_engine.py
+
+      - name: Verificar motores antes do empacotamento
+        shell: pwsh
+        run: ./scripts/verify-engines.ps1
 
       - name: Gerar instalador Windows
         run: npm run build
+
+      - name: Verificar motores dentro do pacote Windows
+        shell: pwsh
+        run: ./scripts/verify-packaged-engines.ps1
 
       - name: Guardar instalador como artefato do Actions
         uses: actions/upload-artifact@v4
