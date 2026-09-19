@@ -56,12 +56,50 @@ test('release workflow verifies both engines before publishing', () => {
   );
 });
 
-test('data safety layer is included and app version is 3.0.2', () => {
-  assert.equal(pkg.version, '3.0.2');
+test('data safety layer is included and app version is 3.0.3', () => {
+  assert.equal(pkg.version, '3.0.3');
   assert.equal(fs.existsSync(path.join(root, 'backend', 'data_safety.py')), true);
 
   const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
   assert.match(main, /\/data-safety\/backup/);
   assert.match(main, /pre-update-/);
   assert.match(main, /open-backup-folder/);
+});
+
+
+test('3.0.3 bridge points installed clients to the dedicated public releases repository', () => {
+  const updates = fs.readFileSync(path.join(root, 'electron', 'updates.js'), 'utf8');
+  assert.match(updates, /owner:\s*['\"]solucionx['\"]/);
+  assert.match(updates, /repo:\s*['\"]Vyzium-Releases['\"]/);
+  assert.equal(pkg.build?.publish?.[0]?.owner, 'solucionx');
+  assert.equal(pkg.build?.publish?.[0]?.repo, 'Vyzium-Releases');
+});
+
+test('bridge keeps production identity and database-location contracts unchanged', () => {
+  assert.equal(pkg.name, 'vyzium-gestao-operacional');
+  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
+  assert.equal(pkg.build?.productName, 'Vyzium');
+  const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
+  assert.match(main, /followup\.db/);
+  assert.match(main, /Vyzium-Compras/);
+});
+
+test('update modal uses the visible colored Vyzium mark', () => {
+  for (const rel of ['renderer/index.html', 'renderer/acompanhamento.html', 'renderer/compras.html']) {
+    const html = fs.readFileSync(path.join(root, rel), 'utf8');
+    const modal = html.slice(html.indexOf('id="update-modal"'));
+    assert.match(modal, /assets\/vyzium-mark\.svg/);
+  }
+  assert.equal(fs.existsSync(path.join(root, 'renderer', 'assets', 'vyzium-mark.svg')), true);
+});
+
+
+test('bridge release workflow still publishes 3.0.3 to the repository running the workflow', () => {
+  const workflowsDir = path.join(root, '.github', 'workflows');
+  const content = fs.readdirSync(workflowsDir)
+    .filter(name => /\.ya?ml$/i.test(name))
+    .map(name => fs.readFileSync(path.join(workflowsDir, name), 'utf8'))
+    .join('\n');
+  assert.match(content, /gh release create \$tag/);
+  assert.doesNotMatch(content, /gh release create[^\n]*--repo\s+solucionx\/Vyzium-Releases/);
 });

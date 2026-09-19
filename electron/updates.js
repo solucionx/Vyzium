@@ -10,7 +10,7 @@ function createUpdater({app, dialog, getWindow, prepareInstall, promptInstall, p
   autoUpdater.allowPrerelease = false;
   autoUpdater.allowDowngrade = false;
   autoUpdater.disableWebInstaller = true;
-  autoUpdater.setFeedURL({provider: 'github', owner: 'solucionx', repo: 'Vyzium'});
+  autoUpdater.setFeedURL({provider: 'github', owner: 'solucionx', repo: 'Vyzium-Releases'});
   autoUpdater.on('download-progress', p => notify(`Baixando atualização: ${Math.round(p.percent)}%`));
   autoUpdater.on('error', () => notify('Não foi possível atualizar. Verifique a conexão e tente novamente.'));
   async function install() {

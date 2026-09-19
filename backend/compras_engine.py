@@ -27,7 +27,7 @@ from workbook_formats import open_book, REPORT_REQUIRED, adapt_report, approval_
 from data_safety import DataIntegrityError, DataSafetyManager
 
 
-APP_VERSION = '3.0.2'
+APP_VERSION = '3.0.3'
 DB_SCHEMA_VERSION = 1
 
 def norm(value):

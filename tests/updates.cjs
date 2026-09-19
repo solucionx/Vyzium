@@ -4,7 +4,7 @@ const {EventEmitter} = require('node:events');
 const {createUpdater} = require('../electron/updates');
 function fixture({packaged=true, available=true, response=0, blocked=false}={}) {
   const events=[], updater=new EventEmitter(); let downloads=0, installs=0, prepared=0;
-  updater.setFeedURL = feed => assert.deepEqual(feed, {provider:'github',owner:'solucionx',repo:'Vyzium'});
+  updater.setFeedURL = feed => assert.deepEqual(feed, {provider:'github',owner:'solucionx',repo:'Vyzium-Releases'});
   updater.checkForUpdates = async () => {events.push('check'); if(available) updater.emit('update-available',{version:'2.1.0'});};
   updater.downloadUpdate = async () => {downloads++; events.push('download');};
   updater.quitAndInstall = (silent,reopen) => {assert.equal(reopen,true); installs++; events.push('install');};
