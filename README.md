@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/solucionx/Vyzium/releases/latest"><img alt="Download para Windows" src="https://img.shields.io/badge/BAIXAR_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white"></a>
   <a href="https://github.com/solucionx/Vyzium/releases"><img alt="Releases" src="https://img.shields.io/badge/RELEASES-0B3554?style=for-the-badge&logo=github&logoColor=white"></a>
-  <img alt="Versão 3.0" src="https://img.shields.io/badge/VERS%C3%83O-3.0-0B3554?style=for-the-badge">
+  <img alt="Versão 3.0.4" src="https://img.shields.io/badge/VERS%C3%83O-3.0.4-0B3554?style=for-the-badge">
   <img alt="Windows 10 e 11" src="https://img.shields.io/badge/WINDOWS-10_%7C_11-007D9C?style=for-the-badge&logo=windows11&logoColor=white">
   <img alt="Dados locais" src="https://img.shields.io/badge/DADOS-LOCAIS-003B73?style=for-the-badge&logo=sqlite&logoColor=white">
 </p>
@@ -340,6 +340,42 @@ Isso permite manter a experiência de um único aplicativo sem transformar uma i
 
 ---
 
+## ✦ Segurança e continuidade dos bancos
+
+A partir da **3.0.2**, o Vyzium adiciona uma camada de proteção específica para os bancos SQLite já utilizados em produção. O objetivo é preservar os dados existentes antes de qualquer operação com potencial de alteração estrutural ou substituição da base importada.
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+### ◈ Verificação antes de alterar
+Ao iniciar, um banco já existente passa por `PRAGMA quick_check` **antes** de migrações, reparos ou criação de novas estruturas. Se a verificação falhar, o Vyzium bloqueia alterações automáticas e mantém o arquivo existente intacto.
+
+### ◇ Snapshot antes da versão
+Na primeira abertura da 3.0.2, cada banco existente recebe um backup SQLite consistente antes de esta versão aplicar qualquer ajuste de schema.
+
+</td>
+<td width="50%" valign="top">
+
+### ◎ Backup antes de importações
+Antes de substituir o snapshot importado de Acompanhamento ou Compras, o aplicativo cria e valida um backup do banco atual. A importação continua transacional: erro durante o processamento causa rollback.
+
+### ✓ Backup antes de atualizar
+Uma atualização do aplicativo só prossegue depois que os dois módulos conseguem gerar snapshots consistentes e validados.
+
+</td>
+</tr>
+</table>
+
+Os backups são gerados pela API nativa de backup do SQLite, incluindo dados comprometidos no WAL, e cada arquivo é validado com `PRAGMA integrity_check` antes de ser considerado válido. Um manifesto ao lado do backup registra versão do aplicativo, data, motivo, tamanho e SHA-256.
+
+Em **Configurações**, cada módulo exibe o estado de integridade, quantidade de backups, último snapshot e os botões **Criar backup agora** e **Abrir pasta de backups**. Backups manuais não são removidos automaticamente; apenas os backups automáticos antigos entram na política de retenção.
+
+> **Decisão de segurança:** a 3.0.2 não faz restauração automática nem substitui silenciosamente um banco com problema. Como o Vyzium já está em uso, qualquer recuperação continuará sendo uma ação deliberada, evitando sobrescrever uma base válida por engano.
+
+
+---
+
 ## ✦ Construído para desktop
 
 <p align="center">
@@ -394,10 +430,22 @@ Para gerar o instalador localmente:
 .\scripts\build-app.ps1
 ```
 
-A versão atual do projeto é **3.0.0**. Para o workflow de release, a tag deve corresponder exatamente à versão do `package.json`:
+
+
+## Vyzium 3.0.4 — Bridge de atualizações
+
+A 3.0.4 é uma versão de transição de distribuição. Os computadores que já recebem atualizações pelo repositório histórico `solucionx/Vyzium` ainda recebem esta versão por esse canal; depois de instalada, a aplicação passa a consultar as próximas atualizações em `solucionx/Vyzium-Releases`.
+
+A Bridge preserva `appId`, nome interno, caminhos de `userData`, `followup.db`, `compras.sqlite3`, sessão do WhatsApp e a camada Data Safety da 3.0.2. O banco operacional não é movido nem substituído. Na primeira abertura, a Data Safety pode criar o snapshot protegido de pré-upgrade da 3.0.4 antes da abertura para escrita.
+
+A janela de atualização também passa a usar a marca colorida oficial da Vyzium, evitando o ícone branco invisível sobre o bloco branco.
+
+> O repositório histórico não deve ser tornado privado antes de confirmar em uma instalação real o fluxo `versão atual → 3.0.4 → próxima versão via Vyzium-Releases`.
+
+A versão atual do projeto é **3.0.4**. Para o workflow de release, a tag deve corresponder exatamente à versão do `package.json`:
 
 ```text
-v3.0.0
+v3.0.4
 ```
 
 ---
@@ -422,3 +470,14 @@ v3.0.0
   Operação · Follow-up · Cotação & Mapas<br><br>
   <sub>Desenvolvido pela <strong>Solucionx</strong></sub>
 </p>
+
+---
+
+## ✦ Integridade do instalador
+
+A partir da versão **3.0.1**, o processo de release valida os dois motores locais antes de publicar o instalador:
+
+- `followup-engine.exe` — Acompanhamento e Follow-up;
+- `compras-engine.exe` — Cotação & Mapas.
+
+O workflow interrompe a release se qualquer um dos motores estiver ausente ou não tiver sido incluído em `resources/backend` do pacote Windows. Isso evita publicar uma instalação incompleta.

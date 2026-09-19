@@ -56,8 +56,8 @@ test('release workflow verifies both engines before publishing', () => {
   );
 });
 
-test('data safety layer is included and app version is 3.0.3', () => {
-  assert.equal(pkg.version, '3.0.3');
+test('data safety layer is included and app version is 3.0.4', () => {
+  assert.equal(pkg.version, '3.0.4');
   assert.equal(fs.existsSync(path.join(root, 'backend', 'data_safety.py')), true);
 
   const main = fs.readFileSync(path.join(root, 'electron', 'main.js'), 'utf8');
@@ -67,7 +67,7 @@ test('data safety layer is included and app version is 3.0.3', () => {
 });
 
 
-test('3.0.3 bridge points installed clients to the dedicated public releases repository', () => {
+test('3.0.4 keeps installed clients on the dedicated public releases repository', () => {
   const updates = fs.readFileSync(path.join(root, 'electron', 'updates.js'), 'utf8');
   assert.match(updates, /owner:\s*['\"]solucionx['\"]/);
   assert.match(updates, /repo:\s*['\"]Vyzium-Releases['\"]/);
@@ -94,12 +94,34 @@ test('update modal uses the visible colored Vyzium mark', () => {
 });
 
 
-test('bridge release workflow still publishes 3.0.3 to the repository running the workflow', () => {
+test('3.0.4 workflow publishes only release artifacts to the dedicated public repository', () => {
   const workflowsDir = path.join(root, '.github', 'workflows');
   const content = fs.readdirSync(workflowsDir)
     .filter(name => /\.ya?ml$/i.test(name))
     .map(name => fs.readFileSync(path.join(workflowsDir, name), 'utf8'))
     .join('\n');
+  assert.match(content, /VYZIUM_RELEASE_TOKEN/);
+  assert.match(content, /solucionx\/Vyzium-Releases/);
   assert.match(content, /gh release create \$tag/);
-  assert.doesNotMatch(content, /gh release create[^\n]*--repo\s+solucionx\/Vyzium-Releases/);
+  assert.match(content, /--repo \$releaseRepo/);
+  assert.match(content, /--target main/);
+});
+
+test('transition release workflow is manual and cannot publish a Release in the old code repository', () => {
+  const workflowsDir = path.join(root, '.github', 'workflows');
+  const workflowFiles = fs.readdirSync(workflowsDir).filter(name => /\.ya?ml$/i.test(name));
+  const content = workflowFiles.map(name => fs.readFileSync(path.join(workflowsDir, name), 'utf8')).join('\n');
+
+  assert.match(content, /workflow_dispatch:/);
+  assert.doesNotMatch(content, /push:\s*\n\s*tags:/);
+  assert.match(content, /RELEASE_REPO:\s*["']solucionx\/Vyzium-Releases["']/);
+  assert.match(content, /GH_TOKEN:\s*\$\{\{\s*secrets\.VYZIUM_RELEASE_TOKEN\s*\}\}/);
+
+  const releaseCommands = content.split('\n').filter(line => /gh release (?:view|create|upload)/.test(line));
+  assert.ok(releaseCommands.length >= 3, 'Esperava comandos explícitos de GitHub Release.');
+  // The repo flag can be on following PowerShell continuation lines; assert globally for each command family.
+  for (const command of ['view', 'create', 'upload']) {
+    const re = new RegExp(`gh release ${command}[\\s\\S]{0,500}?--repo \\$releaseRepo`);
+    assert.match(content, re, `gh release ${command} deve usar --repo $releaseRepo.`);
+  }
 });
