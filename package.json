@@ -1,6 +1,6 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.0.0",
+  "version": "3.0.1",
   "description": "Vyzium unificado: acompanhamento operacional, follow-up, cotações e mapas de compra.",
   "main": "electron/main.js",
   "private": true,
@@ -34,7 +34,8 @@
         "from": "dist-engine",
         "to": "backend",
         "filter": [
-          "**/*"
+          "followup-engine.exe",
+          "compras-engine.exe"
         ]
       }
     ],

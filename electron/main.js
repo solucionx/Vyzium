@@ -52,11 +52,35 @@ function moduleDataDir(moduleName) {
   return moduleName === 'compras' ? comprasDataDir() : followupDataDir();
 }
 
+function resolvePackagedEngine(filename) {
+  // Caminho oficial do electron-builder + caminhos de compatibilidade para
+  // instalações/empacotamentos anteriores. O primeiro arquivo existente vence.
+  const candidates = [
+    path.join(process.resourcesPath, 'backend', filename),
+    path.join(process.resourcesPath, 'backend', 'dist-engine', filename),
+    path.join(process.resourcesPath, 'dist-engine', filename),
+    path.join(path.dirname(process.execPath), 'resources', 'backend', filename)
+  ];
+  const found = candidates.find(candidate => fs.existsSync(candidate));
+  if (found) return found;
+
+  const moduleLabel = filename.startsWith('compras') ? 'Cotação & Mapas' : 'Acompanhamento';
+  const expected = candidates[0];
+  const error = new Error(
+    `O motor de ${moduleLabel} não foi encontrado na instalação do Vyzium. ` +
+    `Arquivo esperado: ${expected}. Reinstale esta versão do Vyzium. ` +
+    `Se o problema persistir, confira o Histórico de proteção do Windows Security, ` +
+    `pois o executável pode ter sido colocado em quarentena.`
+  );
+  error.code = 'VYZIUM_ENGINE_MISSING';
+  throw error;
+}
+
 function engineCommand(moduleName) {
   const filename = moduleName === 'compras' ? 'compras-engine.exe' : 'followup-engine.exe';
   const source = moduleName === 'compras' ? 'compras_engine.py' : 'engine.py';
   if (app.isPackaged) {
-    return { executable: path.join(process.resourcesPath, 'backend', filename), args: [] };
+    return { executable: resolvePackagedEngine(filename), args: [] };
   }
   const python = process.env.FOLLOWUP_PYTHON || (process.platform === 'win32' ? 'python' : 'python3');
   return { executable: python, args: [path.join(__dirname, '..', 'backend', source)] };

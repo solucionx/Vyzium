@@ -24,3 +24,16 @@ test('Python requirements include both Excel formats used by the unified app', (
     assert.match(req, new RegExp(`^${dependency.replace('==', '==')}[^\\r\\n]+`, 'm'));
   }
 });
+
+test('release packages both Python engines as extraResources', () => {
+  const resources = pkg.build?.extraResources || [];
+  const serialized = JSON.stringify(resources);
+  assert.match(serialized, /followup-engine\.exe/);
+  assert.match(serialized, /compras-engine\.exe/);
+});
+
+test('release workflow verifies both engines before publishing', () => {
+  const workflow = fs.readFileSync(path.join(root, '.github', 'workflows', 'release-windows.yml'), 'utf8');
+  assert.match(workflow, /verify-engines\.ps1/);
+  assert.match(workflow, /verify-packaged-engines\.ps1/);
+});
