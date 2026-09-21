@@ -39,6 +39,8 @@
 .whatsapp-body img { flex: 0 0 280px; border: 1px solid var(--line); border-radius: 12px; }
 .whatsapp-body .hidden { display: none; }
 .review-followup { display: block; margin-top: 8px; }
+.history-needs-review { background: #fff8ec; }
+.history-needs-review td { font-weight: 500; }
 .content.operational-content { padding: 0; }
 .operational-content > .operational-workspace {
   margin: 0;
@@ -1287,7 +1289,7 @@ th {
   background: rgba(255,255,255,.08);
 }
 
-/* Multi-select de atendimento no Controle operacional */
+/* Filtros de múltipla seleção no Controle operacional */
 .multi-filter {
   position: relative;
   min-width: 190px;

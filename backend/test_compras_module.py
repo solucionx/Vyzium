@@ -3,6 +3,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 from pathlib import Path
+from openpyxl import Workbook
 import compras_engine as engine
 
 
@@ -140,6 +141,30 @@ class PurchasesTest(unittest.TestCase):
         self.s.put('messages', msg['id'], msg)
         reopened = engine.Store(self.tmp.name)
         self.assertEqual(reopened.all('messages')[0]['status'], 'uncertain')
+
+
+class ImportHardeningTest(unittest.TestCase):
+    def test_header_can_start_after_report_metadata_rows(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / 'base.xlsx'
+            wb = Workbook()
+            ws = wb.active
+            ws.append(['RELATÓRIO DE SCI'])
+            ws.append(['Gerado em', '20/09/2026'])
+            ws.append(['FKEMPRESA', 'EMPRESA', 'IDSCI', 'IDITEMDASCI', 'DESCRICAOARTIGO', 'QUANTIDADESCI', 'UNIDADEDEMEDIDASCI', 'IDORDEMDECOMPRA', 'NMSTATUSDOITEMDASCI', 'NMSTATUSBPMSCI', 'COMPRADOR'])
+            ws.append(['3', 'Hotel A', '1', '10', 'Item', 2, 'UN', '', '0', '3', 'Comprador A'])
+            wb.save(path)
+            items, report = engine.load_items(path)
+            self.assertEqual(len(items), 1)
+            self.assertEqual(report['eligible'], 1)
+
+    def test_internal_json_table_name_is_allowlisted(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = engine.Store(tmp)
+            with self.assertRaisesRegex(ValueError, 'Tabela interna inválida'):
+                store.all('items; DROP TABLE maps;--')
+            with self.assertRaisesRegex(ValueError, 'Tabela interna inválida'):
+                store.put('sqlite_master', 'x', {})
 
 
 class ImportTest(unittest.TestCase):

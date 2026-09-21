@@ -1,6 +1,7 @@
 """Adapters for the raw SCI export and the approval/deadline report."""
 import hashlib
 import re
+import unicodedata
 import zipfile
 from datetime import datetime, timedelta
 
@@ -12,8 +13,10 @@ class Sheet:
     def reset_dimensions(self):
         pass
 
-    def iter_rows(self, **kwargs):
-        return iter(self.rows)
+    def iter_rows(self, min_row=1, max_row=None, values_only=True, **kwargs):
+        start = max(0, int(min_row or 1) - 1)
+        end = None if max_row is None else max(start, int(max_row))
+        return iter(self.rows[start:end])
 
 
 class Book:
@@ -27,10 +30,46 @@ class Book:
         pass
 
 
+class ManagedBook:
+    """Own an XLSX stream together with the openpyxl workbook using it."""
+    def __init__(self, workbook, stream):
+        self.workbook = workbook
+        self.stream = stream
+
+    def __iter__(self):
+        return iter(self.workbook)
+
+    def __getattr__(self, name):
+        return getattr(self.workbook, name)
+
+    def close(self):
+        try:
+            self.workbook.close()
+        finally:
+            self.stream.close()
+
+
+def normalize_header(value):
+    """Normalize spreadsheet headers consistently across both Vyzium modules."""
+    text = '' if value is None else str(value)
+    text = unicodedata.normalize('NFKD', text)
+    text = ''.join(char for char in text if not unicodedata.combining(char))
+    text = re.sub(r'[^A-Za-z0-9]+', ' ', text.upper())
+    return re.sub(r'\s+', ' ', text).strip()
+
+
 def open_book(path, xlsx_loader):
     if zipfile.is_zipfile(path):
         # File objects also permit legitimate XLSX content with an incorrect .xls extension.
-        return xlsx_loader(open(path, 'rb'), read_only=True, data_only=True)
+        # openpyxl/ZipFile does not own a caller-provided stream, so keep explicit
+        # ownership and close both objects when the importer finishes.
+        stream = open(path, 'rb')
+        try:
+            workbook = xlsx_loader(stream, read_only=True, data_only=True)
+        except Exception:
+            stream.close()
+            raise
+        return ManagedBook(workbook, stream)
     if str(path).lower().endswith('.xls'):
         try:
             import xlrd

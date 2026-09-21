@@ -62,46 +62,60 @@ async function renderOperational() {
   let sortKey = OperationalSort.columns.some(([key]) => key === state.sortKey) ? state.sortKey : 'urgency';
   let direction = state.direction === 'desc' ? 'desc' : 'asc';
   let rows = [], request = 0;
-  const option = (value, label) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`;
+
+  const buyerOptions = filters.buyers.map(value => [value, value]);
+  const companyOptions = filters.companies.map(value => [value, value]);
   const attendanceOptions = [['pending','Pendente'],['partial','Atendida parcialmente'],['attended','Atendida'],['canceled','Cancelada']];
-  let attendanceValues = normalizeMultiFilterState(state.attendance_status);
+  const urgencyOptions = [['open','Em aberto'],['critical','Atraso crítico'],['overdue','Atrasados'],['due_soon','Próximos do prazo'],['scheduled','Programados'],['no_due_date','Sem previsão'],['completed','Concluídos']];
+  const controlFilterOptions = [['blank','Sem marcação'], ...controlOptions.filter(([id]) => id)];
+  const filterConfig = {
+    buyer: {title:'Comprador', allLabel:'Todos os compradores', options:buyerOptions},
+    company: {title:'Hotel', allLabel:'Todos os hotéis', options:companyOptions},
+    attendance_status: {title:'Atendimento', allLabel:'Todos', options:attendanceOptions},
+    urgency: {title:'Prazo', allLabel:'Todos os prazos', options:urgencyOptions},
+    control_status: {title:'Controle', allLabel:'Todos os controles', options:controlFilterOptions}
+  };
+  const selected = Object.fromEntries(Object.keys(filterConfig).map(key => [key, normalizeMultiFilterState(state[key])]));
+
+  const multiFilterHtml = (key, config) => `<details id="op-${key}-filter" class="multi-filter">
+    <summary aria-label="Filtrar por ${escapeHtml(config.title.toLowerCase())}"><span class="multi-filter-title">${escapeHtml(config.title)}</span><strong id="op-${key}-label"></strong></summary>
+    <div class="multi-filter-menu" role="group" aria-label="${escapeHtml(config.title)}">
+      ${config.options.map(([value,label]) => `<label class="multi-filter-option"><input type="checkbox" value="${escapeHtml(value)}" ${selected[key].includes(value) ? 'checked' : ''}><span>${escapeHtml(label)}</span></label>`).join('')}
+      <button id="op-${key}-all" type="button" class="multi-filter-clear">Mostrar todos</button>
+    </div>
+  </details>`;
+
   content.innerHTML = `<section class="panel operational-workspace">
     <div class="panel-head"><div><p class="section-kicker">ACOMPANHAMENTO DAS ORDENS</p><h2>Controle operacional</h2><p>Clique nos títulos para ordenar e nas bolhas para editar o controle.</p></div><span id="op-count" class="badge"></span></div>
     <div class="toolbar">
       <input id="op-search" class="search" aria-label="Buscar ordens" placeholder="Buscar OC, fornecedor, hotel ou observação">
-      <select id="op-buyer" aria-label="Comprador">${option('', 'Todos os compradores')}${filters.buyers.map(v => option(v, v)).join('')}</select>
-      <select id="op-company" aria-label="Hotel">${option('', 'Todos os hotéis')}${filters.companies.map(v => option(v, v)).join('')}</select>
-      <details id="op-attendance-filter" class="multi-filter">
-        <summary aria-label="Filtrar por atendimento"><span class="multi-filter-title">Atendimento</span><strong id="op-attendance-label"></strong></summary>
-        <div class="multi-filter-menu" role="group" aria-label="Status de atendimento">
-          ${attendanceOptions.map(([value,label]) => `<label class="multi-filter-option"><input type="checkbox" value="${escapeHtml(value)}" ${attendanceValues.includes(value) ? 'checked' : ''}><span>${escapeHtml(label)}</span></label>`).join('')}
-          <button id="op-attendance-all" type="button" class="multi-filter-clear">Mostrar todos</button>
-        </div>
-      </details>
-      <select id="op-urgency" aria-label="Prazo">${[['all','Todos os prazos'],['open','Em aberto'],['critical','Atraso crítico'],['overdue','Atrasados'],['due_soon','Próximos do prazo'],['scheduled','Programados'],['no_due_date','Sem previsão'],['completed','Concluídos']].map(v => option(...v)).join('')}</select>
-      <select id="op-control_status" aria-label="Controle">${option('all','Todos os controles')}${option('blank','Sem marcação')}${controlOptions.filter(([id]) => id).map(v => option(...v)).join('')}</select>
+      ${multiFilterHtml('buyer', filterConfig.buyer)}
+      ${multiFilterHtml('company', filterConfig.company)}
+      ${multiFilterHtml('attendance_status', filterConfig.attendance_status)}
+      ${multiFilterHtml('urgency', filterConfig.urgency)}
+      ${multiFilterHtml('control_status', filterConfig.control_status)}
       <button id="op-clear" class="button secondary">Limpar filtros</button>
     </div>
     <div class="table-wrap operational-full"><table><thead><tr>${OperationalSort.columns.map(([key,label]) => `<th data-key="${key}"><button type="button" class="sort-heading" data-sort="${key}">${label}<span aria-hidden="true"></span></button></th>`).join('')}</tr></thead><tbody id="op-body"></tbody></table></div>
   </section>`;
-  const keys = ['search','buyer','company','urgency','control_status'];
-  for (const key of keys) {
-    const input = document.getElementById(`op-${key}`);
-    const fallback = ['urgency','control_status'].includes(key) ? 'all' : '';
-    input.value = state[key] ?? fallback;
-    if (input.tagName === 'SELECT' && input.selectedIndex < 0) input.value = fallback;
-  }
-  const updateAttendanceLabel = () => {
-    const label = document.getElementById('op-attendance-label');
-    if (label) label.textContent = multiFilterLabel(attendanceValues, attendanceOptions, 'Todos');
+
+  const searchInput = document.getElementById('op-search');
+  searchInput.value = state.search || '';
+
+  const updateFilterLabel = key => {
+    const label = document.getElementById(`op-${key}-label`);
+    const config = filterConfig[key];
+    if (label) label.textContent = multiFilterLabel(selected[key], config.options, config.allLabel);
   };
-  updateAttendanceLabel();
+  Object.keys(filterConfig).forEach(updateFilterLabel);
+
   const save = () => {
-    const snapshot = {sortKey, direction, attendance_status: [...attendanceValues]};
-    keys.forEach(key => snapshot[key] = document.getElementById(`op-${key}`).value);
+    const snapshot = {sortKey, direction, search: searchInput.value};
+    Object.keys(filterConfig).forEach(key => { snapshot[key] = [...selected[key]]; });
     try { localStorage.setItem('vyzium.operational', JSON.stringify(snapshot)); }
     catch (_) { showToast('Não foi possível guardar os filtros neste dispositivo.', true); }
   };
+
   const draw = () => {
     const sorted = OperationalSort.rows(rows, sortKey, direction);
     document.getElementById('op-count').textContent = `${sorted.length} OC(s)`;
@@ -127,52 +141,66 @@ async function renderOperational() {
     });
     paintBubbles(content);
   };
+
+  const appendValues = (params, key) => {
+    if (selected[key].length) selected[key].forEach(value => params.append(key, value));
+    else params.set(key, 'all');
+  };
+
   const load = async () => {
     save();
     const seq = ++request;
-    const params = new URLSearchParams(keys.map(key => [key, document.getElementById(`op-${key}`).value]));
-    if (attendanceValues.length) attendanceValues.forEach(value => params.append('attendance_status', value));
-    else params.set('attendance_status', 'all');
+    const params = new URLSearchParams();
+    params.set('search', searchInput.value);
+    Object.keys(filterConfig).forEach(key => appendValues(params, key));
     const response = await api('GET', `/orders?${params}`);
     if (seq !== request || currentView !== 'operational') return;
     rows = response.orders;
     draw();
   };
+
   content.querySelectorAll('[data-sort]').forEach(button => button.addEventListener('click', () => {
     direction = sortKey === button.dataset.sort && direction === 'asc' ? 'desc' : 'asc';
     sortKey = button.dataset.sort; save(); draw();
   }));
+
   let searchTimer = null;
-  keys.forEach(key => document.getElementById(`op-${key}`).addEventListener(key === 'search' ? 'input' : 'change', () => {
-    if (key === 'buyer') persistActiveBuyer(document.getElementById('op-buyer').value);
-    if (key === 'search') {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(load, 180);
-    } else {
-      load();
-    }
-  }));
-  document.querySelectorAll('#op-attendance-filter input[type="checkbox"]').forEach(input => input.addEventListener('change', () => {
-    attendanceValues = [...document.querySelectorAll('#op-attendance-filter input[type="checkbox"]:checked')].map(el => el.value);
-    updateAttendanceLabel();
-    load();
-  }));
-  document.getElementById('op-attendance-all').addEventListener('click', () => {
-    attendanceValues = [];
-    document.querySelectorAll('#op-attendance-filter input[type="checkbox"]').forEach(input => { input.checked = false; });
-    updateAttendanceLabel();
-    document.getElementById('op-attendance-filter').removeAttribute('open');
-    load();
+  searchInput.addEventListener('input', () => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(load, 180);
   });
+
+  Object.keys(filterConfig).forEach(key => {
+    const details = document.getElementById(`op-${key}-filter`);
+    details.querySelectorAll('input[type="checkbox"]').forEach(input => input.addEventListener('change', () => {
+      selected[key] = [...details.querySelectorAll('input[type="checkbox"]:checked')].map(el => el.value);
+      updateFilterLabel(key);
+      if (key === 'buyer') persistActiveBuyer(selected.buyer.length === 1 ? selected.buyer[0] : '');
+      load();
+    }));
+    document.getElementById(`op-${key}-all`).addEventListener('click', () => {
+      selected[key] = [];
+      details.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
+      updateFilterLabel(key);
+      details.removeAttribute('open');
+      if (key === 'buyer') persistActiveBuyer('');
+      load();
+    });
+  });
+
   document.getElementById('op-clear').addEventListener('click', () => {
-    keys.forEach(key => document.getElementById(`op-${key}`).value = ['urgency','control_status'].includes(key) ? 'all' : '');
-    attendanceValues = [];
-    document.querySelectorAll('#op-attendance-filter input[type="checkbox"]').forEach(input => { input.checked = false; });
-    updateAttendanceLabel();
-    document.getElementById('op-attendance-filter').removeAttribute('open');
+    searchInput.value = '';
+    Object.keys(filterConfig).forEach(key => {
+      selected[key] = [];
+      const details = document.getElementById(`op-${key}-filter`);
+      details.querySelectorAll('input[type="checkbox"]').forEach(input => { input.checked = false; });
+      details.removeAttribute('open');
+      updateFilterLabel(key);
+    });
     persistActiveBuyer('');
     load();
   });
+
   refreshCurrentOrders = load;
   await load();
 }

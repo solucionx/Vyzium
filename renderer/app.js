@@ -72,7 +72,11 @@ function persistActiveBuyer(value) {
   // O comprador ativo nasce exclusivamente do filtro escolhido pelo usuário.
   // A cópia no backend existe apenas para que a automação diária respeite a
   // mesma escolha, sem criar um comprador padrão no código.
-  window.followup.api('POST', '/settings', { buyer_filter: String(value || '') }).catch(() => {});
+  window.followup.api('POST', '/settings', { buyer_filter: String(value || '') }).catch(error => {
+    const message = error?.message || String(error || 'Falha ao salvar o comprador ativo.');
+    try { window.followup?.logRendererError?.({page:'acompanhamento', message, stack:error?.stack || ''}); } catch (_) {}
+    showToast('Não foi possível salvar o comprador ativo. Tente novamente.', true);
+  });
 }
 
 async function navigate(view) {
@@ -89,15 +93,29 @@ async function navigate(view) {
   paintBubbles(content);
 }
 
+const HISTORY_STATUS_LABELS = {
+  sent: 'Enviado',
+  simulated: 'Simulada',
+  uncertain: 'Conferir no WhatsApp',
+  reviewed: 'Liberado após conferência',
+  failed: 'Falha'
+};
+
 function historyRows(history) {
   if (!history.length) return '<tr><td colspan="5" class="empty">Nenhuma cobrança registrada.</td></tr>';
-  return history.map(row => `<tr>
+  return history.map(row => {
+    const pending = row.status === 'uncertain';
+    const note = pending
+      ? `${escapeHtml(row.error || 'O WhatsApp não confirmou este envio.')}<button type="button" class="button small secondary review-followup" data-id="${escapeHtml(row.id)}">Conferi: liberar novo envio</button>`
+      : escapeHtml(row.error || '—');
+    return `<tr class="${pending ? 'history-needs-review' : ''}">
     <td>${escapeHtml(formatDateTime(row.sent_at))}</td>
     <td>${escapeHtml(row.supplier_name)}</td>
     <td><span class="badge status-${escapeHtml(row.urgency)}">${escapeHtml(row.urgency)}</span></td>
-    <td>${escapeHtml(({sent:'Enviado',simulated:'Simulada',uncertain:'Enviado',reviewed:'Enviado',failed:'Falha'})[row.status] || row.status)}</td>
-    <td class="muted">${escapeHtml(['uncertain','reviewed'].includes(row.status) ? '—' : (row.error || '—'))}</td>
-  </tr>`).join('');
+    <td><span class="badge ${pending ? 'status-overdue' : ''}">${escapeHtml(HISTORY_STATUS_LABELS[row.status] || row.status)}</span></td>
+    <td class="muted">${note}</td>
+  </tr>`;
+  }).join('');
 }
 
 function controlCell(row) {
@@ -572,12 +590,17 @@ async function renderMessages() {
     bar.value = Math.min(processed, Math.max(1, total));
     document.getElementById('batch-progress-count').textContent = `${processed}/${total}`;
     document.getElementById('batch-progress-label').textContent = state.active
-      ? (state.current_supplier ? `Enviando para ${state.current_supplier}` : 'Preparando lote…')
+      ? (state.phase === 'waiting'
+          ? 'Aguardando a conexão do WhatsApp…'
+          : (state.current_supplier ? `Enviando para ${state.current_supplier}` : 'Preparando lote…'))
       : state.phase === 'done' ? 'Lote concluído' : state.phase === 'error' ? 'Lote interrompido' : 'Lote finalizado';
     const parts = [`${state.sent || 0} enviada(s)`, `${state.failed || 0} falha(s)`];
     if (state.uncertain) parts.push(`${state.uncertain} para conferência`);
     if (state.simulated) parts.push(`${state.simulated} simulada(s)`);
-    document.getElementById('batch-progress-detail').textContent = state.error || parts.join(' · ');
+    const waiting = state.active && state.phase === 'waiting'
+      ? 'O lote continua na fila. Conecte ou retome o WhatsApp para prosseguir. '
+      : '';
+    document.getElementById('batch-progress-detail').textContent = state.error || (waiting + parts.join(' · '));
   };
 
   document.getElementById('send-button')?.addEventListener('click', async event => {
@@ -626,7 +649,7 @@ async function renderHistory() {
   content.innerHTML = `<section class="panel"><div class="panel-head"><div><h2>Histórico de cobranças</h2><p>Registro local de envios, simulações e falhas.</p></div></div>
     <div class="table-wrap"><table><thead><tr><th>Data</th><th>Fornecedor</th><th>Urgência</th><th>Status</th><th>Observação</th></tr></thead><tbody>${historyRows(data.history)}</tbody></table></div></section>`;
   content.querySelectorAll('.review-followup').forEach(button => button.addEventListener('click', async () => {
-    if (!confirm('Confira a conversa no WhatsApp. Libere somente se a mensagem NÃO foi enviada. Deseja permitir uma nova tentativa?')) return;
+    if (!confirm('Confira a conversa no WhatsApp.\n\nLibere somente se a mensagem NÃO chegou ao fornecedor. Enquanto o envio ficar sem conferência, este fornecedor continua bloqueado para novas cobranças.\n\nDeseja permitir uma nova tentativa?')) return;
     button.disabled = true;
     try {await api('POST','/followup-reviewed',{id:Number(button.dataset.id)});await renderHistory();}
     finally {if (button.isConnected) button.disabled = false;}
@@ -635,13 +658,11 @@ async function renderHistory() {
 
 function dataSafetyPanelHtml() {
   return `<section class="panel narrow" id="data-safety-panel">
-    <div class="panel-head"><div><h2>Segurança dos dados</h2><p>Backups SQLite consistentes e verificação de integridade da base em uso.</p></div></div>
+    <div class="panel-head"><div><h2>Segurança dos dados</h2><p>Banco local criptografado e verificação de integridade.</p></div></div>
     <div id="data-safety-status" class="callout">Verificando banco de dados…</div>
     <div class="toolbar" style="margin-top:12px">
       <button id="create-db-backup" class="button primary" type="button">Criar backup agora</button>
-      <button id="open-db-backups" class="button secondary" type="button">Abrir pasta de backups</button>
     </div>
-    <p class="muted">O Vyzium cria backups automáticos antes de importações, mudanças de versão e atualizações. Backups automáticos antigos são limitados; backups manuais não são removidos automaticamente.</p>
   </section>`;
 }
 
@@ -651,13 +672,10 @@ async function refreshDataSafetyPanel() {
   try {
     const state = await api('GET', '/data-safety');
     const ok = state.integrity?.ok;
-    const last = state.last_backup;
-    const when = last?.created_at ? new Date(last.created_at).toLocaleString('pt-BR') : 'Nenhum backup registrado';
-    const backupWarning = last && last.valid_now === false ? '<br><small>⚠ O último backup não passou na revalidação atual. Crie um novo backup antes de operações críticas.</small>' : '';
-    target.innerHTML = `<strong>${ok ? '✓ Banco íntegro' : '⚠ Verificação requer atenção'}</strong><br>` +
-      `Schema ${escapeHtml(state.schema_version ?? '—')} · ${escapeHtml(state.backup_count ?? 0)} backup(s)<br>` +
-      `<small>Último backup: ${escapeHtml(when)}${last?.reason ? ` · ${escapeHtml(last.reason)}` : ''}</small>${backupWarning}`;
-    target.classList.toggle('notice', !ok || Boolean(last && last.valid_now === false));
+    const protection = state.encrypted ? '🔒 Criptografado com SQLCipher' : 'Banco legado sem criptografia';
+    target.innerHTML = `<strong>${ok ? '✓ Banco íntegro' : '⚠ Verificação requer atenção'}</strong> · ${escapeHtml(protection)}<br>` +
+      `Schema ${escapeHtml(state.schema_version ?? '—')}`;
+    target.classList.toggle('notice', !ok);
   } catch (error) {
     target.textContent = `Não foi possível verificar a segurança do banco: ${String(error.message || error)}`;
   }
@@ -679,10 +697,6 @@ function wireDataSafetyPanel() {
       button.disabled = false;
       button.textContent = previous;
     }
-  });
-  document.getElementById('open-db-backups')?.addEventListener('click', async () => {
-    try { await window.followup.openBackupFolder(); }
-    catch (error) { showToast(`Não foi possível abrir os backups: ${String(error.message || error)}`, true); }
   });
 }
 

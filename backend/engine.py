@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import hmac
 import json
+import math
 import os
 import re
 import sqlite3
@@ -22,6 +24,17 @@ from urllib.parse import parse_qs, urlparse
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from data_safety import DataIntegrityError, DataSafetyManager
+from secure_sqlite import connect as secure_connect, key_from_env, row_factory, ensure_cipher_runtime
+from crypto_migration import migrate_plain_database, validate_encrypted_database, MigrationError
+from workbook_formats import normalize_header
+
+
+class WhatsAppUnavailable(RuntimeError):
+    """The local WhatsApp bridge stayed unreachable beyond the allowed window.
+
+    Raised only by ``_wait_for_connection``. The batch worker treats it as final
+    instead of retrying, because retrying cannot fix a bridge that is gone.
+    """
 
 
 def whatsapp_request(route, body=None):
@@ -47,7 +60,7 @@ def whatsapp_request(route, body=None):
         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
 
 APP_NAME = "Vyzium"
-APP_VERSION = "3.0.4"
+APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.1.24")
 DB_SCHEMA_VERSION = 1
 DEFAULT_CONTROL_PRESETS = [
     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
@@ -153,17 +166,19 @@ REQUIRED_FIELDS = {"oc", "company", "description", "due_date", "supplier_name"}
 
 
 def normalize(value: Any) -> str:
-    text = "" if value is None else str(value)
-    text = unicodedata.normalize("NFKD", text)
-    text = "".join(char for char in text if not unicodedata.combining(char))
-    text = re.sub(r"[^A-Za-z0-9]+", " ", text.upper())
-    return re.sub(r"\s+", " ", text).strip()
+    return normalize_header(value)
 
 
 def person_matches(value: Any, filter_value: Any) -> bool:
-    actual = set(normalize(value).split())
-    expected = set(normalize(filter_value).split())
-    return bool(actual and expected and (actual.issubset(expected) or expected.issubset(actual)))
+    """Exact normalized identity match for operational filters and message eligibility.
+
+    Fuzzy/subset matching is unsafe here because names such as ``JOAO`` and
+    ``JOAO SILVA`` can belong to different buyers. Visual search already has its
+    own haystack and must remain the only fuzzy mechanism.
+    """
+    actual = normalize(value)
+    expected = normalize(filter_value)
+    return bool(actual and expected and actual == expected)
 
 
 def text_value(value: Any) -> str:
@@ -196,11 +211,32 @@ def iso_date(value: Any) -> str | None:
 
 
 def number_value(value: Any) -> float | None:
-    if value in (None, ""):
+    """Parse numeric Excel values, including common Brazilian text formats."""
+    if value in (None, "") or isinstance(value, bool):
         return None
+    if isinstance(value, (int, float)):
+        try:
+            result = float(value)
+            return result if math.isfinite(result) else None
+        except (TypeError, ValueError, OverflowError):
+            return None
+    raw = str(value).strip().replace("\u00a0", "").replace("R$", "").replace(" ", "")
+    if not raw:
+        return None
+    # If both separators exist, the right-most one is the decimal separator.
+    if "," in raw and "." in raw:
+        if raw.rfind(",") > raw.rfind("."):
+            raw = raw.replace(".", "").replace(",", ".")
+        else:
+            raw = raw.replace(",", "")
+    elif "," in raw:
+        raw = raw.replace(".", "").replace(",", ".")
+    elif raw.count(".") > 1:
+        raw = raw.replace(".", "")
     try:
-        return float(value)
-    except (TypeError, ValueError):
+        result = float(raw)
+        return result if math.isfinite(result) else None
+    except (TypeError, ValueError, OverflowError):
         return None
 
 
@@ -247,14 +283,35 @@ def classify(due_date: str | None, received_date: str | None, order_status: str,
              critical_after_days: int = 10, today: date | None = None,
              order_status_code: int | None = None, received_qty: float | None = None,
              remaining_qty: float | None = None, quantity: float | None = None) -> Classification:
+    order_text = normalize(order_status)
+    request_text = normalize(request_status)
     status = normalize(f"{order_status} {request_status}")
-    if order_status_code in {2, 3} or any(word in status for word in ("CANCELADO", "RECEBIDO TOTALMENTE", "ENTREGUE")):
+
+    # Numeric ERP status remains authoritative. For textual fallbacks, negative
+    # and partial states must be evaluated before terminal words; otherwise
+    # "NAO ENTREGUE" and "ENTREGUE PARCIALMENTE" are incorrectly completed.
+    if order_status_code in {2, 3}:
+        return Classification("completed", None, False)
+    if any(word in status for word in ("CANCELADO", "CANCELADA")):
+        return Classification("completed", None, False)
+    negative_or_partial = (
+        "PARCIAL" in status
+        or "NAO ENTREGUE" in status
+        or "NAO RECEBIDO" in status
+        or "PENDENTE" in status
+    )
+    terminal_text = (
+        "RECEBIDO TOTALMENTE" in status
+        or any(text in {"ENTREGUE", "PEDIDO ENTREGUE", "ATENDIDO", "ATENDIDO TOTALMENTE", "CONCLUIDO", "FINALIZADO"}
+               for text in (order_text, request_text))
+    )
+    if terminal_text and not negative_or_partial:
         return Classification("completed", None, False)
 
     # A receipt date by itself does not prove that the whole item was received.
     # When quantity/saldo data exists, it is authoritative enough to distinguish
     # partial receipts from completion even if the numeric status is missing.
-    if order_status_code is None and received_date and "PARCIAL" not in status:
+    if order_status_code is None and received_date and not negative_or_partial:
         if remaining_qty is not None:
             if remaining_qty <= 1e-9 and (received_qty or 0) > 0:
                 return Classification("completed", None, False)
@@ -282,7 +339,8 @@ class Store:
         path = Path(path).expanduser().resolve()
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
-        self.safety = DataSafetyManager(path, "followup", APP_VERSION, auto_retention=10)
+        self.db_key_hex = key_from_env()
+        self.safety = DataSafetyManager(path, "followup", APP_VERSION, auto_retention=10, key_hex=self.db_key_hex)
         had_existing_database = self.safety.has_existing_database
         # Critical safety rule: validate the user's existing database read-only
         # before this version is allowed to create tables, migrate columns or repair data.
@@ -297,8 +355,8 @@ class Store:
                     f"Este banco usa o schema {existing_schema}, mais novo que o suportado por esta versão ({DB_SCHEMA_VERSION}). "
                     "O Vyzium bloqueou a abertura para evitar que uma versão antiga altere dados mais novos."
                 )
-        self.connection = sqlite3.connect(path, timeout=10, check_same_thread=False)
-        self.connection.row_factory = sqlite3.Row
+        self.connection = secure_connect(path, key_hex=self.db_key_hex, timeout=10, check_same_thread=False)
+        self.connection.row_factory = row_factory(self.db_key_hex)
         self.lock = threading.RLock()
         with self.lock:
             self.connection.execute("PRAGMA busy_timeout=10000")
@@ -705,6 +763,14 @@ class Store:
             # The operational DB is already in production use. Every import gets
             # a verified SQLite snapshot before replacing the imported snapshot.
             self.safety.backup(reason="pre-import", source_connection=self.connection, automatic=True)
+            # A verified backup was just taken and the whole rewrite happens in a
+            # single transaction that is rolled back on any error, so paying for
+            # an fsync per WAL frame during a bulk import buys nothing. FULL is
+            # restored before returning, including on failure.
+            try:
+                self.connection.execute("PRAGMA synchronous=NORMAL")
+            except Exception:
+                pass
             try:
                 self.connection.execute("BEGIN IMMEDIATE")
                 existing_suppliers = {
@@ -753,6 +819,12 @@ class Store:
             except Exception:
                 self.connection.rollback()
                 raise
+            finally:
+                try:
+                    self.connection.execute("PRAGMA synchronous=FULL")
+                    self.connection.execute("PRAGMA wal_checkpoint(FULL)")
+                except Exception:
+                    pass
         return {"previous": previous, "order_items": len(rows), "receipts": len(receipts)}
 
     def suppliers(self) -> list[dict[str, Any]]:
@@ -1179,23 +1251,46 @@ class WorkbookImporter:
 
     @staticmethod
     def _field_map(values: list[Any]) -> dict[str, int]:
-        headers = {normalize(value): index for index, value in enumerate(values) if value not in (None, "")}
+        headers: dict[str, list[int]] = {}
+        for index, value in enumerate(values):
+            key = normalize(value)
+            if key:
+                headers.setdefault(key, []).append(index)
         mapping = {}
         for field, aliases in TARGET_FIELDS.items():
+            present = []
             for alias in aliases:
-                if normalize(alias) in headers:
-                    mapping[field] = headers[normalize(alias)]
-                    break
+                key = normalize(alias)
+                if key in headers:
+                    present.extend(headers[key])
+            if present:
+                mapping[field] = present[0]
         return mapping
+
+    @staticmethod
+    def _validate_critical_headers(values: list[Any]) -> None:
+        normalized = [normalize(value) for value in values]
+        for field, aliases in TARGET_FIELDS.items():
+            positions = []
+            alias_keys = {normalize(alias) for alias in aliases}
+            for index, key in enumerate(normalized):
+                if key and key in alias_keys:
+                    positions.append(index + 1)
+            if len(positions) > 1:
+                raise ValueError(
+                    f"Cabeçalho ambíguo para {field}: mais de uma coluna reconhecida ({', '.join(map(str, positions))}). "
+                    "Remova/renomeie a coluna duplicada e importe novamente; a base anterior foi preservada."
+                )
 
     def _find_source(self, workbook) -> tuple[Any, int, dict[str, int]]:
         best = None
         for sheet in workbook.worksheets:
             for row_index, values in enumerate(sheet.iter_rows(min_row=1, max_row=25, values_only=True), 1):
-                mapping = self._field_map(list(values))
+                values = list(values)
+                mapping = self._field_map(values)
                 score = len(mapping) + 10 * len(REQUIRED_FIELDS.intersection(mapping))
                 if best is None or score > best[0]:
-                    best = (score, sheet, row_index, mapping)
+                    best = (score, sheet, row_index, mapping, values)
         if not best or not REQUIRED_FIELDS.issubset(best[3]):
             raise ValueError(
                 "Não encontrei uma aba de pedidos válida. Selecione a BASE SCI.xlsx ou a planilha completa "
@@ -1203,6 +1298,7 @@ class WorkbookImporter:
                 "DESCRICAOARTIGO, DATAPREVISTAENTREGAOC e RAZAOSOCIALFORNECEDOR. "
                 "A base anterior foi preservada."
             )
+        self._validate_critical_headers(best[4])
         return best[1], best[2], best[3]
 
     def import_file(self, path_value: str) -> dict[str, Any]:
@@ -1496,17 +1592,43 @@ class FollowUpService:
                 group["message"] = edited
         return groups
 
-    def _wait_for_connection(self):
-        """Wait silently while the connection manager restores WhatsApp.
+    CONNECTION_WAIT_LIMIT_SECONDS = 30 * 60
 
-        Pausing the connection does not destroy the queue. The worker simply waits
-        until the user explicitly resumes it. This method emits no UI notification;
-        the existing WhatsApp panel remains the only visible status surface.
+    def _wait_for_connection(self, limit_seconds: int | None = None):
+        """Wait while the connection manager restores WhatsApp, but never forever.
+
+        A pause is an explicit user decision: the queue keeps waiting for as long
+        as the user wants, without consuming the limit. Any other failure (bridge
+        closed, WhatsApp process gone, QR never scanned) is bounded. Without this
+        bound a dead bridge left the worker spinning, the batch permanently
+        ``active``, every new batch rejected and updates blocked until restart.
         """
+        limit = self.CONNECTION_WAIT_LIMIT_SECONDS if limit_seconds is None else max(1, int(limit_seconds))
+        unavailable_since = None
+        last_error = ""
         while True:
             try:
-                return whatsapp_request("/wait")
-            except RuntimeError:
+                result = whatsapp_request("/wait")
+                self._update_job(phase="sending", error=None)
+                return result
+            except RuntimeError as exc:
+                last_error = str(exc)
+                lowered = last_error.lower()
+                if "pausada" in lowered or "retomar" in lowered:
+                    # Deliberate pause: hold the queue and do not spend the limit.
+                    unavailable_since = None
+                    self._update_job(phase="waiting", current_supplier=None)
+                else:
+                    now = time.monotonic()
+                    if unavailable_since is None:
+                        unavailable_since = now
+                    elif now - unavailable_since >= limit:
+                        raise WhatsAppUnavailable(
+                            "A conexão do WhatsApp ficou indisponível por tempo demais e o lote foi interrompido. "
+                            "Nenhuma mensagem pendente foi enviada. Reconecte o WhatsApp e inicie o lote novamente. "
+                            f"Último detalhe: {last_error}"
+                        ) from exc
+                    self._update_job(phase="waiting", current_supplier=None)
                 time.sleep(3)
 
     def _start_persistent_worker(self, batch_id: str):
@@ -1524,6 +1646,12 @@ class FollowUpService:
                     try:
                         self._run_persistent_batch(batch_id)
                         last_error = None
+                        break
+                    except WhatsAppUnavailable as exc:
+                        # No amount of retrying revives a bridge that is gone.
+                        # Quarantine anything in flight and stop immediately.
+                        last_error = str(exc)
+                        self.store.recover_interrupted_queue()
                         break
                     except Exception as exc:
                         last_error = str(exc)
@@ -1690,8 +1818,26 @@ class FollowUpService:
             return [dict(row) for row in cached if row["urgency"] == status]
         return [dict(row) for row in cached]
 
+    def _orders_view(self) -> list[dict[str, Any]]:
+        """Shared, READ-ONLY snapshot of the classified order items.
+
+        ``orders()`` copies every row on every call, which dominated CPU on large
+        bases because dashboard/summaries/filters each asked for a fresh copy of
+        the whole dataset. Callers that only read must use this view; any caller
+        that writes into the rows (``groups`` tags ``_blocked_reason``,
+        ``order_detail`` attaches ``receipts``) must keep using ``orders()``.
+        """
+        self._sync_read_cache()
+        with self.cache_lock:
+            cached = self.orders_cache
+        if cached is not None:
+            return cached
+        self.orders()
+        with self.cache_lock:
+            return self.orders_cache if self.orders_cache is not None else []
+
     def filters(self) -> dict[str, list[str]]:
-        rows = self.orders()
+        rows = self._orders_view()
         return {
             "buyers": sorted({row["buyer"] for row in rows if row.get("buyer")}),
             "companies": sorted({row["company"] for row in rows if row.get("company")}),
@@ -1719,9 +1865,11 @@ class FollowUpService:
         status = normalize(item.get("order_status"))
         if "CANCEL" in status:
             return "canceled"
+        if any(token in status for token in ("NAO ENTREGUE", "NAO RECEBIDO", "NAO ATENDIDO", "PENDENTE")):
+            return "pending"
         if "PARCIAL" in status:
             return "partial"
-        if "TOTAL" in status or "ENTREGUE" in status:
+        if status in {"ENTREGUE", "PEDIDO ENTREGUE", "ATENDIDO", "ATENDIDO TOTALMENTE", "CONCLUIDO", "FINALIZADO"} or "RECEBIDO TOTALMENTE" in status:
             return "attended"
         received = item.get("received_qty")
         remaining = item.get("remaining_qty")
@@ -1745,76 +1893,105 @@ class FollowUpService:
             return "partial"
         return "pending"
 
-    def order_summaries(self, buyer: str = "", company: str = "", urgency: str = "", search: str = "",
-                        control_status: str = "all", attendance_status: str | list[str] | tuple[str, ...] = "all") -> list[dict[str, Any]]:
+    def _summary_row(self, oc: str, supplier_key: str, items: list[dict[str, Any]],
+                     control: dict[str, Any], preset: dict[str, Any], *,
+                     state: str | None = None, attendance: str | None = None) -> dict[str, Any]:
+        """Build one OC summary from the items already grouped by the caller.
+
+        Extracted so that ``order_detail`` can produce the single row it needs
+        instead of recomputing every summary in the base (and evicting the
+        summary cache) on each expanded row in the orders table.
+        """
+        state = state or self._summary_urgency(items)
+        attendance = attendance or self._summary_attendance(items)
+        first = items[0]
+        current_control = control.get("control_status", "")
+        control_label = preset.get("label", CONTROL_STATUS_LABELS.get(current_control, current_control))
+        open_items = [item for item in items if item["urgency"] != "completed"]
+        due_dates = [item["due_date"] for item in (open_items or items) if item.get("due_date")]
+        row = {
+            "oc": oc, "supplier_key": supplier_key, "supplier_name": first.get("supplier_name", ""),
+            "supplier_doc": first.get("supplier_doc", ""), "company": first.get("company", ""),
+            "buyer": first.get("buyer", ""), "order_date": first.get("order_date"),
+            "due_date": min(due_dates) if due_dates else None, "urgency": state,
+            "urgency_label": URGENCY_LABEL[state], "item_count": len(items),
+            "attendance_status": attendance, "attendance_label": ATTENDANCE_LABELS[attendance],
+            "open_item_count": len(open_items),
+            "partial_item_count": sum(1 for item in items if item.get("order_status_code") == 1),
+            "total_value": sum(item.get("value_total") or 0 for item in items),
+            "urgent": any(bool(item.get("urgent")) for item in items),
+            "warning_count": sum(1 for item in items if item.get("data_warning")),
+            "control_status": current_control, "control_label": control_label,
+            "control_note": control.get("note", ""), "control_sent_at": control.get("sent_at"),
+            "control_updated_at": control.get("updated_at"),
+            "phone": first.get("phone") or "",
+        }
+        row["control_color"] = preset.get("color", "#647789")
+        row["approval_status"], row["approval_label"] = approval_summary(items)
+        row["next_action"], row["action_priority"] = next_action(row, preset.get("rule", "none"))
+        row["_haystack"] = normalize(" ".join([
+            oc, first.get("supplier_name", ""), first.get("company", ""), first.get("buyer", ""),
+            control_label, control.get("note", ""), *[x.get("description", "") for x in items]
+        ]))
+        return row
+
+    def order_summaries(self, buyer: str | list[str] | tuple[str, ...] = "", company: str | list[str] | tuple[str, ...] = "",
+                        urgency: str | list[str] | tuple[str, ...] = "", search: str = "",
+                        control_status: str | list[str] | tuple[str, ...] = "all",
+                        attendance_status: str | list[str] | tuple[str, ...] = "all") -> list[dict[str, Any]]:
         self._sync_read_cache()
-        attendance_values = attendance_status if isinstance(attendance_status, (list, tuple, set)) else [attendance_status]
-        attendance_filters = tuple(sorted({
-            str(value).strip() for value in attendance_values
-            if str(value).strip() not in {"", "all"}
-        }))
-        cache_key = (str(buyer), str(company), str(urgency), str(search), str(control_status), attendance_filters)
+
+        def filter_values(value):
+            values = value if isinstance(value, (list, tuple, set)) else [value]
+            return tuple(dict.fromkeys(
+                str(item).strip() for item in values
+                if str(item).strip() not in {"", "all"}
+            ))
+
+        buyer_filters = filter_values(buyer)
+        company_filters = filter_values(company)
+        urgency_filters = filter_values(urgency)
+        control_filters = filter_values(control_status)
+        attendance_filters = filter_values(attendance_status)
+        cache_key = (buyer_filters, company_filters, urgency_filters, str(search), control_filters, attendance_filters)
         with self.cache_lock:
             cached = self.summary_cache.get(cache_key)
         if cached is not None:
             return [dict(row) for row in cached]
         grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
-        buyer_key, company_key, search_key = normalize(buyer), normalize(company), normalize(search)
+        company_keys = {normalize(value) for value in company_filters}
+        search_key = normalize(search)
         controls = self.store.order_controls()
         presets = {p["id"]: p for p in self.store.settings()["control_presets"]}
-        for item in self.orders():
-            if buyer_key and not person_matches(item.get("buyer"), buyer):
+        for item in self._orders_view():
+            if buyer_filters and not any(person_matches(item.get("buyer"), value) for value in buyer_filters):
                 continue
-            if company_key and normalize(item.get("company")) != company_key:
+            if company_keys and normalize(item.get("company")) not in company_keys:
                 continue
             grouped.setdefault((item["oc"], item["supplier_key"]), []).append(item)
         summaries = []
         for (oc, supplier_key), items in grouped.items():
             state = self._summary_urgency(items)
             attendance = self._summary_attendance(items)
-            if urgency == "open" and state == "completed":
-                continue
-            if urgency and urgency not in {"all", "open"} and state != urgency:
-                continue
+            if urgency_filters:
+                urgency_match = state in urgency_filters or ("open" in urgency_filters and state != "completed")
+                if not urgency_match:
+                    continue
             if attendance_filters and attendance not in attendance_filters:
                 continue
             first = items[0]
             control = controls.get((oc, supplier_key), {})
             current_control = control.get("control_status", "")
-            if control_status == "blank" and current_control:
-                continue
-            if control_status not in {"", "all", "blank"} and current_control != control_status:
-                continue
+            if control_filters:
+                control_match = current_control in control_filters or ("blank" in control_filters and not current_control)
+                if not control_match:
+                    continue
             preset = presets.get(current_control, {})
-            control_label = preset.get("label", CONTROL_STATUS_LABELS.get(current_control, current_control))
-            haystack = normalize(" ".join([
-                oc, first.get("supplier_name", ""), first.get("company", ""), first.get("buyer", ""),
-                control_label, control.get("note", ""), *[x.get("description", "") for x in items]
-            ]))
-            if search_key and search_key not in haystack:
+            row = self._summary_row(oc, supplier_key, items, control, preset, state=state, attendance=attendance)
+            if search_key and search_key not in row["_haystack"]:
                 continue
-            open_items = [item for item in items if item["urgency"] != "completed"]
-            due_dates = [item["due_date"] for item in (open_items or items) if item.get("due_date")]
-            total_value = sum(item.get("value_total") or 0 for item in items)
-            summaries.append({
-                "oc": oc, "supplier_key": supplier_key, "supplier_name": first.get("supplier_name", ""),
-                "supplier_doc": first.get("supplier_doc", ""), "company": first.get("company", ""),
-                "buyer": first.get("buyer", ""), "order_date": first.get("order_date"),
-                "due_date": min(due_dates) if due_dates else None, "urgency": state,
-                "urgency_label": URGENCY_LABEL[state], "item_count": len(items),
-                "attendance_status": attendance, "attendance_label": ATTENDANCE_LABELS[attendance],
-                "open_item_count": len(open_items), "partial_item_count": sum(1 for item in items if item.get("order_status_code") == 1),
-                "total_value": total_value, "urgent": any(bool(item.get("urgent")) for item in items),
-                "warning_count": sum(1 for item in items if item.get("data_warning")),
-                "control_status": current_control, "control_label": control_label,
-                "control_note": control.get("note", ""), "control_sent_at": control.get("sent_at"),
-                "control_updated_at": control.get("updated_at"),
-                "phone": first.get("phone") or "",
-            })
-            row = summaries[-1]
-            row["control_color"] = preset.get("color", "#647789")
-            row["approval_status"], row["approval_label"] = approval_summary(items)
-            row["next_action"], row["action_priority"] = next_action(row, preset.get("rule", "none"))
+            row.pop("_haystack", None)
+            summaries.append(row)
         rank = {"critical": 0, "overdue": 1, "due_soon": 2, "scheduled": 3, "no_due_date": 4, "completed": 5}
         result = sorted(summaries, key=lambda row: (rank[row["urgency"]], row.get("due_date") or "9999", row["oc"]))
         if self.store.revision == self.cache_revision:
@@ -1834,10 +2011,18 @@ class FollowUpService:
             by_item.setdefault(receipt["item_key"], []).append(receipt)
         for item in items:
             item["receipts"] = by_item.get(item["item_key"], [])
-        summary = self.order_summaries(search=str(oc))
-        summary = next((row for row in summary if row["oc"] == str(oc) and (not supplier_key or row["supplier_key"] == supplier_key)), None)
         control_supplier_key = supplier_key or items[0]["supplier_key"]
-        return {"summary": summary, "items": items, "control": self.store.order_control(str(oc), control_supplier_key)}
+        # Build just this OC's summary. Calling order_summaries(search=oc) here
+        # reprocessed the whole base and thrashed the summary cache on every
+        # expanded row in the orders table.
+        control = self.store.order_control(str(oc), control_supplier_key)
+        presets = {p["id"]: p for p in self.store.settings()["control_presets"]}
+        summary = self._summary_row(
+            str(oc), control_supplier_key, items,
+            control, presets.get(control.get("control_status", ""), {})
+        )
+        summary.pop("_haystack", None)
+        return {"summary": summary, "items": items, "control": control}
 
     def _can_send(self, item: dict[str, Any], cooldown_hours: int) -> bool:
         last = self.store.last_success(item["item_key"])
@@ -1905,7 +2090,7 @@ class FollowUpService:
                 last = last_successes.get(item["item_key"])
                 if last:
                     if last.get("status") == "uncertain":
-                        blocked_reason = "Aguardando intervalo anti-spam"
+                        blocked_reason = "Envio sem confirmação — conferir no WhatsApp"
                     elif last["urgency"] == item["urgency"]:
                         then = datetime.fromisoformat(last["sent_at"])
                         if (datetime.now() - then).total_seconds() < settings["cooldown_hours"] * 3600:
@@ -1936,7 +2121,7 @@ class FollowUpService:
 
     def dashboard(self, buyer: str = "") -> dict[str, Any]:
         buyer = str(buyer or "").strip()
-        orders = [item for item in self.orders() if not buyer or person_matches(item.get("buyer"), buyer)]
+        orders = [item for item in self._orders_view() if not buyer or person_matches(item.get("buyer"), buyer)]
         summaries = self.order_summaries(buyer=buyer)
         open_summaries = [order for order in summaries if order["urgency"] != "completed"]
         counts = {key: 0 for key in URGENCY_LABEL}
@@ -2167,31 +2352,6 @@ class AutoScheduler(threading.Thread):
             self.stop_event.wait(self.poll_seconds)
 
 
-class WhatsAppSupervisor(threading.Thread):
-    """Silent backend heartbeat for the local WhatsApp bridge.
-
-    The bridge owns reconnection and session state. This supervisor only nudges
-    its health check periodically. It never surfaces popups or changes business
-    rules, and a user pause is respected by the bridge.
-    """
-    def __init__(self, poll_seconds: int = 20):
-        super().__init__(name="whatsapp-backend-supervisor", daemon=True)
-        self.poll_seconds = poll_seconds
-        self.stop_event = threading.Event()
-
-    def run(self):
-        # Give Electron a few seconds to finish the normal application startup.
-        self.stop_event.wait(5)
-        while not self.stop_event.is_set():
-            try:
-                whatsapp_request("/health")
-            except Exception:
-                # The Node-side connection manager owns recovery. A temporary
-                # bridge failure must stay silent and be tried again later.
-                pass
-            self.stop_event.wait(self.poll_seconds)
-
-
 class ApiHandler(BaseHTTPRequestHandler):
     store: Store
     importer: WorkbookImporter
@@ -2210,11 +2370,17 @@ class ApiHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
+    MAX_BODY_BYTES = 5_000_000
+
     def _authorized(self) -> bool:
-        return bool(self.token) and self.headers.get("X-FollowUp-Token") == self.token
+        if not self.token:
+            return False
+        return hmac.compare_digest(str(self.headers.get("X-FollowUp-Token", "")), str(self.token))
 
     def _body(self) -> dict[str, Any]:
-        length = int(self.headers.get("Content-Length", "0"))
+        length = int(self.headers.get("Content-Length", "0") or 0)
+        if length < 0 or length > self.MAX_BODY_BYTES:
+            raise ValueError("Requisição muito grande.")
         return json.loads(self.rfile.read(length) or b"{}")
 
     def do_GET(self):
@@ -2241,9 +2407,9 @@ class ApiHandler(BaseHTTPRequestHandler):
             if parsed.path == "/orders":
                 query = parse_qs(parsed.query)
                 return self._json(200, {"orders": self.service.order_summaries(
-                    buyer=query.get("buyer", [""])[0], company=query.get("company", [""])[0],
-                    urgency=query.get("urgency", [""])[0], search=query.get("search", [""])[0],
-                    control_status=query.get("control_status", ["all"])[0],
+                    buyer=query.get("buyer", ["all"]), company=query.get("company", ["all"]),
+                    urgency=query.get("urgency", ["all"]), search=query.get("search", [""])[0],
+                    control_status=query.get("control_status", ["all"]),
                     attendance_status=query.get("attendance_status", ["all"]),
                 )})
             if parsed.path == "/order":
@@ -2323,8 +2489,9 @@ def serve(port: int):
         raise RuntimeError("Token local ausente.")
     scheduler = AutoScheduler(store, ApiHandler.importer, ApiHandler.service)
     scheduler.start()
-    whatsapp_supervisor = WhatsAppSupervisor()
-    whatsapp_supervisor.start()
+    # A saúde da sessão do WhatsApp é responsabilidade exclusiva do gerenciador
+    # de conexão no Electron (monitor a cada 15s). Um segundo heartbeat aqui
+    # apenas duplicava chamadas getState() sobre o mesmo Puppeteer.
     server = ThreadingHTTPServer(("127.0.0.1", port), ApiHandler)
     print(json.dumps({"event": "ready", "port": server.server_address[1]}), flush=True)
     server.serve_forever()
@@ -2335,6 +2502,14 @@ def main():
     subparsers = parser.add_subparsers(dest="command", required=True)
     serve_parser = subparsers.add_parser("serve")
     serve_parser.add_argument("--port", type=int, default=0)
+    subparsers.add_parser("security-check")
+    migrate_parser = subparsers.add_parser("migrate-db")
+    migrate_parser.add_argument("--source", required=True)
+    migrate_parser.add_argument("--target", required=True)
+    migrate_parser.add_argument("--module", choices=("followup", "compras"), required=True)
+    validate_parser = subparsers.add_parser("validate-db")
+    validate_parser.add_argument("--path", required=True)
+    validate_parser.add_argument("--module", choices=("followup", "compras"), required=True)
     args = parser.parse_args()
     if args.command == "serve":
         try:
@@ -2342,6 +2517,30 @@ def main():
         except DataIntegrityError as exc:
             print(f"VYZIUM_DATA_INTEGRITY: {exc}", file=sys.stderr, flush=True)
             raise SystemExit(3)
+    elif args.command == "security-check":
+        print(json.dumps(ensure_cipher_runtime(), ensure_ascii=False), flush=True)
+    elif args.command == "validate-db":
+        key_hex = key_from_env()
+        if not key_hex:
+            raise SystemExit("VYZIUM_DB_KEY_HEX ausente.")
+        try:
+            result = validate_encrypted_database(args.path, key_hex=key_hex, module_name=args.module)
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+        except (MigrationError, DataIntegrityError, RuntimeError) as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr, flush=True)
+            raise SystemExit(4)
+    elif args.command == "migrate-db":
+        key_hex = key_from_env()
+        if not key_hex:
+            raise SystemExit("VYZIUM_DB_KEY_HEX ausente.")
+        try:
+            result = migrate_plain_database(
+                args.source, args.target, key_hex=key_hex, module_name=args.module, app_version=APP_VERSION
+            )
+            print(json.dumps(result, ensure_ascii=False), flush=True)
+        except (MigrationError, DataIntegrityError, RuntimeError, sqlite3.DatabaseError, OSError) as exc:
+            print(json.dumps({"error": str(exc)}, ensure_ascii=False), file=sys.stderr, flush=True)
+            raise SystemExit(4)
 
 
 if __name__ == "__main__":

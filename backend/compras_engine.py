@@ -23,15 +23,16 @@ from urllib.parse import urlparse, parse_qs
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError, URLError
 from openpyxl import load_workbook
-from workbook_formats import open_book, REPORT_REQUIRED, adapt_report, approval_deadline
+from workbook_formats import open_book, REPORT_REQUIRED, adapt_report, approval_deadline, normalize_header
 from data_safety import DataIntegrityError, DataSafetyManager
+from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = '3.0.4'
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.1.24')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
-    return ''.join(c for c in unicodedata.normalize('NFKD', str(value or '').upper()) if not unicodedata.combining(c)).strip()
+    return normalize_header(value)
 
 
 def text(value):
@@ -81,21 +82,40 @@ def load_items(path):
     rows_seen = 0
     try:
         source = None
+        headers = []
+        report_format = False
         required = {'FKEMPRESA', 'EMPRESA', 'IDSCI', 'IDITEMDASCI', 'DESCRICAOARTIGO',
                     'QUANTIDADESCI', 'UNIDADEDEMEDIDASCI', 'IDORDEMDECOMPRA',
                     'NMSTATUSDOITEMDASCI', 'NMSTATUSBPMSCI', 'COMPRADOR'}
+        recognized = required | REPORT_REQUIRED
         for sheet in book:
             sheet.reset_dimensions()  # SCI export declares A1:A1 despite containing all rows.
-            iterator = sheet.iter_rows(values_only=True)
-            headers = [norm(v) for v in next(iterator, ())]
-            report_format = REPORT_REQUIRED.issubset(headers)
-            if required.issubset(headers) or report_format:
-                source = iterator
-                break
+            best = None
+            for row_index, values in enumerate(sheet.iter_rows(min_row=1, max_row=30, values_only=True), 1):
+                candidate = [norm(v) for v in values]
+                candidate_set = {h for h in candidate if h}
+                candidate_report = REPORT_REQUIRED.issubset(candidate_set)
+                candidate_raw = required.issubset(candidate_set)
+                score = len(candidate_set & recognized) + (100 if candidate_report or candidate_raw else 0)
+                if best is None or score > best[0]:
+                    best = (score, row_index, candidate, candidate_report, candidate_raw)
+            if not best or not (best[3] or best[4]):
+                continue
+            _, header_row, headers, report_format, _ = best
+            duplicates = sorted({h for h in headers if h and headers.count(h) > 1 and h in recognized})
+            if duplicates:
+                raise ValueError('Cabeçalhos duplicados/ambíguos: ' + ', '.join(duplicates) + '. A base anterior foi preservada.')
+            source = sheet.iter_rows(min_row=header_row + 1, values_only=True)
+            break
         if source is None:
-            raise ValueError('Cabeçalhos não reconhecidos. Use o relatório com Número da SCI, Comprador SCI, Status da SCI e Status BPM SCI, ou a BASE SCI original.')
+            raise ValueError('Cabeçalhos não reconhecidos nas primeiras 30 linhas. Use o relatório com Número da SCI, Comprador SCI, Status da SCI e Status BPM SCI, ou a BASE SCI original.')
         for row in source:
             if not any(v is not None for v in row):
+                continue
+            # Some exports repeat the header inside the data region (and custom
+            # spreadsheet adapters may ignore min_row). Never count a header as
+            # a purchase item.
+            if [norm(v) for v in row] == headers:
                 continue
             r = dict(zip(headers, row))
             if report_format:
@@ -233,7 +253,8 @@ class Store:
         directory = Path(directory).expanduser().resolve()
         directory.mkdir(parents=True, exist_ok=True)
         self.path = str(directory / 'compras.sqlite3')
-        self.safety = DataSafetyManager(self.path, 'compras', APP_VERSION, auto_retention=10)
+        self.db_key_hex = key_from_env()
+        self.safety = DataSafetyManager(self.path, 'compras', APP_VERSION, auto_retention=10, key_hex=self.db_key_hex)
         had_existing_database = self.safety.has_existing_database
         self.safety.assert_existing_integrity()
         self.lock = threading.RLock()
@@ -265,7 +286,7 @@ class Store:
 
     @contextmanager
     def db(self):
-        con = sqlite3.connect(self.path, timeout=30)
+        con = secure_connect(self.path, key_hex=self.db_key_hex, timeout=30)
         try:
             con.execute('PRAGMA busy_timeout=10000')
             con.execute('PRAGMA foreign_keys=ON')
@@ -288,11 +309,22 @@ class Store:
         with self.lock, self.db() as con:
             return self.safety.backup(reason=reason, source_connection=con, automatic=automatic)
 
+    JSON_TABLES = frozenset({'items', 'maps', 'settings', 'messages'})
+
+    @classmethod
+    def _safe_table(cls, table):
+        name = str(table or '')
+        if name not in cls.JSON_TABLES:
+            raise ValueError('Tabela interna inválida.')
+        return name
+
     def all(self, table):
+        table = self._safe_table(table)
         with self.db() as con:
             return [json.loads(r[0]) for r in con.execute(f'SELECT data FROM {table}')]
 
     def put(self, table, key, data):
+        table = self._safe_table(table)
         with self.db() as con:
             con.execute(f'INSERT OR REPLACE INTO {table}(id,data) VALUES (?,?)', (key, json.dumps(data, ensure_ascii=False)))
 
@@ -409,9 +441,9 @@ class Store:
                 for sid, q in quotes.items():
                     normalized = {'price': '' if q.get('price') in ('', None) else str(number(q['price']))}
                     if 'negotiated' in q:
-                        normalized['negotiated'] = '' if q['negotiated'] in ('', None) else str(number(q['negotiated']))
-                        if not normalized['price'] and normalized['negotiated']:
-                            raise ValueError('Informe o preço inicial antes do negociado.')
+                        # Preço inicial vazio significa que este fornecedor não cotou este item.
+                        # Qualquer valor negociado residual é descartado para não participar da comparação.
+                        normalized['negotiated'] = '' if not normalized['price'] or q['negotiated'] in ('', None) else str(number(q['negotiated']))
                     else:
                         normalized.update(discount=str(number(q.get('discount') or 0)), kind=q.get('kind', 'percent'))
                     quotes[sid] = normalized
@@ -587,6 +619,8 @@ class Handler(BaseHTTPRequestHandler):
                         s.put('maps', m['id'], m)
                     return self.reply(200, {'ok': True})
                 if parsed.path == '/settings':
+                    if not isinstance(body, dict):
+                        raise ValueError('Configuração inválida.')
                     body['id'] = 'ui'
                     s.put('settings', 'ui', body)
                     return self.reply(200, body)

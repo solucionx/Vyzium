@@ -1,17 +1,24 @@
 'use strict';
 
-const { app, BrowserWindow, dialog, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, dialog, ipcMain, safeStorage, clipboard, shell } = require('electron');
 const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { WhatsAppSession, startBridge } = require('./whatsapp');
 const { createUpdater } = require('./updates');
+const { FirebaseClient } = require('./firebase-client');
+const { AuthManager } = require('./auth-manager');
+const { SecurityManager } = require('./security-manager');
 
 let window;
 let whatsapp;
 let whatsappBridge;
 let updater;
+let firebaseClient;
+let authManager;
+let securityManager;
+let workspaceServicesStarted = false;
 let quitting = false;
 let updating = false;
 let activeRequests = 0;
@@ -37,14 +44,17 @@ app.on('second-instance', () => {
 });
 
 function followupDataDir() {
-  // Mantém o mesmo userData do Vyzium 2.1 para preservar followup.db,
-  // configurações, filtros e a sessão já existente do WhatsApp.
+  if (securityManager && authManager?.getState()?.authenticated) {
+    try { return securityManager.moduleDir('followup'); } catch (_) {}
+  }
+  // Legacy path is read only by the migration layer until the account is protected.
   return app.getPath('userData');
 }
 
 function comprasDataDir() {
-  // Mantém a base do antigo Vyzium Compras no local original. Os módulos
-  // continuam independentes e nenhuma memória operacional é compartilhada.
+  if (securityManager && authManager?.getState()?.authenticated) {
+    try { return securityManager.moduleDir('compras'); } catch (_) {}
+  }
   return path.join(app.getPath('appData'), 'Vyzium-Compras');
 }
 
@@ -120,6 +130,8 @@ function startEngine(moduleName) {
         FOLLOWUP_DATA_DIR: moduleDataDir(moduleName),
         FOLLOWUP_API_TOKEN: engineToken,
         FOLLOWUP_WHATSAPP_URL: whatsappBridge.url,
+        VYZIUM_DB_KEY_HEX: securityManager.getModuleKeyHex(moduleName),
+        VYZIUM_APP_VERSION: app.getVersion(),
         PYTHONUNBUFFERED: '1'
       },
       windowsHide: true,
@@ -289,9 +301,26 @@ async function requestEngine(moduleName, method, route, body) {
 }
 
 async function apiRequest(method, route, body) {
-  if (method === 'GET' && route === '/whatsapp/status') return whatsapp.status();
-  if (method === 'POST' && route === '/whatsapp/connect') return whatsapp.connect();
-  if (method === 'POST' && route === '/whatsapp/pause') return whatsapp.pause();
+  if (String(route || '').startsWith('/whatsapp/')) {
+    // The session is torn down by stopWorkspaceServices() during logout and
+    // during the security setup, while an open WhatsApp panel may still be
+    // polling. Answer with a clear message instead of dereferencing null.
+    if (!workspaceServicesStarted || !whatsapp) {
+      throw new Error('A conexão do WhatsApp não está ativa. Entre na sua conta Vyzium.');
+    }
+    if (method === 'GET' && route === '/whatsapp/status') return whatsapp.status();
+    if (method === 'GET' && route === '/whatsapp/diagnostics') return whatsapp.diagnostics();
+    if (method === 'POST' && route === '/whatsapp/connect') return whatsapp.connect();
+    if (method === 'POST' && route === '/whatsapp/new-qr') return whatsapp.newQr();
+    if (method === 'POST' && route === '/whatsapp/pause') return whatsapp.pause();
+    if (method === 'POST' && route === '/whatsapp/diagnostics/clear') return whatsapp.clearDiagnostics();
+    if (method === 'POST' && route === '/whatsapp/diagnostics/open-folder') {
+      const error = await shell.openPath(whatsapp.diagnosticDirectory());
+      if (error) throw new Error(`Não foi possível abrir a pasta do diagnóstico: ${error}`);
+      return {opened:true};
+    }
+    throw new Error('Operação de WhatsApp não permitida.');
+  }
   if (!['followup', 'compras'].includes(activeModule)) throw new Error('Entre em um módulo para realizar esta operação.');
   // Os dois módulos usam a mesma sessão do WhatsApp. Impedir que uma cotação
   // concorra com um lote de follow-up que esteja rodando em segundo plano.
@@ -314,7 +343,7 @@ async function comprasOverview() {
   const command = engineCommand('compras');
   return new Promise((resolve, reject) => {
     const child = spawn(command.executable, [...command.args, 'summary'], {
-      env: { ...process.env, FOLLOWUP_DATA_DIR: comprasDataDir(), PYTHONUNBUFFERED: '1' },
+      env: { ...process.env, FOLLOWUP_DATA_DIR: comprasDataDir(), VYZIUM_DB_KEY_HEX: securityManager.getModuleKeyHex('compras'), VYZIUM_APP_VERSION: app.getVersion(), PYTHONUNBUFFERED: '1' },
       windowsHide: true,
       stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -362,7 +391,137 @@ async function getOverview() {
   return value;
 }
 
-async function createWindow() {
+
+async function runSecurityTool(args, extraEnv = {}) {
+  const command = engineCommand('followup');
+  return new Promise((resolve, reject) => {
+    const child = spawn(command.executable, [...command.args, ...args], {
+      env: {
+        ...process.env,
+        ...extraEnv,
+        VYZIUM_APP_VERSION: app.getVersion(),
+        PYTHONUNBUFFERED: '1',
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8'
+      },
+      windowsHide: true,
+      stdio: ['ignore', 'pipe', 'pipe']
+    });
+    let stdout = '';
+    let stderr = '';
+    let lastStage = '';
+    const operation = args[0] || 'security-tool';
+    const timeoutMs = operation === 'migrate-db' ? 20 * 60 * 1000 : operation === 'validate-db' ? 2 * 60 * 1000 : 45 * 1000;
+    const timer = setTimeout(() => {
+      killProcessTree(child).catch(() => {});
+      const seconds = Math.round(timeoutMs / 1000);
+      reject(new Error(`${operation} excedeu ${seconds} segundos. O banco original foi preservado; tente novamente.`));
+    }, timeoutMs);
+    child.stdout.on('data', chunk => { stdout += chunk.toString(); });
+    child.stderr.on('data', chunk => {
+      const text = chunk.toString('utf8');
+      stderr = (stderr + text).slice(-16000);
+      for (const line of text.split(/\r?\n/)) {
+        if (line.startsWith('VYZIUM_SECURITY_STAGE:')) {
+          lastStage = line.slice('VYZIUM_SECURITY_STAGE:'.length).trim();
+          continue;
+        }
+        if (line.startsWith('VYZIUM_SECURITY_PROGRESS:')) {
+          try {
+            const payload = JSON.parse(line.slice('VYZIUM_SECURITY_PROGRESS:'.length));
+            if (window && !window.isDestroyed()) window.webContents.send('security-progress', payload);
+          } catch (_) {}
+        }
+      }
+    });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
+    child.once('exit', code => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        const numericCode = Number(code);
+        const unsignedCode = Number.isFinite(numericCode) ? (numericCode >>> 0) : null;
+        const hexCode = unsignedCode === null ? '' : ` (0x${unsignedCode.toString(16).toUpperCase().padStart(8, '0')})`;
+        const stageText = lastStage ? `; etapa: ${lastStage}` : '';
+        let detail = '';
+        try {
+          const candidate = stderr.trim().split(/\r?\n/).filter(Boolean).reverse().find(line => line.trim().startsWith('{'));
+          const parsed = JSON.parse(candidate || '{}');
+          detail = parsed.error || '';
+        } catch (_) {}
+        if (!detail) {
+          detail = stderr
+            .split(/\r?\n/)
+            .filter(line => line && !line.startsWith('VYZIUM_SECURITY_STAGE:') && !line.startsWith('VYZIUM_SECURITY_PROGRESS:'))
+            .join('\n')
+            .trim();
+        }
+        const exitText = unsignedCode === null ? 'processo encerrado' : `saída ${unsignedCode}${hexCode}`;
+        return reject(new Error(`${operation}${stageText}; ${exitText}. ${detail || 'O motor encerrou sem informar a causa.'}`));
+      }
+      try {
+        const line = stdout.trim().split(/\r?\n/).filter(Boolean).at(-1) || '{}';
+        resolve(JSON.parse(line));
+      } catch (_) {
+        reject(new Error('O motor de segurança retornou uma resposta inválida.'));
+      }
+    });
+  });
+}
+
+async function startWorkspaceServices() {
+  if (workspaceServicesStarted) return;
+  const security = await securityManager.status();
+  if (!security.ready) throw new Error('Conclua a proteção dos dados antes de abrir o Vyzium.');
+  // Fail closed before starting any operational service if the protected root key
+  // cannot be unwrapped or an existing SQLCipher database fails integrity/key
+  // validation. Fresh accounts without a database are allowed and the engine will
+  // create a new encrypted database on first use.
+  securityManager.getModuleKeyHex('followup');
+  securityManager.getModuleKeyHex('compras');
+  await securityManager.validateProtectedDatabases();
+  whatsapp = new WhatsAppSession(securityManager.whatsappDir(), {
+    profileDataDir: securityManager.whatsappRuntimeDir()
+  });
+  whatsappBridge = await startBridge(whatsapp, engineToken);
+  workspaceServicesStarted = true;
+  startEngine('followup').catch(error => {
+    console.error('[followup-engine]', error);
+    if (window && !window.isDestroyed()) {
+      window.webContents.send('engine-status', { module: 'followup', error: error.message });
+    }
+  });
+  whatsapp.autoStart();
+}
+
+async function stopWorkspaceServices() {
+  await stopAllEngines();
+  await Promise.resolve(whatsapp?.shutdown()).catch(() => {});
+  if (whatsappBridge?.server) {
+    await new Promise(resolve => whatsappBridge.server.close(() => resolve())).catch(() => {});
+  }
+  whatsapp = null;
+  whatsappBridge = null;
+  workspaceServicesStarted = false;
+}
+
+async function enterApplication() {
+  await startWorkspaceServices();
+  activeModule = 'home';
+  overviewCache = null;
+  await window.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  window.webContents.setZoomFactor(0.85);
+  return true;
+}
+
+async function returnToAuth() {
+  activeModule = 'auth';
+  overviewCache = null;
+  await stopWorkspaceServices();
+  await window.loadFile(path.join(__dirname, '..', 'renderer', 'auth.html'));
+  window.webContents.setZoomFactor(0.85);
+}
+
+async function createWindow(initialPage = 'auth.html') {
   window = new BrowserWindow({
     width: 1440,
     height: 900,
@@ -376,30 +535,44 @@ async function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: true
+      sandbox: true,
+      devTools: false
     }
   });
   window.removeMenu();
+
+  // Build estável: DevTools permanece indisponível e os atalhos comuns são bloqueados.
+  window.webContents.on('before-input-event', (event, input) => {
+    if (input.type !== 'keyDown') return;
+    const key = String(input.key || '').toLowerCase();
+    const devToolsShortcut = input.key === 'F12'
+      || (input.control && input.shift && ['i','j','c'].includes(key));
+    if (devToolsShortcut) event.preventDefault();
+  });
+
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   window.webContents.on('will-navigate', event => event.preventDefault());
   window.webContents.setZoomFactor(0.85);
-  await window.loadFile(path.join(__dirname, '..', 'renderer', 'index.html'));
+  await window.loadFile(path.join(__dirname, '..', 'renderer', initialPage));
   window.webContents.setZoomFactor(0.85);
 }
 
 ipcMain.handle('api', async (_event, { method, route, body }) => {
   if (updating) throw new Error('Atualização em instalação. Aguarde a reabertura do Vyzium.');
-  activeRequests++;
+  const normalizedMethod = String(method || 'GET').toUpperCase();
+  const blocksNavigation = normalizedMethod !== 'GET';
+  if (blocksNavigation) activeRequests++;
   try {
-    const result = await apiRequest(method, route, body);
-    if (String(method).toUpperCase() !== 'GET') overviewCache = null;
+    const result = await apiRequest(normalizedMethod, route, body);
+    if (blocksNavigation) overviewCache = null;
     return result;
   } finally {
-    activeRequests--;
+    if (blocksNavigation) activeRequests--;
   }
 });
 
 ipcMain.handle('switch-module', async (_event, target) => {
+  if (!workspaceServicesStarted) throw new Error('Entre na sua conta Vyzium.');
   if (updating) throw new Error('Atualização em instalação. Aguarde a reabertura do Vyzium.');
   if (!['followup', 'compras'].includes(target)) throw new Error('Módulo inválido.');
   if (activeRequests) throw new Error('Aguarde a operação atual terminar antes de trocar de módulo.');
@@ -425,6 +598,7 @@ ipcMain.handle('switch-module', async (_event, target) => {
 });
 
 ipcMain.handle('go-home', async () => {
+  if (!workspaceServicesStarted) throw new Error('Entre na sua conta Vyzium.');
   if (updating) throw new Error('Atualização em instalação. Aguarde a reabertura do Vyzium.');
   if (activeRequests) throw new Error('Aguarde a operação atual terminar.');
   if (navigationBusy) throw new Error('Aguarde a troca de tela terminar.');
@@ -446,22 +620,29 @@ ipcMain.handle('go-home', async () => {
   }
 });
 
+ipcMain.handle('app-version', () => app.getVersion());
+ipcMain.handle('renderer-error', (_event, payload = {}) => {
+  try {
+    const dir = path.join(app.getPath('userData'), 'logs');
+    fs.mkdirSync(dir, { recursive: true });
+    const safe = {
+      at: new Date().toISOString(),
+      page: String(payload.page || activeModule || '').slice(0, 80),
+      message: String(payload.message || 'Erro no renderer').slice(0, 1200),
+      stack: String(payload.stack || '').split('\n').slice(0, 12).join('\n').slice(0, 5000)
+    };
+    fs.appendFileSync(path.join(dir, 'renderer-errors.jsonl'), JSON.stringify(safe) + '\n', { encoding: 'utf8', mode: 0o600 });
+  } catch (_) {}
+  return true;
+});
 ipcMain.handle('get-overview', () => getOverview());
+ipcMain.handle('copy-text', (_event, value) => { clipboard.writeText(String(value || '')); return true; });
 ipcMain.handle('check-updates', () => updater.check());
 ipcMain.handle('set-zoom', (_event, percent) => {
   const value = Number(percent);
   if (!Number.isFinite(value) || value < 70 || value > 120) throw new Error('Zoom inválido.');
   if (window && !window.isDestroyed()) window.webContents.setZoomFactor(value / 100);
   return value;
-});
-ipcMain.handle('open-backup-folder', async () => {
-  if (!['followup', 'compras'].includes(activeModule)) throw new Error('Entre em um módulo para abrir os backups.');
-  const moduleFolder = activeModule === 'compras' ? 'compras' : 'followup';
-  const folder = path.join(moduleDataDir(activeModule), 'backups', moduleFolder);
-  await fs.promises.mkdir(folder, { recursive: true });
-  const error = await shell.openPath(folder);
-  if (error) throw new Error(error);
-  return true;
 });
 ipcMain.handle('choose-workbook', async () => {
   if (updating) throw new Error('Atualização em instalação. Aguarde a reabertura do Vyzium.');
@@ -491,29 +672,71 @@ ipcMain.handle('save-export', async (_event, mapId) => {
   }
 });
 
+
+ipcMain.handle('auth-state', () => authManager.getState());
+ipcMain.handle('auth-register', (_event, body) => authManager.register(body || {}));
+ipcMain.handle('auth-login', (_event, body) => authManager.login(body || {}));
+ipcMain.handle('auth-resend-verification', () => authManager.resendVerification());
+ipcMain.handle('auth-refresh-verification', () => authManager.refreshVerification());
+ipcMain.handle('auth-reset-password', (_event, email) => authManager.resetPassword(email));
+ipcMain.handle('security-status', () => securityManager.status());
+ipcMain.handle('security-setup', async () => {
+  if (workspaceServicesStarted) await stopWorkspaceServices();
+  return securityManager.prepare();
+});
+ipcMain.handle('security-finalize', async () => {
+  if (workspaceServicesStarted) await stopWorkspaceServices();
+  return securityManager.finalize();
+});
+ipcMain.handle('security-recover', (_event, code) => securityManager.recoverWithCode(code));
+ipcMain.handle('security-enter-app', async () => {
+  const auth = authManager.getState();
+  if (!auth.authenticated || !auth.emailVerified) throw new Error('Confirme sua conta antes de continuar.');
+  const security = await securityManager.status();
+  if (!security.ready) throw new Error('Conclua a proteção dos dados antes de abrir o Vyzium.');
+  return enterApplication();
+});
+ipcMain.handle('auth-logout', async () => {
+  const result = authManager.logout();
+  securityManager.clearKeyFromMemory();
+  await returnToAuth();
+  return result;
+});
+
 app.whenReady().then(async () => {
   try {
-    whatsapp = new WhatsAppSession(path.join(followupDataDir(), 'whatsapp-session'));
-    whatsappBridge = await startBridge(whatsapp, engineToken);
+    firebaseClient = new FirebaseClient();
+    authManager = new AuthManager({ firebase: firebaseClient, safeStorage, userDataDir: app.getPath('userData') });
+    securityManager = new SecurityManager({
+      app,
+      safeStorage,
+      firebase: firebaseClient,
+      auth: authManager,
+      runSecurityTool,
+      reportProgress: payload => {
+        if (window && !window.isDestroyed()) window.webContents.send('security-progress', payload);
+      }
+    });
 
     updater = createUpdater({
       app,
       dialog,
       getWindow: () => window,
       prepareInstall: async () => {
+        if (!workspaceServicesStarted) {
+          throw new Error('Entre no Vyzium antes de instalar a atualização para que os bancos sejam protegidos por backup.');
+        }
         if (activeRequests) throw new Error('Aguarde a operação atual terminar e tente novamente.');
         if (navigationBusy) throw new Error('Aguarde a troca de tela terminar e tente novamente.');
         updating = true;
         try {
-          // First perform a non-locking status check. The final /prepare-update
-          // call below is the race-free gate that actually retains the send lock.
           if (followupEngineUrl) {
             const state = await requestEngine('followup', 'GET', '/send-status');
             if (state?.active) throw new Error('Existe um envio em andamento. Aguarde e tente novamente.');
           }
 
-          // Data-safety gate: the installer is allowed to continue only after
-          // both operational databases have produced verified SQLite snapshots.
+          // Backups created in secure mode remain SQLCipher-encrypted with the
+          // same per-module key. No plaintext backup is produced by the updater.
           await requestEngine('followup', 'POST', '/data-safety/backup', {
             reason: `pre-update-${app.getVersion()}`,
             automatic: true
@@ -523,9 +746,6 @@ app.whenReady().then(async () => {
             automatic: true
           });
 
-          // Acquire the final update lock only after backups are complete. If a
-          // scheduled send started during the backups this returns 409 and the
-          // update is cancelled without leaving the application half-shut down.
           if (followupEngineUrl) {
             const response = await fetch(`${followupEngineUrl}/prepare-update`, {
               method: 'POST',
@@ -539,26 +759,26 @@ app.whenReady().then(async () => {
           throw error;
         }
         app.isQuitting = true;
-        await Promise.resolve(whatsapp?.shutdown()).catch(() => {});
-        whatsappBridge?.server.close();
-        await stopAllEngines();
+        await stopWorkspaceServices();
         quitting = true;
       }
     });
 
-    await createWindow();
-
-    // O acompanhamento é o motor de fundo do Vyzium: mantém agendamento,
-    // cache e automações sem bloquear a primeira pintura da Visão geral.
-    startEngine('followup').catch(error => {
-      console.error('[followup-engine]', error);
-      if (window && !window.isDestroyed()) {
-        window.webContents.send('engine-status', { module: 'followup', error: error.message });
-      }
-    });
-    whatsapp.autoStart();
+    const restored = await authManager.restore();
+    let security = null;
+    if (restored.authenticated && restored.emailVerified) {
+      security = await securityManager.status();
+    }
+    const ready = Boolean(restored.authenticated && restored.emailVerified && security?.ready);
+    activeModule = ready ? 'home' : 'auth';
+    if (ready) {
+      await startWorkspaceServices();
+      await createWindow('index.html');
+    } else {
+      await createWindow('auth.html');
+    }
   } catch (error) {
-    dialog.showErrorBox('Falha ao iniciar', `${error.message}\n\nInstale as dependências do motor e tente novamente.`);
+    dialog.showErrorBox('Falha ao iniciar', `${error.message}\n\nO Vyzium não alterou seus bancos de dados.`);
     app.quit();
   }
 });
@@ -567,11 +787,7 @@ app.on('before-quit', event => {
   if (quitting) return;
   event.preventDefault();
   app.isQuitting = true;
-  Promise.allSettled([
-    stopAllEngines(),
-    Promise.resolve(whatsapp?.shutdown()).catch(() => {})
-  ]).finally(() => {
-    whatsappBridge?.server.close();
+  Promise.resolve(stopWorkspaceServices()).finally(() => {
     quitting = true;
     app.quit();
   });

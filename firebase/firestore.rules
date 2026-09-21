@@ -1,0 +1,212 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function verifiedUser() {
+      return signedIn()
+        && request.auth.token.email_verified == true;
+    }
+
+    function workspaceExists(workspaceId) {
+      return exists(
+        /databases/$(database)/documents/workspaces/$(workspaceId)
+      );
+    }
+
+    function isWorkspaceOwner(workspaceId) {
+      return verifiedUser()
+        && workspaceExists(workspaceId)
+        && get(
+          /databases/$(database)/documents/workspaces/$(workspaceId)
+        ).data.ownerUid == request.auth.uid;
+    }
+
+    function isWorkspaceMember(workspaceId) {
+      return verifiedUser()
+        && exists(
+          /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)
+        );
+    }
+
+    match /users/{userId} {
+      allow create:
+        if verifiedUser()
+        && request.auth.uid == userId
+        && request.resource.data.keys().hasOnly([
+          'displayName',
+          'email',
+          'createdAt'
+        ])
+        && request.resource.data.displayName is string
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.createdAt == request.time;
+
+      allow read:
+        if verifiedUser()
+        && request.auth.uid == userId;
+
+      allow update:
+        if verifiedUser()
+        && request.auth.uid == userId
+        && request.resource.data.diff(resource.data)
+             .affectedKeys()
+             .hasOnly([
+               'displayName',
+               'email'
+             ])
+        && request.resource.data.displayName is string
+        && request.resource.data.email == request.auth.token.email;
+
+      allow delete: if false;
+    }
+
+    match /workspaces/{workspaceId} {
+      allow create:
+        if verifiedUser()
+        && workspaceId == request.auth.uid
+        && request.resource.data.ownerUid == request.auth.uid
+        && request.resource.data.keys().hasOnly([
+          'name',
+          'ownerUid',
+          'createdAt',
+          'schemaVersion'
+        ])
+        && request.resource.data.name is string
+        && request.resource.data.schemaVersion == 1
+        && request.resource.data.createdAt == request.time;
+
+      allow read:
+        if isWorkspaceOwner(workspaceId)
+        || isWorkspaceMember(workspaceId);
+
+      allow update:
+        if isWorkspaceOwner(workspaceId)
+        && request.resource.data.ownerUid == resource.data.ownerUid
+        && request.resource.data.diff(resource.data)
+             .affectedKeys()
+             .hasOnly([
+               'name'
+             ])
+        && request.resource.data.name is string
+        && request.resource.data.schemaVersion == resource.data.schemaVersion;
+
+      allow delete: if false;
+
+      match /members/{userId} {
+        allow read:
+          if isWorkspaceOwner(workspaceId)
+          || (
+            verifiedUser()
+            && request.auth.uid == userId
+          );
+
+        allow create:
+          if isWorkspaceOwner(workspaceId)
+          && request.resource.data.keys().hasOnly([
+            'uid',
+            'email',
+            'role',
+            'createdAt'
+          ])
+          && request.resource.data.uid == userId
+          && request.resource.data.createdAt == request.time
+          && exists(
+            /databases/$(database)/documents/users/$(userId)
+          )
+          && request.resource.data.email ==
+             get(
+               /databases/$(database)/documents/users/$(userId)
+             ).data.email
+          && request.resource.data.role in [
+            'owner',
+            'admin',
+            'buyer',
+            'followup'
+          ]
+          && (
+            request.resource.data.role != 'owner'
+            || userId ==
+               get(
+                 /databases/$(database)/documents/workspaces/$(workspaceId)
+               ).data.ownerUid
+          );
+
+        allow update:
+          if isWorkspaceOwner(workspaceId)
+          && request.resource.data.uid == resource.data.uid
+          && request.resource.data.uid == userId
+          && request.resource.data.diff(resource.data)
+               .affectedKeys()
+               .hasOnly([
+                 'email',
+                 'role'
+               ])
+          && request.resource.data.email ==
+             get(
+               /databases/$(database)/documents/users/$(userId)
+             ).data.email
+          && request.resource.data.role in [
+            'owner',
+            'admin',
+            'buyer',
+            'followup'
+          ]
+          && (
+            request.resource.data.role != 'owner'
+            || userId ==
+               get(
+                 /databases/$(database)/documents/workspaces/$(workspaceId)
+               ).data.ownerUid
+          );
+
+        allow delete:
+          if isWorkspaceOwner(workspaceId)
+          && userId !=
+             get(
+               /databases/$(database)/documents/workspaces/$(workspaceId)
+             ).data.ownerUid;
+      }
+
+      // The cloud only stores an AES-GCM wrapped copy of the local root key.
+      // The plaintext key and the recovery code never leave the desktop app.
+      match /keyRecovery/{keyId} {
+        allow read:
+          if keyId == 'current'
+          && isWorkspaceOwner(workspaceId);
+
+        allow create, update:
+          if keyId == 'current'
+          && isWorkspaceOwner(workspaceId)
+          && request.resource.data.keys().hasOnly([
+            'version',
+            'algorithm',
+            'kdf',
+            'salt',
+            'iv',
+            'ciphertext',
+            'tag',
+            'updatedAt'
+          ])
+          && request.resource.data.version == 1
+          && request.resource.data.algorithm == 'AES-256-GCM'
+          && request.resource.data.kdf is string
+          && request.resource.data.salt is string
+          && request.resource.data.iv is string
+          && request.resource.data.ciphertext is string
+          && request.resource.data.tag is string
+          && request.resource.data.updatedAt == request.time;
+
+        allow delete: if false;
+      }
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

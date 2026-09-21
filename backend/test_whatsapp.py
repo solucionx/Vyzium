@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 from urllib.error import URLError
-from engine import Store, FollowUpService, whatsapp_request
+from engine import Store, FollowUpService, WhatsAppUnavailable, whatsapp_request
 
 
 class WhatsAppBridgeConnectionTests(unittest.TestCase):
@@ -296,3 +296,45 @@ class WhatsAppBatchQueueTests(unittest.TestCase):
         # Prevent tearDown from closing the already-closed original connection twice.
         self.store = Store(Path(self.temp.name) / 'throwaway.db')
 
+
+
+class WhatsAppWaitBoundTests(unittest.TestCase):
+    """Antes, _wait_for_connection tentava /wait para sempre. Com a ponte morta,
+    o worker girava eternamente, o lote ficava `active` indefinidamente, todo
+    lote novo era recusado e a atualização do app ficava bloqueada."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        self.service = FollowUpService(Store(Path(self.dir.name) / "followup.db"))
+
+    def test_unreachable_bridge_eventually_aborts(self):
+        calls = {"n": 0}
+
+        def always_down(route, body=None):
+            calls["n"] += 1
+            raise RuntimeError("Não foi possível falar com a ponte do WhatsApp.")
+
+        with patch('engine.whatsapp_request', side_effect=always_down), \
+             patch('engine.time.sleep', lambda _seconds: None):
+            with self.assertRaises(WhatsAppUnavailable) as ctx:
+                self.service._wait_for_connection(limit_seconds=1)
+        self.assertGreater(calls["n"], 1)
+        self.assertIn("lote foi interrompido", str(ctx.exception))
+
+    def test_user_pause_keeps_waiting_and_then_proceeds(self):
+        attempts = {"n": 0}
+
+        def paused_then_ready(route, body=None):
+            attempts["n"] += 1
+            if attempts["n"] < 4:
+                raise RuntimeError("Conexão pausada. Clique em Retomar conexão para continuar.")
+            return {"ready": True}
+
+        with patch('engine.whatsapp_request', side_effect=paused_then_ready), \
+             patch('engine.time.sleep', lambda _seconds: None):
+            # Um limite minusculo nao pode derrubar o lote enquanto a pausa for
+            # uma decisão explícita do usuário.
+            result = self.service._wait_for_connection(limit_seconds=1)
+        self.assertEqual(result, {"ready": True})
+        self.assertEqual(attempts["n"], 4)

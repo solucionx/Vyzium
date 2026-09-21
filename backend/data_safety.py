@@ -3,28 +3,25 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import sqlite3
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from secure_sqlite import connect as db_connect, database_errors
+
 
 class DataIntegrityError(RuntimeError):
-    """Raised when an existing SQLite database fails an integrity check."""
+    """Raised when an existing SQLite/SQLCipher database fails an integrity check."""
 
 
 class DataSafetyManager:
-    PROTECTED_REASON_PREFIXES = ("pre-upgrade-", "pre-update-")
+    PROTECTED_REASON_PREFIXES = ("pre-upgrade-", "pre-update-", "pre-encryption-")
 
-    """Conservative SQLite backup/integrity helper.
+    """Conservative backup/integrity helper for plaintext SQLite and SQLCipher.
 
-    Design goals for Vyzium:
-    - never modify an existing database before it has passed a read-only check;
-    - use SQLite's online backup API instead of copying a live WAL database;
-    - validate every generated backup with PRAGMA integrity_check;
-    - keep automatic backups bounded while never pruning manual/recovery copies;
-    - keep backup metadata beside the backup, never inside the operational DB.
+    A key is optional. Without a key the behavior is the same as Vyzium 3.0.4.
+    With a key every connection, including backup destinations and integrity
+    checks, uses SQLCipher so no decrypted backup is written to disk.
     """
 
     def __init__(
@@ -34,11 +31,13 @@ class DataSafetyManager:
         app_version: str,
         *,
         auto_retention: int = 10,
+        key_hex: str | None = None,
     ):
         self.db_path = Path(db_path).expanduser().resolve()
         self.module_name = str(module_name)
         self.app_version = str(app_version)
         self.auto_retention = max(3, int(auto_retention))
+        self.key_hex = str(key_hex or "").strip().lower() or None
         self.backup_dir = self.db_path.parent / "backups" / self.module_name
         self.backup_dir.mkdir(parents=True, exist_ok=True)
 
@@ -49,37 +48,26 @@ class DataSafetyManager:
         except OSError:
             return False
 
-    @staticmethod
-    def _connect_readonly(path: Path) -> sqlite3.Connection:
-        # Path.as_uri() is portable for Windows drive letters and spaces.
-        uri = path.resolve().as_uri() + "?mode=ro"
-        return sqlite3.connect(uri, uri=True, timeout=10)
+    def _connect_readonly(self, path: Path):
+        return db_connect(path, key_hex=self.key_hex, readonly=True, timeout=10)
 
-    @classmethod
-    def check_path(cls, path: str | Path, *, full: bool = False) -> dict[str, Any]:
+    def check_path(self, path: str | Path, *, full: bool = False) -> dict[str, Any]:
         target = Path(path).expanduser().resolve()
         if not target.is_file() or target.stat().st_size <= 0:
             return {"ok": False, "result": "arquivo ausente", "path": str(target)}
         pragma = "integrity_check" if full else "quick_check"
         try:
-            con = cls._connect_readonly(target)
+            con = self._connect_readonly(target)
             try:
                 rows = [str(row[0]) for row in con.execute(f"PRAGMA {pragma}").fetchall()]
             finally:
                 con.close()
-        except (sqlite3.DatabaseError, OSError) as exc:
+        except database_errors() + (OSError, RuntimeError) as exc:
             return {"ok": False, "result": str(exc), "path": str(target)}
         ok = rows == ["ok"]
         return {"ok": ok, "result": "ok" if ok else "; ".join(rows[:12]), "path": str(target)}
 
-
     def existing_schema_version(self) -> int:
-        """Read the existing schema version without opening the DB for writes.
-
-        Databases created by versions newer than the running application must not
-        be modified by an older binary. Missing migration metadata means legacy
-        schema version 0.
-        """
         if not self.has_existing_database:
             return 0
         con = self._connect_readonly(self.db_path)
@@ -91,7 +79,7 @@ class DataSafetyManager:
                 return 0
             row = con.execute("SELECT MAX(version) FROM schema_migrations").fetchone()
             return int((row or [0])[0] or 0)
-        except (sqlite3.DatabaseError, ValueError, TypeError) as exc:
+        except database_errors() + (ValueError, TypeError) as exc:
             raise DataIntegrityError(
                 f"Não foi possível identificar a versão estrutural do banco existente: {exc}"
             ) from exc
@@ -99,7 +87,6 @@ class DataSafetyManager:
             con.close()
 
     def assert_existing_integrity(self) -> None:
-        """Read-only guard used before Store performs any schema/data maintenance."""
         if not self.has_existing_database:
             return
         result = self.check_path(self.db_path, full=False)
@@ -131,6 +118,7 @@ class DataSafetyManager:
             "reason": reason,
             "automatic": bool(automatic),
             "protected": protected,
+            "encrypted": bool(self.key_hex),
             "integrity": "ok",
             "sha256": self._sha256(backup_path),
             "size_bytes": backup_path.stat().st_size,
@@ -154,7 +142,7 @@ class DataSafetyManager:
                 reason = str(data.get("reason", "")).lower()
                 if data.get("protected") or reason.startswith(self.PROTECTED_REASON_PREFIXES):
                     continue
-                db_path = Path(str(manifest_path)[:-5])  # remove trailing .json
+                db_path = Path(str(manifest_path)[:-5])
                 if db_path.exists():
                     candidates.append((db_path.stat().st_mtime, db_path))
             except (OSError, ValueError, json.JSONDecodeError):
@@ -171,15 +159,9 @@ class DataSafetyManager:
         self,
         *,
         reason: str,
-        source_connection: sqlite3.Connection | None = None,
+        source_connection: Any | None = None,
         automatic: bool = True,
     ) -> dict[str, Any]:
-        """Create and validate a consistent SQLite snapshot.
-
-        If a live connection is provided, SQLite's backup API reads a transactionally
-        consistent snapshot including committed WAL content. This is intentionally
-        not a filesystem copy of the live DB.
-        """
         if not self.has_existing_database and source_connection is None:
             return {"created": False, "reason": "Banco ainda não existe."}
 
@@ -196,7 +178,7 @@ class DataSafetyManager:
             if source is None:
                 owned_source = self._connect_readonly(self.db_path)
                 source = owned_source
-            destination = sqlite3.connect(temp_path, timeout=15)
+            destination = db_connect(temp_path, key_hex=self.key_hex, timeout=15)
             source.backup(destination, pages=256, sleep=0.01)
             destination.commit()
             destination.close()
@@ -218,6 +200,7 @@ class DataSafetyManager:
                 "reason": safe_reason,
                 "sha256": manifest["sha256"],
                 "size_bytes": manifest["size_bytes"],
+                "encrypted": bool(self.key_hex),
             }
         except Exception:
             temp_path.unlink(missing_ok=True)
@@ -236,23 +219,18 @@ class DataSafetyManager:
                 db_path = Path(str(manifest_path)[:-5])
                 if not db_path.is_file():
                     continue
-                data = {
-                    **data,
-                    "filename": db_path.name,
-                    "path": str(db_path),
-                    "exists": True,
-                }
-                records.append(data)
+                records.append({**data, "filename": db_path.name, "path": str(db_path), "exists": True})
             except (OSError, ValueError, json.JSONDecodeError):
                 continue
         records.sort(key=lambda item: item.get("created_at", ""), reverse=True)
         return records
 
     def _record_is_valid(self, item: dict[str, Any], *, full: bool = True) -> bool:
-        """Revalidate a recorded backup before trusting it for recovery/upgrade guards."""
         try:
             backup_path = Path(str(item.get("path", ""))).expanduser().resolve()
             if not backup_path.is_file() or backup_path.stat().st_size <= 0:
+                return False
+            if bool(item.get("encrypted")) != bool(self.key_hex):
                 return False
             expected_size = item.get("size_bytes")
             if expected_size is not None and int(expected_size) != backup_path.stat().st_size:
@@ -260,8 +238,7 @@ class DataSafetyManager:
             expected_hash = str(item.get("sha256", "")).strip().lower()
             if not expected_hash or self._sha256(backup_path).lower() != expected_hash:
                 return False
-            checked = self.check_path(backup_path, full=full)
-            return bool(checked.get("ok"))
+            return bool(self.check_path(backup_path, full=full).get("ok"))
         except (OSError, ValueError, TypeError):
             return False
 
@@ -272,14 +249,11 @@ class DataSafetyManager:
                 continue
             if item.get("integrity") != "ok":
                 continue
-            # Never trust only a stale manifest: verify size, SHA-256 and SQLite
-            # integrity again before deciding that the safety snapshot exists.
             if self._record_is_valid(item, full=True):
                 return True
         return False
 
-    def ensure_version_backup(self, source_connection: sqlite3.Connection | None = None) -> dict[str, Any]:
-        """One-time snapshot of an existing DB before this app version touches it."""
+    def ensure_version_backup(self, source_connection: Any | None = None) -> dict[str, Any]:
         if not self.has_existing_database:
             return {"created": False, "reason": "Banco novo."}
         if self.has_version_backup():
@@ -304,6 +278,7 @@ class DataSafetyManager:
             "database": self.module_name,
             "database_path": str(self.db_path),
             "backup_dir": str(self.backup_dir),
+            "encrypted": bool(self.key_hex),
             "integrity": integrity,
             "backup_count": len(records),
             "last_backup": last_backup,

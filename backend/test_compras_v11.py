@@ -74,6 +74,15 @@ class V11(unittest.TestCase):
             q['negotiated']=invalid
             with self.assertRaises(ValueError):evaluate(m)
 
+    def test_blank_initial_means_supplier_did_not_quote_item(self):
+        m=self.make_map()['map'];q=m['quotes'][sample()['id']]['s1']
+        q['price']='';q['negotiated']='15'
+        saved=self.store.save_map(m)
+        stored=saved['map']['quotes'][sample()['id']]['s1']
+        self.assertEqual(stored,{'price':'','negotiated':''})
+        self.assertEqual(saved['result']['unquoted'],1)
+        self.assertEqual(saved['result']['net'],'0')
+
     def test_real_xls_export_roundtrips_numbers_and_percent(self):
         import xlrd
         m=self.make_map()['map'];payload=self.store.export_xls(m['id']);raw=base64.b64decode(payload['content'])

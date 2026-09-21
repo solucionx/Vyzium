@@ -7,7 +7,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from openpyxl import Workbook
 
-from engine import AutoScheduler, Store, WorkbookImporter, FollowUpService, classify, normalize, person_matches, phone_value
+from engine import AutoScheduler, Store, WorkbookImporter, FollowUpService, classify, normalize, number_value, person_matches, phone_value
 
 
 class ClassificationTests(unittest.TestCase):
@@ -118,9 +118,29 @@ class ImportTests(unittest.TestCase):
 
     def test_normalization(self):
         self.assertEqual(normalize("Razão Social - LTDA"), "RAZAO SOCIAL LTDA")
-        self.assertTrue(person_matches("COMPRADOR", "COMPRADOR TESTE"))
-        self.assertTrue(person_matches("COMPRADOR TESTE", "COMPRADOR"))
+        self.assertTrue(person_matches("Comprador Teste", "COMPRADOR TESTE"))
+        self.assertFalse(person_matches("COMPRADOR", "COMPRADOR TESTE"))
+        self.assertFalse(person_matches("COMPRADOR TESTE", "COMPRADOR"))
         self.assertFalse(person_matches("MARIANA PEIXOTO", "COMPRADOR TESTE"))
+
+    def test_brazilian_numeric_text_is_parsed_safely(self):
+        self.assertEqual(number_value("1,5"), 1.5)
+        self.assertEqual(number_value("1.234,56"), 1234.56)
+        self.assertEqual(number_value("1,234.56"), 1234.56)
+        self.assertIsNone(number_value("não é número"))
+
+    def test_negative_and_partial_delivery_text_never_becomes_completed_by_substring(self):
+        old = (date.today() - timedelta(days=2)).isoformat()
+        for label in ("NÃO ENTREGUE", "ENTREGUE PARCIALMENTE", "PENDENTE"):
+            result = classify(old, date.today().isoformat(), label, "")
+            self.assertTrue(result.eligible, label)
+            self.assertNotEqual(result.urgency, "completed", label)
+
+    def test_attendance_text_respects_negative_and_partial_delivery(self):
+        base = {"order_status_code": None, "received_qty": 0, "remaining_qty": 1, "received_date": None}
+        self.assertEqual(FollowUpService._item_attendance({**base, "order_status": "NÃO ENTREGUE"}), "pending")
+        self.assertEqual(FollowUpService._item_attendance({**base, "order_status": "ENTREGUE PARCIALMENTE"}), "partial")
+        self.assertEqual(FollowUpService._item_attendance({**base, "order_status": "ENTREGUE"}), "attended")
 
     def test_brazilian_legacy_mobile_gets_ninth_digit(self):
         self.assertEqual(phone_value("+558599216923"), "+5585999216923")
@@ -148,6 +168,18 @@ class ImportTests(unittest.TestCase):
         workbook.active.append([1, 2])
         workbook.save(invalid)
         with self.assertRaisesRegex(ValueError, "BASE SCI.xlsx"):
+            WorkbookImporter(self.store).import_file(str(invalid))
+        self.assertEqual(self.store.current_order_count(), 2)
+
+    def test_duplicate_critical_header_is_rejected_without_replacing_snapshot(self):
+        WorkbookImporter(self.store).import_file(str(self.make_workbook()))
+        invalid = self.root / "cabecalho-duplicado.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["OC", "IDORDEMDECOMPRA", "EMPRESA", "DESCRICAOARTIGO", "DATAPREVISTAENTREGAOC", "RAZAOSOCIALFORNECEDOR"])
+        sheet.append([123, 123, "Hotel A", "Filtro", date.today(), "Fornecedor Ágil"])
+        workbook.save(invalid)
+        with self.assertRaisesRegex(ValueError, "Cabeçalho ambíguo"):
             WorkbookImporter(self.store).import_file(str(invalid))
         self.assertEqual(self.store.current_order_count(), 2)
 
@@ -249,6 +281,35 @@ class ImportTests(unittest.TestCase):
         combined = service.order_summaries(attendance_status=["pending", "partial"])
         self.assertEqual({row["attendance_status"] for row in combined}, {"pending", "partial"})
         self.assertEqual(len(combined), 2)
+
+    def test_operational_filters_accept_multiple_values(self):
+        path = self.root / "multi-operational.xlsx"
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.append(["OC", "EMPRESA", "DESCRICAOARTIGO", "DATAPREVISTAENTREGAOC", "RAZAOSOCIALFORNECEDOR", "COMPRADOR", "STATUSITEMDAORDEMDECOMPRA"])
+        sheet.append([2001, "Hotel A", "Item A", date.today(), "Fornecedor A", "COMPRADOR A", "0 - Solicitado"])
+        sheet.append([2002, "Hotel B", "Item B", date.today(), "Fornecedor B", "COMPRADOR B", "1 - Recebido Parcialmente"])
+        sheet.append([2003, "Hotel C", "Item C", date.today(), "Fornecedor C", "COMPRADOR C", "2 - Recebido"])
+        workbook.save(path)
+        WorkbookImporter(self.store).import_file(str(path))
+        service = FollowUpService(self.store)
+
+        buyers = service.order_summaries(buyer=["COMPRADOR A", "COMPRADOR B"])
+        self.assertEqual({row["buyer"] for row in buyers}, {"COMPRADOR A", "COMPRADOR B"})
+
+        companies = service.order_summaries(company=["Hotel A", "Hotel C"])
+        self.assertEqual({row["company"] for row in companies}, {"Hotel A", "Hotel C"})
+
+        attendance = service.order_summaries(attendance_status=["pending", "partial"])
+        self.assertEqual({row["attendance_status"] for row in attendance}, {"pending", "partial"})
+
+        first = buyers[0]
+        self.store.save_order_control({"oc": first["oc"], "supplier_key": first["supplier_key"], "control_status": "sent", "note": ""})
+        controls = service.order_summaries(control_status=["sent", "blank"])
+        self.assertEqual(len(controls), 3)
+
+        urgencies = service.order_summaries(urgency=["open", "completed"])
+        self.assertEqual(len(urgencies), 3)
 
     def test_attendance_summary_states(self):
         service = FollowUpService(self.store)
