@@ -3,6 +3,25 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // =====================================================================
+    // Regras do Vyzium 3.1.x — escritas para as operações que o app realmente
+    // faz (electron/firebase-client.js):
+    //
+    //   users/{uid}                          get + create
+    //   workspaces/{uid}                     get + create
+    //   workspaces/{uid}/members/{uid}       get + create (somente o proprio dono)
+    //   workspaces/{uid}/keyRecovery/current get + create + update
+    //
+    // INVARIANTE: o id do workspace e SEMPRE o uid do dono. O create exige
+    // workspaceId == request.auth.uid, ownerUid nao pode mudar e delete esta
+    // bloqueado. Por isso "ser dono" = workspaceId == request.auth.uid, sem
+    // nenhuma leitura cobrada.
+    //
+    // Convite/gestao de outros membros NAO existe na 3.1 (docs/SECURITY_3.1.md
+    // trata multiusuario como evolucao futura), entao nenhuma regra o permite.
+    // Nenhuma colecao e listavel: o app so usa get de documento individual.
+    // =====================================================================
+
     function signedIn() {
       return request.auth != null;
     }
@@ -12,60 +31,120 @@ service cloud.firestore {
         && request.auth.token.email_verified == true;
     }
 
+    function isSelf(userId) {
+      return verifiedUser()
+        && userId == request.auth.uid;
+    }
+
+    // Dono = uid autenticado igual ao id do workspace (ver invariante acima).
+    function isWorkspaceOwner(workspaceId) {
+      return verifiedUser()
+        && workspaceId == request.auth.uid;
+    }
+
     function workspaceExists(workspaceId) {
       return exists(
         /databases/$(database)/documents/workspaces/$(workspaceId)
       );
     }
 
-    function isWorkspaceOwner(workspaceId) {
-      return verifiedUser()
-        && workspaceExists(workspaceId)
-        && get(
-          /databases/$(database)/documents/workspaces/$(workspaceId)
-        ).data.ownerUid == request.auth.uid;
+    // O app limita o nome a 120 caracteres (auth.html maxlength e slice(0, 120)).
+    // Pode ser vazio: o cadastro grava '' quando o Auth nao devolve displayName.
+    function validDisplayName(value) {
+      return value is string
+        && value.size() <= 120;
     }
 
-    function isWorkspaceMember(workspaceId) {
-      return verifiedUser()
-        && exists(
-          /databases/$(database)/documents/workspaces/$(workspaceId)/members/$(request.auth.uid)
-        );
+    function validWorkspaceName(value) {
+      return value is string
+        && value.size() >= 1
+        && value.size() <= 120;
     }
 
+    // Base64 padrao com tamanho exato (AES-256-GCM: salt 16 B, iv 12 B,
+    // chave raiz 32 B, tag 16 B => 24, 16, 44 e 24 caracteres).
+    function base64OfSize(value, chars) {
+      return value is string
+        && value.size() == chars
+        && value.matches('[A-Za-z0-9+/]+={0,2}');
+    }
+
+    // Envelope gerado por wrapRootKeyForRecovery() em electron/security-core.js.
+    function validRecoveryEnvelope() {
+      return request.resource.data.keys().hasOnly([
+          'version',
+          'algorithm',
+          'kdf',
+          'salt',
+          'iv',
+          'ciphertext',
+          'tag',
+          'updatedAt'
+        ])
+        && request.resource.data.keys().hasAll([
+          'version',
+          'algorithm',
+          'kdf',
+          'salt',
+          'iv',
+          'ciphertext',
+          'tag',
+          'updatedAt'
+        ])
+        && request.resource.data.version is int
+        && request.resource.data.version == 1
+        && request.resource.data.algorithm == 'AES-256-GCM'
+        && request.resource.data.kdf == 'scrypt-N16384-r8-p1'
+        && base64OfSize(request.resource.data.salt, 24)
+        && base64OfSize(request.resource.data.iv, 16)
+        && base64OfSize(request.resource.data.ciphertext, 44)
+        && base64OfSize(request.resource.data.tag, 24)
+        && request.resource.data.updatedAt == request.time;
+    }
+
+    // ---------------------------------------------------------------------
+    // users/{userId}: perfil privado. Ninguem le o perfil de outro usuario.
+    // ---------------------------------------------------------------------
     match /users/{userId} {
+
+      allow get: if isSelf(userId);
+
       allow create:
-        if verifiedUser()
-        && request.auth.uid == userId
+        if isSelf(userId)
         && request.resource.data.keys().hasOnly([
           'displayName',
           'email',
           'createdAt'
         ])
-        && request.resource.data.displayName is string
+        && request.resource.data.keys().hasAll([
+          'displayName',
+          'email',
+          'createdAt'
+        ])
+        && validDisplayName(request.resource.data.displayName)
         && request.resource.data.email == request.auth.token.email
         && request.resource.data.createdAt == request.time;
 
-      allow read:
-        if verifiedUser()
-        && request.auth.uid == userId;
-
       allow update:
-        if verifiedUser()
-        && request.auth.uid == userId
+        if isSelf(userId)
         && request.resource.data.diff(resource.data)
              .affectedKeys()
              .hasOnly([
                'displayName',
                'email'
              ])
-        && request.resource.data.displayName is string
+        && validDisplayName(request.resource.data.displayName)
         && request.resource.data.email == request.auth.token.email;
 
       allow delete: if false;
     }
 
+    // ---------------------------------------------------------------------
+    // workspaces/{workspaceId}
+    // ---------------------------------------------------------------------
     match /workspaces/{workspaceId} {
+
+      // Somente o workspace cujo id e o proprio uid; ownerUid tem que ser o uid.
       allow create:
         if verifiedUser()
         && workspaceId == request.auth.uid
@@ -76,14 +155,23 @@ service cloud.firestore {
           'createdAt',
           'schemaVersion'
         ])
-        && request.resource.data.name is string
+        && request.resource.data.keys().hasAll([
+          'name',
+          'ownerUid',
+          'createdAt',
+          'schemaVersion'
+        ])
+        && validWorkspaceName(request.resource.data.name)
+        && request.resource.data.schemaVersion is int
         && request.resource.data.schemaVersion == 1
         && request.resource.data.createdAt == request.time;
 
-      allow read:
-        if isWorkspaceOwner(workspaceId)
-        || isWorkspaceMember(workspaceId);
+      // Leitura individual pelo dono. Ler o proprio workspace ainda nao criado
+      // tambem e permitido (o app faz get antes do create); o Firestore
+      // responde "nao existe" sem expor nada.
+      allow get: if isWorkspaceOwner(workspaceId);
 
+      // Somente o dono, somente "name"; ownerUid e schemaVersion imutaveis.
       allow update:
         if isWorkspaceOwner(workspaceId)
         && request.resource.data.ownerUid == resource.data.ownerUid
@@ -92,119 +180,65 @@ service cloud.firestore {
              .hasOnly([
                'name'
              ])
-        && request.resource.data.name is string
+        && validWorkspaceName(request.resource.data.name)
         && request.resource.data.schemaVersion == resource.data.schemaVersion;
 
       allow delete: if false;
 
+      // -------------------------------------------------------------------
+      // members/{userId}: guarda e-mail e papel. Na 3.1 existe um unico
+      // documento por workspace: o do proprio dono, com role 'owner'.
+      // Sem list, sem update, sem delete e sem criar membros de terceiros.
+      // -------------------------------------------------------------------
       match /members/{userId} {
-        allow read:
+
+        allow get:
           if isWorkspaceOwner(workspaceId)
-          || (
-            verifiedUser()
-            && request.auth.uid == userId
-          );
+          && userId == workspaceId;
 
         allow create:
           if isWorkspaceOwner(workspaceId)
+          && userId == workspaceId
+          && workspaceExists(workspaceId)
           && request.resource.data.keys().hasOnly([
             'uid',
             'email',
             'role',
             'createdAt'
           ])
+          && request.resource.data.keys().hasAll([
+            'uid',
+            'email',
+            'role',
+            'createdAt'
+          ])
           && request.resource.data.uid == userId
-          && request.resource.data.createdAt == request.time
-          && exists(
-            /databases/$(database)/documents/users/$(userId)
-          )
-          && request.resource.data.email ==
-             get(
-               /databases/$(database)/documents/users/$(userId)
-             ).data.email
-          && request.resource.data.role in [
-            'owner',
-            'admin',
-            'buyer',
-            'followup'
-          ]
-          && (
-            request.resource.data.role != 'owner'
-            || userId ==
-               get(
-                 /databases/$(database)/documents/workspaces/$(workspaceId)
-               ).data.ownerUid
-          );
-
-        allow update:
-          if isWorkspaceOwner(workspaceId)
-          && request.resource.data.uid == resource.data.uid
-          && request.resource.data.uid == userId
-          && request.resource.data.diff(resource.data)
-               .affectedKeys()
-               .hasOnly([
-                 'email',
-                 'role'
-               ])
-          && request.resource.data.email ==
-             get(
-               /databases/$(database)/documents/users/$(userId)
-             ).data.email
-          && request.resource.data.role in [
-            'owner',
-            'admin',
-            'buyer',
-            'followup'
-          ]
-          && (
-            request.resource.data.role != 'owner'
-            || userId ==
-               get(
-                 /databases/$(database)/documents/workspaces/$(workspaceId)
-               ).data.ownerUid
-          );
-
-        allow delete:
-          if isWorkspaceOwner(workspaceId)
-          && userId !=
-             get(
-               /databases/$(database)/documents/workspaces/$(workspaceId)
-             ).data.ownerUid;
+          && request.resource.data.email == request.auth.token.email
+          && request.resource.data.role == 'owner'
+          && request.resource.data.createdAt == request.time;
       }
 
-      // The cloud only stores an AES-GCM wrapped copy of the local root key.
-      // The plaintext key and the recovery code never leave the desktop app.
+      // -------------------------------------------------------------------
+      // keyRecovery/current: so o envelope da chave protegido por AES-GCM.
+      // A chave em texto puro e o codigo de recuperacao nunca saem do app.
+      // -------------------------------------------------------------------
       match /keyRecovery/{keyId} {
-        allow read:
+
+        allow get:
           if keyId == 'current'
           && isWorkspaceOwner(workspaceId);
 
         allow create, update:
           if keyId == 'current'
           && isWorkspaceOwner(workspaceId)
-          && request.resource.data.keys().hasOnly([
-            'version',
-            'algorithm',
-            'kdf',
-            'salt',
-            'iv',
-            'ciphertext',
-            'tag',
-            'updatedAt'
-          ])
-          && request.resource.data.version == 1
-          && request.resource.data.algorithm == 'AES-256-GCM'
-          && request.resource.data.kdf is string
-          && request.resource.data.salt is string
-          && request.resource.data.iv is string
-          && request.resource.data.ciphertext is string
-          && request.resource.data.tag is string
-          && request.resource.data.updatedAt == request.time;
+          && workspaceExists(workspaceId)
+          && validRecoveryEnvelope();
 
         allow delete: if false;
       }
     }
 
+    // Nega tudo que nao foi liberado acima.
     match /{document=**} {
       allow read, write: if false;
     }
