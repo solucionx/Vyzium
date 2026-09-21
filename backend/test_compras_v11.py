@@ -87,10 +87,19 @@ class V11(unittest.TestCase):
         import xlrd
         m=self.make_map()['map'];payload=self.store.export_xls(m['id']);raw=base64.b64decode(payload['content'])
         self.assertEqual(raw[:8],bytes.fromhex('D0CF11E0A1B11AE1'))
-        book=xlrd.open_workbook(file_contents=raw);sheet=book.sheet_by_index(0)
+        book=xlrd.open_workbook(file_contents=raw);sheet=book.sheet_by_name('Detalhado')
         self.assertEqual(sheet.cell_value(1,8),19);self.assertEqual(sheet.cell_value(1,9),15)
         self.assertAlmostEqual(sheet.cell_value(1,10),.2105);self.assertEqual(sheet.cell_value(1,13),150)
-        self.assertEqual(sheet.cell_value(1,14),'Fornecedor A');self.assertEqual(book.sheet_by_index(1).cell_value(2,2),150)
+        self.assertEqual(sheet.cell_value(1,14),'Fornecedor A')
+        printable=book.sheet_by_name('Mapa para impressão')
+        self.assertEqual(printable.cell_value(5,0),'Hotel A');self.assertEqual(printable.cell_value(5,5),19)
+        self.assertEqual(printable.cell_value(1,0),'Valor inicial')
+        self.assertEqual(printable.cell_value(1,2),'Valor negociado')
+        self.assertEqual(printable.cell_value(1,4),'Economia')
+        self.assertEqual(printable.cell_value(1,6),'Itens sem cotação')
+        self.assertEqual(printable.cell_value(4,5),'Fornecedor A\nInicial')
+        self.assertEqual(printable.cell_value(4,6),'Fornecedor A\nNegociado')
+        self.assertEqual(book.sheet_by_name('Resumo por fornecedor').cell_value(3,2),150)
 
     def test_new_maps_keep_report_notes_and_type(self):
         fixture(self.path,[report_row()]);self.store.import_file(self.path);i=self.store.catalog()['items'][0]

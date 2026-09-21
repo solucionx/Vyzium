@@ -35,6 +35,19 @@ let comprasStartPromise = null;
 
 const engineToken = crypto.randomBytes(24).toString('hex');
 
+// Keep the Windows shell/taskbar identity aligned with the appId used by
+// electron-builder. Without an explicit AppUserModelID, development runs can
+// be grouped under electron.exe and show Electron's generic taskbar icon.
+if (process.platform === 'win32') {
+  app.setAppUserModelId('com.vyzium.gestaooperacional');
+}
+
+function appIconPath() {
+  const png = path.join(__dirname, '..', 'build', 'icon.png');
+  const ico = path.join(__dirname, '..', 'build', 'icon.ico');
+  return process.platform === 'win32' && fs.existsSync(ico) ? ico : png;
+}
+
 if (!app.requestSingleInstanceLock()) app.exit(0);
 app.on('second-instance', () => {
   if (window && !window.isDestroyed()) {
@@ -529,7 +542,7 @@ async function createWindow(initialPage = 'auth.html') {
     minHeight: 700,
     backgroundColor: '#eef3f7',
     title: 'Vyzium',
-    icon: path.join(__dirname, '..', 'build', 'icon.png'),
+    icon: appIconPath(),
     webPreferences: {
       zoomFactor: 0.85,
       preload: path.join(__dirname, 'preload.js'),

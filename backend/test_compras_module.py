@@ -8,7 +8,7 @@ import compras_engine as engine
 
 
 def sample():
-    return {'id': '3|1|100', 'company': 'Hotel A', 'sci': '1', 'article': 'A01',
+    return {'id': '3|1|100', 'company': 'CARMEL CUMBUCO', 'sci': '1', 'article': 'A01',
             'description': 'Lâmpada', 'quantity': '10', 'unit': 'UN', 'buyer': 'Comprador A',
             'group': 'Elétrica', 'needed': '2026-09-20', 'issued': '2026-09-01', 'urgent': False,
             'status': 'pending', 'approval': 'approved'}
@@ -89,16 +89,85 @@ class PurchasesTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.s.save_map(old)
 
+    def test_complete_map_moves_to_completed_and_releases_items(self):
+        detail = self.s.complete_map(self.m['id'])
+        self.assertTrue(detail['map']['archived'])
+        self.assertTrue(detail['map'].get('completed_at'))
+        summary = next(m for m in self.s.map_summaries() if m['id'] == self.m['id'])
+        self.assertTrue(summary['archived'])
+        self.assertEqual(self.s.catalog()['items'][0]['maps'], [])
+        replacement = self.s.create_map({'name': 'Nova cotação', 'ids': [sample()['id']]})
+        self.assertFalse(replacement['archived'])
+
+    def test_complete_map_is_idempotent(self):
+        first = self.s.complete_map(self.m['id'])['map']
+        second = self.s.complete_map(self.m['id'])['map']
+        self.assertEqual(second['revision'], first['revision'])
+        self.assertEqual(second['completed_at'], first['completed_at'])
+
+    def test_delete_map_removes_map_and_releases_items(self):
+        self.s.delete_map(self.m['id'])
+        with self.assertRaisesRegex(ValueError, 'Mapa não encontrado'):
+            self.s.get_map(self.m['id'])
+        self.assertEqual(self.s.catalog()['items'][0]['maps'], [])
+        self.assertFalse(self.s.create_map({'name': 'Depois da exclusão', 'ids': [sample()['id']]})['archived'])
+
+    def test_delete_map_creates_recovery_backup_before_removal(self):
+        before = set(self.s.safety.backup_dir.glob('*.db'))
+        self.s.delete_map(self.m['id'])
+        after = set(self.s.safety.backup_dir.glob('*.db'))
+        created = after - before
+        self.assertEqual(len(created), 1)
+        self.assertIn('pre-delete-map', next(iter(created)).name)
+
+    def test_map_summaries_include_sci_item_and_article_for_search(self):
+        summary = next(m for m in self.s.map_summaries() if m['id'] == self.m['id'])
+        self.assertEqual(summary['scis'], ['1'])
+        self.assertIn('Lâmpada', summary['items'])
+        self.assertIn('A01', summary['articles'])
+
     def send_body(self):
         p = self.s.preview(self.m['id'], 's1')
         return {'map_id': self.m['id'], 'supplier_id': 's1', 'fingerprint': p['fingerprint'], 'revision': p['revision']}
 
     def test_message_has_scope_without_competitor_prices(self):
         p = self.s.preview(self.m['id'], 's1')
-        self.assertIn('Hotel: Hotel A | SCI: 1', p['message'])
+        self.assertIn('Hotel: CARMEL CUMBUCO | CNPJ: 19.253.187/0001-63', p['message'])
+        self.assertNotIn('SCI:', p['message'])
         self.assertIn('Quantidade: 10 UN', p['message'])
         self.assertNotIn('Fornecedor B', p['message'])
         self.assertNotIn('90.00', p['message'])
+
+    def test_hotel_cnpj_associations_cover_current_base(self):
+        expected = {
+            'MAGNA PRAIA': '02.333.096/0001-35',
+            'MAGNA PRAIA HOTEL': '02.333.096/0001-35',
+            'CARMEL TAÍBA': '27.708.448/0001-10',
+            'CARMEL TAIBA EXCLUSIVE RESORT HOTEIS LTDA': '27.708.448/0001-10',
+            'CHARME HOSPEDAGEM': '27.794.852/0001-54',
+            'CARMEL RESORT HOSPEDAGEM LTDA - EPP': '27.794.852/0001-54',
+            'CARMEL CUMBUCO': '19.253.187/0001-63',
+            'CARMEL WIND RESORT LTDA (CUMBUCO)': '19.253.187/0001-63',
+            'CM SERVICOS': '35.428.047/0001-35',
+            'CM CENTRAL DE SERVICOS ADMINISTRATIVOS LTDA': '35.428.047/0001-35',
+            'CARMEL ICARAIZINHO': '45.862.118/0001-67',
+            'CARMEL ICARAIZINHO RESORT LTDA': '45.862.118/0001-67',
+        }
+        for hotel, cnpj in expected.items():
+            with self.subTest(hotel=hotel):
+                self.assertEqual(engine.hotel_cnpj(hotel), cnpj)
+
+    def test_unknown_hotel_never_leaks_internal_sci(self):
+        data = self.s.get_map(self.m['id'])
+        data['items'][0]['company'] = 'HOTEL NOVO'
+        # Write the map snapshot directly so the preview sees an old/unknown hotel
+        # without changing the current item source used by stale-data validation.
+        self.s.put('maps', data['id'], data)
+        current = next(i for i in self.s.all('items') if i['id'] == sample()['id'])
+        current['company'] = 'HOTEL NOVO'
+        self.s.put('items', current['id'], current)
+        with self.assertRaisesRegex(ValueError, 'CNPJ não cadastrado'):
+            self.s.preview(self.m['id'], 's1')
 
     def test_sending_is_explicit_and_deduplicated(self):
         with patch('compras_engine.whatsapp_request', side_effect=[{'ready': True}, {'status': 'sent'}]) as bridge:

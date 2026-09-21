@@ -28,11 +28,33 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.1.25')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.2.0')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
     return normalize_header(value)
+
+
+# CNPJ used only in supplier-facing quotation messages. The SCI remains an
+# internal Vyzium identifier and must never be exposed in those messages.
+HOTEL_CNPJ = {
+    'MAGNA PRAIA': '02.333.096/0001-35',
+    'MAGNA PRAIA HOTEL': '02.333.096/0001-35',
+    'CARMEL TAIBA': '27.708.448/0001-10',
+    'CARMEL TAIBA EXCLUSIVE RESORT HOTEIS LTDA': '27.708.448/0001-10',
+    'CHARME HOSPEDAGEM': '27.794.852/0001-54',
+    'CARMEL RESORT HOSPEDAGEM LTDA EPP': '27.794.852/0001-54',
+    'CARMEL CUMBUCO': '19.253.187/0001-63',
+    'CARMEL WIND RESORT LTDA CUMBUCO': '19.253.187/0001-63',
+    'CM SERVICOS': '35.428.047/0001-35',
+    'CM CENTRAL DE SERVICOS ADMINISTRATIVOS LTDA': '35.428.047/0001-35',
+    'CARMEL ICARAIZINHO': '45.862.118/0001-67',
+    'CARMEL ICARAIZINHO RESORT LTDA': '45.862.118/0001-67',
+}
+
+
+def hotel_cnpj(company):
+    return HOTEL_CNPJ.get(norm(company), '')
 
 
 def text(value):
@@ -398,18 +420,62 @@ class Store:
             if any(i not in catalog for i in ids):
                 raise ValueError('Um item deixou de estar disponível. Atualize a lista.')
             if any(catalog[i]['maps'] for i in ids):
-                raise ValueError('Há item em outro mapa ativo. Arquive o mapa anterior antes de reutilizá-lo.')
+                raise ValueError('Há item em outro mapa ativo. Conclua o mapa anterior antes de reutilizá-lo.')
             data = {'id': uuid.uuid4().hex, 'name': name, 'created': now(), 'revision': 1,
                     'items': [{**catalog[i], 'note': catalog[i].get('note', ''), 'purchase_type': catalog[i].get('purchase_type', '')} for i in ids],
                     'suppliers': [], 'quotes': {}, 'choices': {}, 'archived': False}
             self.put('maps', data['id'], data)
         return data
 
+    def map_summaries(self):
+        """Small searchable summaries for the map library without changing stored map data."""
+        summaries = []
+        for data in self.all('maps'):
+            items = data.get('items', [])
+            summaries.append({
+                'id': data.get('id', ''),
+                'name': data.get('name', ''),
+                'created': data.get('created', ''),
+                'updated': data.get('updated', ''),
+                'completed_at': data.get('completed_at', ''),
+                'count': len(items),
+                # Keep the historical `archived` flag for backwards compatibility; in the UI it means concluded.
+                'archived': bool(data.get('archived')),
+                'scis': sorted({text(item.get('sci')) for item in items if text(item.get('sci'))}),
+                'items': [text(item.get('description')) for item in items if text(item.get('description'))],
+                'articles': [text(item.get('article')) for item in items if text(item.get('article'))],
+            })
+        summaries.sort(key=lambda m: (m.get('completed_at') or m.get('updated') or m.get('created') or '', m.get('created') or ''), reverse=True)
+        return summaries
+
+    def complete_map(self, mid):
+        with self.lock:
+            data = self.get_map(mid)
+            if not data.get('archived'):
+                stamp = now()
+                data.update(archived=True, completed_at=stamp, updated=stamp, revision=data.get('revision', 0) + 1)
+                self.put('maps', data['id'], data)
+        return self.detail(mid)
+
+    def delete_map(self, mid):
+        """Permanently remove the map/quotes. Sent-message history is intentionally retained as an audit log."""
+        with self.lock, self.db() as con:
+            row = con.execute('SELECT data FROM maps WHERE id=?', (mid,)).fetchone()
+            if not row:
+                raise ValueError('Mapa não encontrado.')
+            # Destructive action gets an automatic recovery point before deletion.
+            self.safety.backup(reason='pre-delete-map', source_connection=con, automatic=True)
+            con.execute('DELETE FROM maps WHERE id=?', (mid,))
+            check = [str(row[0]) for row in con.execute('PRAGMA quick_check').fetchall()]
+            if check != ['ok']:
+                raise DataIntegrityError('A exclusão não passou na verificação interna; alterações revertidas.')
+        return {'ok': True}
+
     def save_map(self, body):
         with self.lock:
             data = self.get_map(body.get('id'))
             if data['archived']:
-                raise ValueError('Mapa arquivado: somente consulta e exportação estão disponíveis.')
+                raise ValueError('Mapa concluído: somente consulta e exportação estão disponíveis.')
             if body.get('revision') != data['revision']:
                 raise ValueError('O mapa foi alterado em outra tela. Abra novamente antes de salvar.')
             # Only user-owned fields are editable; imported identity and quantities remain authoritative.
@@ -470,15 +536,18 @@ class Store:
         detail = self.detail(mid)
         data = detail['map']
         if data['archived']:
-            raise ValueError('Mapa arquivado. Crie um novo mapa para solicitar cotações.')
+            raise ValueError('Mapa concluído. Crie um novo mapa para solicitar cotações.')
         if detail['changes']:
-            raise ValueError('A base mudou para itens deste mapa. Arquive este mapa e crie outro com os dados atuais antes de enviar.')
+            raise ValueError('A base mudou para itens deste mapa. Conclua este mapa e crie outro com os dados atuais antes de enviar.')
         supplier = next((s for s in data['suppliers'] if s['id'] == sid), None)
         if not supplier:
             raise ValueError('Fornecedor não encontrado.')
         lines = [f"Olá, {supplier['name']}! Poderia cotar os itens abaixo?", f"Mapa: {data['name']}", '']
         for n, item in enumerate(data['items'], 1):
-            lines += [f"{n}. {item['description']}", f"Hotel: {item['company']} | SCI: {item['sci']}",
+            cnpj = hotel_cnpj(item['company'])
+            if not cnpj:
+                raise ValueError(f"CNPJ não cadastrado para o hotel {item['company']}. Atualize a associação antes de enviar a cotação.")
+            lines += [f"{n}. {item['description']}", f"Hotel: {item['company']} | CNPJ: {cnpj}",
                       f"Quantidade: {item['quantity']} {item['unit']}"]
             if item['note']:
                 lines.append('Observação: ' + item['note'])
@@ -588,7 +657,7 @@ class Handler(BaseHTTPRequestHandler):
                 if parsed.path == '/items':
                     return self.reply(200, s.catalog())
                 if parsed.path == '/maps':
-                    return self.reply(200, [{'id': m['id'], 'name': m['name'], 'created': m['created'], 'count': len(m['items']), 'archived': m['archived']} for m in s.all('maps')][::-1])
+                    return self.reply(200, s.map_summaries())
                 if parsed.path == '/map':
                     return self.reply(200, s.detail(query['id']))
                 if parsed.path == '/settings':
@@ -612,12 +681,11 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, s.create_map(body))
                 if parsed.path == '/maps/save':
                     return self.reply(200, s.save_map(body))
-                if parsed.path == '/maps/archive':
-                    with s.lock:
-                        m = s.get_map(body['id'])
-                        m.update(archived=True, revision=m['revision'] + 1)
-                        s.put('maps', m['id'], m)
-                    return self.reply(200, {'ok': True})
+                if parsed.path in ('/maps/complete', '/maps/archive'):
+                    # /maps/archive remains as a compatibility alias for older renderers.
+                    return self.reply(200, s.complete_map(body['id']))
+                if parsed.path == '/maps/delete':
+                    return self.reply(200, s.delete_map(body['id']))
                 if parsed.path == '/settings':
                     if not isinstance(body, dict):
                         raise ValueError('Configuração inválida.')
