@@ -1270,7 +1270,28 @@ class WorkbookImporter:
     @staticmethod
     def _validate_critical_headers(values: list[Any]) -> None:
         normalized = [normalize(value) for value in values]
+        # A BASE SCI oficial pode trazer, ao mesmo tempo, campos diferentes que
+        # são alternativas legítimas para o acompanhamento. Nesses casos o
+        # _field_map já aplica a prioridade definida em TARGET_FIELDS
+        # (QUANTIDADEOC antes de QUANTIDADESCI e RAZAOSOCIALFORNECEDOR antes de
+        # NOMEFORNECEDOR). Só é ambíguo se o MESMO cabeçalho reconhecido estiver
+        # realmente duplicado.
+        coexistence_fields = {"quantity", "supplier_name"}
         for field, aliases in TARGET_FIELDS.items():
+            if field in coexistence_fields:
+                for alias in aliases:
+                    alias_key = normalize(alias)
+                    positions = [
+                        index + 1 for index, key in enumerate(normalized)
+                        if key and key == alias_key
+                    ]
+                    if len(positions) > 1:
+                        raise ValueError(
+                            f"Cabeçalho ambíguo para {field}: mais de uma coluna reconhecida ({', '.join(map(str, positions))}). "
+                            "Remova/renomeie a coluna duplicada e importe novamente; a base anterior foi preservada."
+                        )
+                continue
+
             positions = []
             alias_keys = {normalize(alias) for alias in aliases}
             for index, key in enumerate(normalized):
