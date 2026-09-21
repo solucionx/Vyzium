@@ -17,3 +17,13 @@ foreach ($file in $required) {
   }
   Write-Host "EMPACOTADO OK: $($item.Name) | $([Math]::Round($item.Length / 1MB, 2)) MB"
 }
+
+$securityJson = & (Join-Path $Resources "followup-engine.exe") security-check
+if ($LASTEXITCODE -ne 0) {
+  throw "O motor empacotado não conseguiu executar o diagnóstico do SQLCipher."
+}
+$security = $securityJson | ConvertFrom-Json
+if (-not $security.available -or -not $security.cipher_version) {
+  throw "O pacote Windows foi gerado sem SQLCipher funcional."
+}
+Write-Host "SQLCIPHER EMPACOTADO OK | versão $($security.cipher_version)"

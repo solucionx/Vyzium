@@ -1,13 +1,35 @@
+# Vyzium 3.1.24 — Full Stable
+
+Versão de estabilização integral do Vyzium. Esta release mantém o Chrome do WhatsApp em modo gráfico (`headless:false`) com ocultação pré-exibição no Windows e reforça persistência da sessão, importação das planilhas, regras de negócio, consistência de versão e validação de dados.
+
+### Principais correções desta versão
+
+- sessão do WhatsApp transacional: um novo QR só substitui o perfil ativo depois que o novo perfil chega a `ready`;
+- nenhuma rotina de boot apaga um `LocalAuth` apenas por divergência de metadata;
+- `session-state.json` passa a ser a fonte de verdade, com migração não destrutiva dos marcadores antigos;
+- Chrome continua `headless:false`, nasce suspenso e é ocultado antes da primeira exibição;
+- CDP só é entregue ao `whatsapp-web.js` depois de validar `/json/version` e o WebSocket do browser;
+- perfil Chromium permanece em `%LOCALAPPDATA%`, sem probes ativos de CacheStorage/IndexedDB durante o bootstrap;
+- comprador do Acompanhamento usa correspondência exata normalizada, evitando misturar nomes parecidos;
+- estados como **NÃO ENTREGUE** e **ENTREGUE PARCIALMENTE** não são mais classificados como concluídos por substring;
+- números brasileiros em texto, como `1,5` e `1.234,56`, são tratados na importação;
+- Cotação & Mapas procura cabeçalhos nas primeiras 30 linhas e bloqueia cabeçalhos ambíguos;
+- tabelas JSON do módulo Compras usam allowlist explícita;
+- versão do pacote é propagada aos motores Python e ao renderer para evitar divergência em backups e interface;
+- falhas assíncronas no renderer de Compras deixam de ser silenciosas e passam a ser registradas localmente.
+
+> O patch V6 de bootstrap do `whatsapp-web.js`, a recuperação por `hasSynced`, QR, `authenticated`, `ready`, watchdog, reconexão e o perfil LocalAuth local foram preservados.
+
 <p align="center">
   <img src="docs/readme/vyzium-banner.svg" alt="Vyzium — Operação, Follow-up, Cotação e Mapas" width="100%">
 </p>
 
 <p align="center">
-  <a href="https://github.com/solucionx/Vyzium/releases/latest"><img alt="Download para Windows" src="https://img.shields.io/badge/BAIXAR_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white"></a>
-  <a href="https://github.com/solucionx/Vyzium/releases"><img alt="Releases" src="https://img.shields.io/badge/RELEASES-0B3554?style=for-the-badge&logo=github&logoColor=white"></a>
-  <img alt="Versão 3.0.4" src="https://img.shields.io/badge/VERS%C3%83O-3.0.4-0B3554?style=for-the-badge">
+  <a href="https://github.com/solucionx/Vyzium-Releases/releases/latest"><img alt="Download para Windows" src="https://img.shields.io/badge/BAIXAR_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white"></a>
+  <a href="https://github.com/solucionx/Vyzium-Releases/releases"><img alt="Releases" src="https://img.shields.io/badge/RELEASES-0B3554?style=for-the-badge&logo=github&logoColor=white"></a>
+  <img alt="Versão 3.1.24 Full Stable" src="https://img.shields.io/badge/VERS%C3%83O-3.1.24%20FULL%20STABLE-0B3554?style=for-the-badge">
   <img alt="Windows 10 e 11" src="https://img.shields.io/badge/WINDOWS-10_%7C_11-007D9C?style=for-the-badge&logo=windows11&logoColor=white">
-  <img alt="Dados locais" src="https://img.shields.io/badge/DADOS-LOCAIS-003B73?style=for-the-badge&logo=sqlite&logoColor=white">
+  <img alt="Dados locais criptografados" src="https://img.shields.io/badge/DADOS-LOCAIS_CRIPTOGRAFADOS-003B73?style=for-the-badge&logo=sqlite&logoColor=white">
 </p>
 
 <p align="center">
@@ -373,6 +395,40 @@ Em **Configurações**, cada módulo exibe o estado de integridade, quantidade d
 
 > **Decisão de segurança:** a 3.0.2 não faz restauração automática nem substitui silenciosamente um banco com problema. Como o Vyzium já está em uso, qualquer recuperação continuará sendo uma ação deliberada, evitando sobrescrever uma base válida por engano.
 
+## ✦ Vyzium 3.1 — conta, workspace e banco criptografado
+
+A **3.1.0** adiciona uma camada de identidade e criptografia mantendo os dados operacionais no computador. O Firebase identifica o usuário e autoriza o workspace; os bancos locais passam a ser protegidos pelo SQLCipher.
+
+```text
+Firebase Authentication
+        │
+        ▼
+e-mail verificado + UID
+        │
+        ▼
+Workspace Vyzium
+        │
+        ├── chave raiz aleatória de 256 bits
+        │       ├── protegida localmente pelo Windows
+        │       └── envelope de recuperação AES-256-GCM
+        │
+        ├── followup.db      🔒 SQLCipher
+        └── compras.sqlite3  🔒 SQLCipher
+```
+
+### Usuários que já possuem banco
+
+A migração é deliberadamente conservadora. O Vyzium **não criptografa o arquivo existente por cima**. Ele verifica a base legada, cria um novo destino criptografado, compara as tabelas, executa `integrity_check` e somente então ativa o workspace. Os bancos antigos permanecem no caminho original para rollback histórico.
+
+### Recuperação
+
+A senha do Firebase não é usada como chave do banco. Na primeira configuração, o Vyzium gera um código de recuperação independente. A chave raiz é envolvida com scrypt + AES-256-GCM; somente o envelope criptografado vai para o Firestore e para a cópia local de recuperação. O código não é armazenado.
+
+### O que fica na nuvem
+
+O Firestore recebe apenas o mínimo para identidade e autorização: perfil, workspace, associação e envelope criptografado de recuperação. Pedidos, fornecedores, telefones, mapas, preços, observações e históricos permanecem locais.
+
+Documentação técnica: `docs/SECURITY_3.1.md`, `docs/FIREBASE_3.1.md` e `docs/MIGRATION_3.1.md`.
 
 ---
 
@@ -386,12 +442,14 @@ Em **Configurações**, cada módulo exibe o estado de integridade, quantidade d
 <tr><td><strong>Desktop</strong></td><td>Electron</td></tr>
 <tr><td><strong>Interface</strong></td><td>HTML · CSS · JavaScript</td></tr>
 <tr><td><strong>Motores locais</strong></td><td>Python · Acompanhamento + Cotação & Mapas</td></tr>
-<tr><td><strong>Persistência</strong></td><td>SQLite · bases operacionais independentes</td></tr>
+<tr><td><strong>Persistência</strong></td><td>SQLCipher (SQLite criptografado) · bases operacionais independentes</td></tr>
 <tr><td><strong>Acompanhamento</strong></td><td>Excel (.xlsx / .xlsm)</td></tr>
 <tr><td><strong>Cotação & Mapas</strong></td><td>Excel (.xls / .xlsx / .xlsm)</td></tr>
 <tr><td><strong>Exportação de mapas</strong></td><td>Excel (.xls)</td></tr>
 <tr><td><strong>Mensageria</strong></td><td>WhatsApp Web</td></tr>
-<tr><td><strong>Distribuição</strong></td><td>Instalador para Windows + atualização via GitHub Releases</td></tr>
+<tr><td><strong>Identidade</strong></td><td>Firebase Authentication · e-mail verificado</td></tr>
+<tr><td><strong>Proteção de chave</strong></td><td>Electron safeStorage · Windows DPAPI</td></tr>
+<tr><td><strong>Distribuição</strong></td><td>Vyzium-Core privado + Vyzium-Releases público</td></tr>
 </table>
 
 ---
@@ -432,28 +490,26 @@ Para gerar o instalador localmente:
 
 
 
-## Vyzium 3.0.4 — Bridge de atualizações
+## ✦ Release atual e segurança
 
-A 3.0.4 é uma versão de transição de distribuição. Os computadores que já recebem atualizações pelo repositório histórico `solucionx/Vyzium` ainda recebem esta versão por esse canal; depois de instalada, a aplicação passa a consultar as próximas atualizações em `solucionx/Vyzium-Releases`.
+A versão atual é **3.1.24 Full Stable**. Ela preserva a identidade da instalação (`com.vyzium.gestaooperacional`), mantém a camada Data Safety/SQLCipher e usa a versão do `package.json` como fonte de verdade para o Electron e os motores Python.
 
-A Bridge preserva `appId`, nome interno, caminhos de `userData`, `followup.db`, `compras.sqlite3`, sessão do WhatsApp e a camada Data Safety da 3.0.2. O banco operacional não é movido nem substituído. Na primeira abertura, a Data Safety pode criar o snapshot protegido de pré-upgrade da 3.0.4 antes da abertura para escrita.
+O gate técnico desta revisão está documentado em `docs/VALIDACAO_3.1.24_FULL_STABLE.md`.
 
-A janela de atualização também passa a usar a marca colorida oficial da Vyzium, evitando o ícone branco invisível sobre o bloco branco.
-
-> O repositório histórico não deve ser tornado privado antes de confirmar em uma instalação real o fluxo `versão atual → 3.0.4 → próxima versão via Vyzium-Releases`.
-
-A versão atual do projeto é **3.0.4**. Para o workflow de release, a tag deve corresponder exatamente à versão do `package.json`:
+O workflow de release continua manual e gera primeiro uma **Draft**. A tag da release deve corresponder ao `package.json`:
 
 ```text
-v3.0.4
+v3.1.24
 ```
+
+> Antes de publicar para computadores em operação, execute o workflow Windows completo, incluindo os testes SQLCipher, `.xls`, verificação dos motores empacotados e o smoke test real do WhatsApp/Chrome invisível.
 
 ---
 
 ## ✦ Download
 
 <p align="center">
-  <a href="https://github.com/solucionx/Vyzium/releases/latest">
+  <a href="https://github.com/solucionx/Vyzium-Releases/releases/latest">
     <img alt="Baixar Vyzium" src="https://img.shields.io/badge/↓_BAIXAR_VYZIUM_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white">
   </a>
 </p>
@@ -481,3 +537,7 @@ A partir da versão **3.0.1**, o processo de release valida os dois motores loca
 - `compras-engine.exe` — Cotação & Mapas.
 
 O workflow interrompe a release se qualquer um dos motores estiver ausente ou não tiver sido incluído em `resources/backend` do pacote Windows. Isso evita publicar uma instalação incompleta.
+
+## ✦ WhatsApp e perfil local
+
+No Windows, os metadados do WhatsApp permanecem no workspace do Vyzium, enquanto o perfil Chromium/LocalAuth fica em `%LOCALAPPDATA%\Vyzium\workspaces\<workspace>\whatsapp-runtime`. O navegador continua em modo gráfico (`headless:false`) e é ocultado antes da primeira exibição, sem alterar o bootstrap estável do WhatsApp Web.

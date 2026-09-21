@@ -11,16 +11,19 @@ if ($LASTEXITCODE -ne 0) { throw "Falha ao instalar dependências Python." }
 $Dist = Join-Path $ProjectRoot "dist-engine"
 New-Item -ItemType Directory -Force -Path $Dist | Out-Null
 
-& $Python -m PyInstaller --noconfirm --clean --onefile --name followup-engine --collect-all openpyxl `
+& $Python -m PyInstaller --noconfirm --clean --onefile --name followup-engine --collect-all openpyxl --collect-all sqlcipher3 `
     --workpath (Join-Path $ProjectRoot "build\pyinstaller-followup") `
     --distpath $Dist `
     (Join-Path $ProjectRoot "backend\engine.py")
 if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar motor de Acompanhamento." }
 
-& $Python -m PyInstaller --noconfirm --clean --onefile --name compras-engine --collect-all openpyxl --hidden-import xlrd --hidden-import xlwt `
+& $Python -m PyInstaller --noconfirm --clean --onefile --name compras-engine --collect-all openpyxl --collect-all sqlcipher3 --hidden-import xlrd --hidden-import xlwt `
     --workpath (Join-Path $ProjectRoot "build\pyinstaller-compras") `
     --distpath $Dist `
     (Join-Path $ProjectRoot "backend\compras_engine.py")
 if ($LASTEXITCODE -ne 0) { throw "Falha ao compilar motor de Cotação & Mapas." }
 
 Write-Host "Motores criados em dist-engine\followup-engine.exe e dist-engine\compras-engine.exe"
+
+& (Join-Path $PSScriptRoot "verify-engines.ps1")
+if ($LASTEXITCODE -ne 0) { throw "Falha na validação dos motores." }

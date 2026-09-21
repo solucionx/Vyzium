@@ -1,15 +1,18 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.0.4",
-  "description": "Vyzium unificado: acompanhamento operacional, follow-up, cotações e mapas de compra.",
+  "version": "3.1.24",
+  "description": "Vyzium 3.1.24 Full Stable: corrige endpoint CDP do Chrome invisível, preserva sessão transacional e mantém regras/importação endurecidas.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
     "start": "electron .",
     "test:backend": "python -m unittest discover -s backend -p \"test_*.py\" -v",
+    "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
+    "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
-    "test:node": "node --test tests/whatsapp.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs && node tests/sort.cjs",
-    "test": "npm run test:backend && npm run test:node"
+    "test:node": "node --test tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
+    "test": "npm run test:backend && npm run test:node",
+    "postinstall": "node scripts/patch-whatsapp-web.js"
   },
   "dependencies": {
     "whatsapp-web.js": "1.34.7",
@@ -63,11 +66,14 @@
         "repo": "Vyzium-Releases",
         "releaseType": "release"
       }
+    ],
+    "asarUnpack": [
+      "electron/whatsapp-hidden-browser.ps1"
     ]
   },
   "author": "Solucionx",
   "repository": {
     "type": "git",
-    "url": "https://github.com/solucionx/Vyzium.git"
+    "url": "https://github.com/solucionx/Vyzium-Core.git"
   }
 }
