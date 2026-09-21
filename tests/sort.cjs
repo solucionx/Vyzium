@@ -1,0 +1,10 @@
+const assert = require('node:assert/strict');
+const sort = require('../renderer/operational.js');
+const rows = [{oc:'100', due_date:'2026-10-01', company:'Zulu'}, {oc:'9', due_date:'2025-12-01',company:'Água'}, {oc:'20',due_date:null,company:'Beta'}];
+assert.deepEqual(sort.rows(rows,'oc','asc').map(r=>r.oc), ['9','20','100']);
+assert.deepEqual(sort.rows(rows,'oc','desc').map(r=>r.oc), ['100','20','9']);
+assert.deepEqual(sort.rows(rows,'due_date','asc').map(r=>r.oc), ['9','100','20']);
+assert.deepEqual(sort.rows(rows,'due_date','desc').map(r=>r.oc), ['100','9','20']);
+assert.deepEqual(sort.rows(rows,'company','asc').map(r=>r.oc), ['9','20','100']);
+assert.equal(rows[0].oc,'100');
+console.log('6 verificações de ordenação aprovadas');
