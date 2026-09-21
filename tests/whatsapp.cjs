@@ -4,7 +4,17 @@ const {EventEmitter} = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {WhatsAppSession, startBridge, phoneCandidates, normalizeBrowserMode, resolveBrowserMode, isFatalCacheStorageError, normalizeBrowserWSEndpoint, stopHiddenHeadedBrowser} = require('../electron/whatsapp');
+const {WhatsAppSession: NativeWhatsAppSession, startBridge, phoneCandidates, normalizeBrowserMode, resolveBrowserMode, isFatalCacheStorageError, normalizeBrowserWSEndpoint, stopHiddenHeadedBrowser} = require('../electron/whatsapp');
+
+// Unit tests must not launch a real Windows Chrome/PowerShell helper merely
+// because the CI runner itself is Windows. Production still uses process.platform
+// by default; tests inject a neutral platform. Dedicated pre-show tests opt back
+// in with forcePreShowGuard:true and a fake launcher.
+class WhatsAppSession extends NativeWhatsAppSession {
+  constructor(dataDir, deps = {}) {
+    super(dataDir, {platform:'linux', ...deps});
+  }
+}
 
 function setup(t) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-test-'));
@@ -63,6 +73,8 @@ test('headed WhatsApp browser uses the proven pre-show Win32 guard on Windows',(
  const source=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp.js'),'utf8');
  const helper=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp-hidden-browser.ps1'),'utf8');
  assert.match(source,/launchHiddenHeadedBrowser/);
+ assert.match(source,/const runtimePlatform = this\.deps\.platform \|\| process\.platform/);
+ assert.match(source,/runtimePlatform === 'win32'/);
  assert.match(source,/browserWSEndpoint:hiddenBrowser\.endpoint/);
  assert.match(source,/browser\.pre-show-guard-ready/);
  assert.doesNotMatch(source,/browserArgs\.push\('--window-position=-32000,-32000'/);

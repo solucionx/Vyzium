@@ -115,7 +115,7 @@ test('3.1 keeps updates on the dedicated public releases repository', () => {
   assert.match(updates, /repo:\s*['"]Vyzium-Releases['"]/);
   assert.equal(pkg.build?.publish?.[0]?.owner, 'solucionx');
   assert.equal(pkg.build?.publish?.[0]?.repo, 'Vyzium-Releases');
-  assert.equal(pkg.repository?.url, 'https://github.com/solucionx/Vyzium-Core.git');
+  assert.equal(pkg.repository?.url, 'https://github.com/solucionx/Vyzium.git');
 });
 
 test('3.1 retains legacy database paths only as migration sources and adds workspace paths', () => {
