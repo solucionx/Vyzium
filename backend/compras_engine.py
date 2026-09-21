@@ -28,7 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.1.24')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.1.25')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
