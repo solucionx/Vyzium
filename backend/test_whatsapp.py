@@ -307,6 +307,10 @@ class WhatsAppWaitBoundTests(unittest.TestCase):
         self.dir = tempfile.TemporaryDirectory()
         self.addCleanup(self.dir.cleanup)
         self.service = FollowUpService(Store(Path(self.dir.name) / "followup.db"))
+        # Windows mantém o arquivo SQLite bloqueado enquanto a conexão estiver aberta.
+        # unittest executa cleanups em LIFO, então registre o close depois do cleanup
+        # do diretório para garantir que o banco seja fechado ANTES da remoção do temp.
+        self.addCleanup(self.service.store.connection.close)
 
     def test_unreachable_bridge_eventually_aborts(self):
         calls = {"n": 0}
