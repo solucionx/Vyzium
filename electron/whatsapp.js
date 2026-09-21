@@ -1189,7 +1189,12 @@ class WhatsAppSession {
     const launchMode = normalizeBrowserMode(options.browserMode) || this.browserMode;
     const headless = launchMode === 'headless';
     const browserArgs = ['--disable-background-timer-throttling','--disable-backgrounding-occluded-windows'];
-    const preShowGuard = !headless && (process.platform === 'win32' || this.deps.forcePreShowGuard === true);
+    // Keep native Windows behavior in production, while allowing unit tests to
+    // inject a deterministic platform without spawning a real PowerShell/Chrome.
+    // forcePreShowGuard still wins so the dedicated pre-show test exercises the
+    // hidden-browser integration contract on every CI platform.
+    const runtimePlatform = this.deps.platform || process.platform;
+    const preShowGuard = !headless && (this.deps.forcePreShowGuard === true || runtimePlatform === 'win32');
     this._audit('browser.selected', {browser:path.basename(browser), executablePath:browser});
     this._audit('browser.launch-config', {generation, mode:launchMode, headless, args:browserArgs, preShowGuard});
     this._audit('browser.profile-storage', {
@@ -1288,7 +1293,7 @@ class WhatsAppSession {
           const child = typeof attachedBrowser.process === 'function' ? attachedBrowser.process() : null;
           const browserPid = child?.pid || hiddenBrowser?.pid || null;
           this._audit('puppeteer.browser-attached', {generation, pid:browserPid, preShowGuard:Boolean(hiddenBrowser)});
-          if (!headless && process.platform === 'win32' && browserPid && !hiddenBrowser) {
+          if (!headless && runtimePlatform === 'win32' && browserPid && !hiddenBrowser) {
             const hidden = this.deps.hideBrowserWindow
               ? Boolean(this.deps.hideBrowserWindow(browserPid))
               : hideWindowsForPid(browserPid);
