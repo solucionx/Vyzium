@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'">
+  <title>Vyzium — Acesso seguro</title>
+  <link rel="stylesheet" href="auth.css">
+</head>
+<body>
+  <main class="auth-shell">
+    <section class="brand-panel">
+      <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt="Vyzium"></div>
+      <div>
+        <div class="brand-name">Vyzium</div>
+        <div class="brand-kicker">Gestão operacional protegida</div>
+      </div>
+      <div class="brand-copy">
+        <h1>Seu trabalho continua local. O acesso agora é protegido.</h1>
+        <p>Autenticação por conta Vyzium, banco local criptografado e migração conservadora dos dados que já existem.</p>
+      </div>
+      <div class="security-points">
+        <div><span>✓</span> Firebase Authentication</div>
+        <div><span>✓</span> SQLCipher para os bancos locais</div>
+        <div><span>✓</span> Chave protegida pelo Windows</div>
+        <div><span>✓</span> Banco legado preservado durante a migração</div>
+      </div>
+      <div class="brand-footer">Desenvolvido por Solucionx</div>
+    </section>
+
+    <section class="auth-panel">
+      <div class="auth-card">
+        <div class="mobile-brand">
+          <img src="assets/vyzium-mark.svg" alt="Vyzium">
+          <strong>Vyzium</strong>
+        </div>
+
+        <div id="message" class="message" hidden></div>
+
+        <section id="loginView" class="view">
+          <div class="eyebrow">CONTA VYZIUM</div>
+          <h2>Entrar</h2>
+          <p class="lead">Acesse seu workspace para liberar os dados locais protegidos.</p>
+          <form id="loginForm">
+            <label>E-mail<input id="loginEmail" type="email" autocomplete="username" required></label>
+            <label>Senha<input id="loginPassword" type="password" autocomplete="current-password" required></label>
+            <button class="primary" type="submit">Entrar</button>
+          </form>
+          <button id="forgotBtn" class="link-button">Esqueci minha senha</button>
+          <div class="separator"><span>ou</span></div>
+          <button id="showRegister" class="secondary">Criar conta</button>
+        </section>
+
+        <section id="registerView" class="view" hidden>
+          <div class="eyebrow">NOVA CONTA</div>
+          <h2>Criar conta</h2>
+          <p class="lead">A senha deve ter pelo menos 12 caracteres e combinar letras, número e símbolo.</p>
+          <form id="registerForm">
+            <label>Nome<input id="registerName" maxlength="120" autocomplete="name" required></label>
+            <label>E-mail<input id="registerEmail" type="email" autocomplete="username" required></label>
+            <label>Senha<input id="registerPassword" type="password" autocomplete="new-password" required></label>
+            <label>Confirmar senha<input id="registerPassword2" type="password" autocomplete="new-password" required></label>
+            <div id="passwordRules" class="password-rules">
+              <span data-rule="minLength">12+ caracteres</span><span data-rule="uppercase">Maiúscula</span>
+              <span data-rule="lowercase">Minúscula</span><span data-rule="number">Número</span><span data-rule="special">Símbolo</span>
+            </div>
+            <button class="primary" type="submit">Criar conta</button>
+          </form>
+          <button id="showLogin" class="link-button">Já tenho uma conta</button>
+        </section>
+
+        <section id="verifyView" class="view" hidden>
+          <div class="status-icon">✉</div>
+          <div class="eyebrow">CONFIRMAÇÃO</div>
+          <h2>Verifique seu e-mail</h2>
+          <p class="lead">Enviamos um link de confirmação para <strong id="verifyEmail"></strong>. Depois de confirmar, volte aqui.</p>
+          <button id="verifiedBtn" class="primary">Já confirmei meu e-mail</button>
+          <button id="resendBtn" class="secondary">Reenviar verificação</button>
+          <button id="verifyLogoutBtn" class="link-button">Usar outra conta</button>
+        </section>
+
+        <section id="securityView" class="view" hidden>
+          <div class="status-icon shield">◆</div>
+          <div class="eyebrow">PROTEÇÃO DOS DADOS</div>
+          <h2>Preparar seu workspace</h2>
+          <p class="lead" id="securityDescription">O Vyzium vai preparar os bancos criptografados sem sobrescrever os bancos que já estão em uso.</p>
+          <div class="security-summary">
+            <div><span>Banco de Acompanhamento</span><strong id="legacyFollowup">Verificando…</strong></div>
+            <div><span>Banco de Cotação & Mapas</span><strong id="legacyCompras">Verificando…</strong></div>
+            <div><span>Proteção da chave</span><strong>Windows</strong></div>
+          </div>
+          <div class="warning-box">
+            Os bancos antigos não serão apagados. A ativação só acontece depois da cópia criptografada passar nas verificações de integridade.
+          </div>
+          <button id="protectBtn" class="primary">Proteger meus dados</button>
+          <button id="securityLogoutBtn" class="link-button">Sair desta conta</button>
+        </section>
+
+        <section id="recoveryView" class="view" hidden>
+          <div class="status-icon shield">◆</div>
+          <div class="eyebrow">RECUPERAÇÃO</div>
+          <h2>Recuperar chave do workspace</h2>
+          <p class="lead">Encontramos dados protegidos, mas a chave local não está disponível nesta conta do Windows.</p>
+          <label>Código de recuperação<input id="recoveryInput" autocomplete="off" placeholder="VYZIUM-XXXXX-XXXXX-..."></label>
+          <button id="recoverBtn" class="primary">Recuperar acesso</button>
+          <button id="recoveryLogoutBtn" class="link-button">Usar outra conta</button>
+        </section>
+
+        <section id="recoveryCodeView" class="view" hidden>
+          <div class="status-icon ok">✓</div>
+          <div class="eyebrow">PROTEÇÃO CONCLUÍDA</div>
+          <h2>Guarde seu código de recuperação</h2>
+          <p class="lead">Ele pode ser necessário se o Windows for reinstalado ou a chave local deixar de estar disponível.</p>
+          <div class="recovery-code" id="recoveryCode"></div>
+          <button id="copyRecoveryBtn" class="secondary">Copiar código</button>
+          <label class="check"><input id="recoverySaved" type="checkbox"> Guardei este código em um local seguro.</label>
+          <button id="finishSecurityBtn" class="primary" disabled>Entrar no Vyzium</button>
+        </section>
+
+        <section id="readyView" class="view" hidden>
+          <div class="status-icon ok">✓</div>
+          <div class="eyebrow">AMBIENTE PROTEGIDO</div>
+          <h2>Tudo pronto</h2>
+          <p class="lead">Sua conta foi validada e o workspace local está protegido.</p>
+          <button id="enterBtn" class="primary">Abrir Vyzium</button>
+          <button id="readyLogoutBtn" class="link-button">Sair</button>
+        </section>
+
+        <section id="resetView" class="view" hidden>
+          <div class="eyebrow">RECUPERAÇÃO DE CONTA</div>
+          <h2>Redefinir senha</h2>
+          <p class="lead">Informe seu e-mail. Se houver uma conta compatível, o Firebase enviará as instruções.</p>
+          <form id="resetForm">
+            <label>E-mail<input id="resetEmail" type="email" autocomplete="email" required></label>
+            <button class="primary" type="submit">Enviar instruções</button>
+          </form>
+          <button id="resetBack" class="link-button">Voltar para entrar</button>
+        </section>
+
+        <div id="busy" class="busy" hidden><span></span><span id="busyText">Processando com segurança…</span></div>
+      </div>
+    </section>
+  </main>
+  <script src="auth.js"></script>
+</body>
+</html>
