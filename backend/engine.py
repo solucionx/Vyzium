@@ -1700,14 +1700,22 @@ class FollowUpService:
                         )
                         self.store.connection.commit()
             finally:
-                with self.job_lock:
-                    self.worker_batches.discard(batch_id)
-                batch = self.store.message_batch(batch_id)
-                if batch and batch.get("status") == "done":
-                    self._update_job(**self._state_from_batch(batch, active=False))
-                    self._update_job(result=self._batch_result(batch_id))
-                elif batch:
-                    self._update_job(**self._state_from_batch(batch, active=False))
+                # Keep the batch marked as active until every final database read
+                # and the final in-memory state update have completed.  Clearing
+                # worker_batches earlier allowed send_status() to report the job as
+                # inactive while this daemon thread was still touching SQLite.
+                # A caller (notably test teardown, and potentially shutdown/update
+                # flows) could then close the database underneath the worker.
+                try:
+                    batch = self.store.message_batch(batch_id)
+                    if batch and batch.get("status") == "done":
+                        self._update_job(**self._state_from_batch(batch, active=False))
+                        self._update_job(result=self._batch_result(batch_id))
+                    elif batch:
+                        self._update_job(**self._state_from_batch(batch, active=False))
+                finally:
+                    with self.job_lock:
+                        self.worker_batches.discard(batch_id)
 
         threading.Thread(target=worker, name=f"followup-queue-{batch_id[:8]}", daemon=True).start()
 

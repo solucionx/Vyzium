@@ -194,6 +194,48 @@ class WhatsAppBatchQueueTests(unittest.TestCase):
 
     @patch('engine.time.sleep')
     @patch('engine.whatsapp_request')
+    def test_async_status_stays_active_until_worker_finalization_finishes(self, bridge, _sleep):
+        groups = [
+            dict(supplier_key='one', supplier_name='One', phone='+5585111111111', urgency='overdue', message='One', items=[dict(item_key='one-item', urgency='overdue')]),
+        ]
+        self.service.groups = lambda: groups
+        bridge.side_effect = [
+            {'ready': True},
+            {'ready': True},
+            {'status': 'sent', 'message_id': 'one-message', 'ack': 1},
+        ]
+
+        import threading as _threading
+        entered_finalization = _threading.Event()
+        release_finalization = _threading.Event()
+        original_batch_result = self.service._batch_result
+        worker_calls = {'count': 0}
+
+        def gated_batch_result(batch_id):
+            if _threading.current_thread().name.startswith('followup-queue-'):
+                worker_calls['count'] += 1
+                if worker_calls['count'] == 2:
+                    entered_finalization.set()
+                    release_finalization.wait(1.0)
+            return original_batch_result(batch_id)
+
+        self.service._batch_result = gated_batch_result
+        state = self.service.start_send(['one'], False, None)
+        self.assertTrue(entered_finalization.wait(1.0))
+        mid = self.service.send_status(state['job_id'])
+        self.assertTrue(mid['active'])
+        release_finalization.set()
+
+        for _ in range(100):
+            state = self.service.send_status(state['job_id'])
+            if not state['active']:
+                break
+            _threading.Event().wait(0.005)
+        self.assertFalse(state['active'])
+        self.assertEqual(state['phase'], 'done')
+
+    @patch('engine.time.sleep')
+    @patch('engine.whatsapp_request')
     def test_persistent_batch_keeps_queue_and_provider_confirmation(self, bridge, _sleep):
         groups = [
             dict(supplier_key='one', supplier_name='One', phone='+5585111111111', urgency='overdue', message='One', items=[dict(item_key='one-item', urgency='overdue')]),
