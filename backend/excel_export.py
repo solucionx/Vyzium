@@ -28,7 +28,8 @@ def _page_setup(sheet, *, fit_width=1, repeat_row=None):
     _call(sheet, 'set_show_grid', False)
     if repeat_row is not None:
         _call(sheet, 'set_rows_to_repeat', repeat_row, repeat_row)
-    _call(sheet, 'set_footer_str', '&C&P de &N')
+    # xlwt 1.3.0 has a Python 3 incompatibility in set_footer_str/set_header_str.
+    # Keep page setup portable and rely on the sheet title/table for printed identification.
 
 
 def _styles(xlwt):
@@ -111,7 +112,6 @@ def _build_print_sheet(book, xlwt, data, result, st):
     columns = 5 + supplier_count * 3 + 3
     sheet = book.add_sheet('Mapa para impressão')
     _page_setup(sheet, fit_width=1 if supplier_count <= 3 else 2, repeat_row=4)
-    _call(sheet, 'set_header_str', f"&LVyzium · Mapa de compra&R{data['name']}")
 
     last_col = columns - 1
     sheet.write_merge(0, 0, 0, last_col, f"MAPA DE COMPRA · {data['name']}", st['title'])
@@ -214,7 +214,6 @@ def _build_print_sheet(book, xlwt, data, result, st):
 def _build_detail_sheet(book, xlwt, data, result, st):
     sheet = book.add_sheet('Detalhado')
     _page_setup(sheet, fit_width=1 if len(data['suppliers']) <= 2 else 2, repeat_row=0)
-    _call(sheet, 'set_header_str', f"&LVyzium · Detalhamento&R{data['name']}")
     sheet.set_panes_frozen(True)
     sheet.set_horz_split_pos(1)
     sheet.set_vert_split_pos(4)
@@ -258,7 +257,6 @@ def _build_detail_sheet(book, xlwt, data, result, st):
 def _build_supplier_summary(book, xlwt, data, result, st):
     sheet = book.add_sheet('Resumo por fornecedor')
     _page_setup(sheet, fit_width=1, repeat_row=2)
-    _call(sheet, 'set_header_str', f"&LVyzium · Resumo por fornecedor&R{data['name']}")
     sheet.write_merge(0, 0, 0, 3, f"RESUMO · {data['name']}", st['title'])
     sheet.write(1, 0, 'Mapa', st['subtitle'])
     sheet.write_merge(1, 1, 1, 3, data['name'], st['plain'])
