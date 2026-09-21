@@ -15,7 +15,7 @@ test('package identity remains compatible with the existing Vyzium installation'
 });
 
 
-test('3.1.25 keeps one authoritative release version across package, Python and renderer', () => {
+test('3.2.0 keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -48,6 +48,14 @@ test('Windows installer assets referenced by electron-builder exist', () => {
   for (const rel of ['build/icon.ico', 'build/icon.png', 'build/installer-sidebar.bmp']) {
     assert.equal(fs.existsSync(path.join(root, rel)), true, `Arquivo ausente: ${rel}`);
   }
+});
+
+test('Windows runtime uses the Vyzium taskbar identity and explicit app icon', () => {
+  const main = read('electron/main.js');
+  assert.match(main, /app\.setAppUserModelId\(['"]com\.vyzium\.gestaooperacional['"]\)/);
+  assert.match(main, /function appIconPath\(\)/);
+  assert.match(main, /build['"], ['"]icon\.ico/);
+  assert.match(main, /icon:\s*appIconPath\(\)/);
 });
 
 test('Windows hidden-browser launcher is unpacked for PowerShell execution', () => {
@@ -84,7 +92,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.1.25');
+  assert.equal(pkg.version, '3.2.0');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',

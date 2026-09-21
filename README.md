@@ -1,9 +1,15 @@
-# Vyzium 3.1.25 — Full Stable
+# Vyzium 3.2.0 — Full Stable
 
-Versão de estabilização integral do Vyzium. Esta release mantém o Chrome do WhatsApp em modo gráfico (`headless:false`) com ocultação pré-exibição no Windows e reforça persistência da sessão, importação das planilhas, regras de negócio, consistência de versão e validação de dados.
+Versão estável do Vyzium com evolução do módulo Cotação & Mapas. Mantém a base estabilizada de WhatsApp, SQLCipher, Firebase e importações, acrescentando busca e organização dos mapas, conclusão/exclusão segura, exportação XLS preparada para impressão, CNPJ do hotel nas solicitações de cotação e correção do ícone do Vyzium na barra de tarefas do Windows.
 
 ### Principais correções desta versão
 
+- Mapas de Compra passam a separar **Em cotação** e **Concluídos**, com busca por nome, SCI, artigo e descrição do item;
+- conclusão libera os itens para novos mapas e exclusão cria backup automático antes da remoção;
+- exportação `.xls` ganha uma primeira aba organizada para impressão, além das abas detalhada e resumo por fornecedor;
+- solicitação de cotação por WhatsApp deixa de expor a SCI e passa a informar o CNPJ associado ao hotel;
+- resumo do mapa segue a sequência valor inicial → valor negociado → economia → itens sem cotação;
+- identidade da janela no Windows usa o `AppUserModelID` e o ícone do Vyzium na barra de tarefas;
 - sessão do WhatsApp transacional: um novo QR só substitui o perfil ativo depois que o novo perfil chega a `ready`;
 - nenhuma rotina de boot apaga um `LocalAuth` apenas por divergência de metadata;
 - `session-state.json` passa a ser a fonte de verdade, com migração não destrutiva dos marcadores antigos;
@@ -27,7 +33,7 @@ Versão de estabilização integral do Vyzium. Esta release mantém o Chrome do 
 <p align="center">
   <a href="https://github.com/solucionx/Vyzium-Releases/releases/latest"><img alt="Download para Windows" src="https://img.shields.io/badge/BAIXAR_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white"></a>
   <a href="https://github.com/solucionx/Vyzium-Releases/releases"><img alt="Releases" src="https://img.shields.io/badge/RELEASES-0B3554?style=for-the-badge&logo=github&logoColor=white"></a>
-  <img alt="Versão 3.1.25 Full Stable" src="https://img.shields.io/badge/VERS%C3%83O-3.1.25%20FULL%20STABLE-0B3554?style=for-the-badge">
+  <img alt="Versão 3.2.0 Full Stable" src="https://img.shields.io/badge/VERS%C3%83O-3.2.0%20FULL%20STABLE-0B3554?style=for-the-badge">
   <img alt="Windows 10 e 11" src="https://img.shields.io/badge/WINDOWS-10_%7C_11-007D9C?style=for-the-badge&logo=windows11&logoColor=white">
   <img alt="Dados locais criptografados" src="https://img.shields.io/badge/DADOS-LOCAIS_CRIPTOGRAFADOS-003B73?style=for-the-badge&logo=sqlite&logoColor=white">
 </p>
@@ -492,14 +498,14 @@ Para gerar o instalador localmente:
 
 ## ✦ Release atual e segurança
 
-A versão atual é **3.1.25 Full Stable**. Ela preserva a identidade da instalação (`com.vyzium.gestaooperacional`), mantém a camada Data Safety/SQLCipher e usa a versão do `package.json` como fonte de verdade para o Electron e os motores Python.
+A versão atual é **3.2.0 Full Stable**. Ela preserva a identidade da instalação (`com.vyzium.gestaooperacional`), mantém a camada Data Safety/SQLCipher e usa a versão do `package.json` como fonte de verdade para o Electron e os motores Python.
 
-O gate técnico desta revisão está documentado em `docs/VALIDACAO_3.1.24_FULL_STABLE.md`.
+O gate técnico desta revisão está documentado em `docs/VALIDACAO_3.2.0.md`.
 
 O workflow de release continua manual e gera primeiro uma **Draft**. A tag da release deve corresponder ao `package.json`:
 
 ```text
-v3.1.25
+v3.2.0
 ```
 
 > Antes de publicar para computadores em operação, execute o workflow Windows completo, incluindo os testes SQLCipher, `.xls`, verificação dos motores empacotados e o smoke test real do WhatsApp/Chrome invisível.

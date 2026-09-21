@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.1.25",
-  "description": "Vyzium 3.1.25 Full Stable: corrige endpoint CDP do Chrome invisível, preserva sessão transacional e mantém regras/importação endurecidas.",
+  "version": "3.2.0",
+  "description": "Vyzium 3.2.0: aprimora Mapas de Compra com busca, conclusão e exclusão, exportação pronta para impressão, CNPJ nas cotações e ícone correto no Windows.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
