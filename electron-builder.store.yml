@@ -29,7 +29,6 @@ appx:
   publisher: "CN=B0BDB428-BDCB-4054-A750-186A5394F35E"
   publisherDisplayName: Solucionx
   displayName: Vyzium
-  description: "Vyzium - acompanhamento operacional, cotacoes e mapas de compra."
   backgroundColor: "#FFFFFF"
   languages:
     - pt-BR
