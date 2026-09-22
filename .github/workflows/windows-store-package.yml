@@ -91,7 +91,26 @@ jobs:
 
       - name: Gerar pacote Microsoft Store (AppX x64)
         shell: pwsh
-        run: npx electron-builder --win appx --x64 --config electron-builder.store.yml --publish never
+        run: |
+          & npx electron-builder --win appx --x64 --config electron-builder.store.yml --publish never
+          $buildExit = $LASTEXITCODE
+          if ($buildExit -ne 0) {
+            $manifest = Get-ChildItem dist-store -Recurse -Filter AppxManifest.xml -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($manifest) {
+              Write-Host '::group::AppxManifest.xml gerado pelo electron-builder'
+              Get-Content $manifest.FullName
+              Write-Host '::endgroup::'
+              try {
+                [xml](Get-Content $manifest.FullName -Raw) | Out-Null
+                Write-Host 'Manifesto e XML bem-formado; a falha restante e de schema/semantica do AppX.'
+              } catch {
+                Write-Error "Manifesto XML malformado: $($_.Exception.Message)"
+              }
+            } else {
+              Write-Warning 'AppxManifest.xml nao foi encontrado para diagnostico.'
+            }
+            exit $buildExit
+          }
 
       - name: Validar pacote e identidade
         shell: pwsh
