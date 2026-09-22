@@ -240,6 +240,9 @@ test('Microsoft Store package config matches reserved Vyzium identity and stays 
   assert.match(cfg, /target:\s*\n\s*- target:\s*appx/);
   assert.match(cfg, /minVersion:\s*["']10\.0\.17763\.0["']/);
   assert.match(cfg, /languages:\s*\n\s*- pt-BR/);
+  assert.match(cfg, /extraMetadata:\s*\n\s*description:\s*["']Vyzium 3\.2\.1 - acompanhamento operacional, cotacoes e mapas de compra\.["']/);
+  const storeDescription = cfg.match(/extraMetadata:\s*\n\s*description:\s*["']([^"']+)["']/)?.[1] || '';
+  assert.doesNotMatch(storeDescription, /[<&]/, 'Descrição da build Store não pode injetar metacaracteres XML crus no AppxManifest.xml');
 });
 
 test('Microsoft Store assets and build workflow are present without replacing the normal Windows release', () => {
