@@ -1,0 +1,39 @@
+appId: com.vyzium.gestaooperacional
+productName: Vyzium
+artifactName: "Vyzium-Store-${version}-${arch}.${ext}"
+directories:
+  output: dist-store
+  buildResources: build
+files:
+  - electron/**/*
+  - renderer/**/*
+  - build/icon.png
+  - package.json
+extraResources:
+  - from: dist-engine
+    to: backend
+    filter:
+      - followup-engine.exe
+      - compras-engine.exe
+asarUnpack:
+  - electron/whatsapp-hidden-browser.ps1
+win:
+  icon: build/icon.ico
+  target:
+    - target: appx
+      arch:
+        - x64
+appx:
+  identityName: Solucionx.Vyzium
+  applicationId: Vyzium
+  publisher: "CN=B0BDB428-BDCB-4054-A750-186A5394F35E"
+  publisherDisplayName: Solucionx
+  displayName: Vyzium
+  description: "Vyzium - acompanhamento operacional, cotacoes e mapas de compra."
+  backgroundColor: "#FFFFFF"
+  languages:
+    - pt-BR
+  minVersion: "10.0.17763.0"
+  maxVersionTested: "10.0.26100.0"
+  setBuildNumber: false
+  electronUpdaterAware: false
