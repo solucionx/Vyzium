@@ -246,11 +246,20 @@ test('Microsoft Store assets and build workflow are present without replacing th
   for (const asset of ['StoreLogo.png','Square150x150Logo.png','Square44x44Logo.png','Wide310x150Logo.png']) {
     assert.ok(fs.existsSync(path.join(root, 'build', 'appx', asset)), `Asset Store ausente: ${asset}`);
   }
+
+  // The Store pipeline must validate its own contract. It must not depend on
+  // another workflow file being present in the checkout snapshot, because a
+  // manual/re-run can legitimately execute an older GITHUB_SHA. The normal
+  // Windows release contract is authoritative in package.json and remains NSIS.
   const storeWorkflow = read('.github/workflows/windows-store-package.yml');
-  const releaseWorkflow = read('.github/workflows/windows-release.yml');
+  const pkg = JSON.parse(read('package.json'));
+
   assert.match(storeWorkflow, /workflow_dispatch:/);
   assert.match(storeWorkflow, /(?:npx\s+)?electron-builder --win appx --x64 --config electron-builder\.store\.yml/);
   assert.match(storeWorkflow, /Vyzium-Store-3\.2\.1-x64/);
-  assert.match(releaseWorkflow, /npm run build/);
-  assert.match(releaseWorkflow, /Vyzium-Setup\.exe/);
+  assert.doesNotMatch(storeWorkflow, /Vyzium-Releases|gh\s+release|Vyzium-Setup\.exe/);
+
+  assert.match(pkg.scripts?.build || '', /electron-builder --win nsis --x64 --publish never/);
+  assert.deepEqual(pkg.build?.win?.target, ['nsis']);
+  assert.equal(pkg.build?.artifactName, 'Vyzium-Setup.${ext}');
 });
