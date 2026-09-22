@@ -231,3 +231,26 @@ test('Compras desktop allowlist covers map completion, deletion and assisted neg
   }
   assert.match(main, /\['\/send', '\/send-negotiation'\]\.includes\(routePath\)/);
 });
+
+test('Microsoft Store package config matches reserved Vyzium identity and stays Desktop-only', () => {
+  const cfg = read('electron-builder.store.yml');
+  assert.match(cfg, /identityName:\s*Solucionx\.Vyzium/);
+  assert.match(cfg, /publisher:\s*["']CN=B0BDB428-BDCB-4054-A750-186A5394F35E["']/);
+  assert.match(cfg, /publisherDisplayName:\s*Solucionx/);
+  assert.match(cfg, /target:\s*\n\s*- target:\s*appx/);
+  assert.match(cfg, /minVersion:\s*["']10\.0\.17763\.0["']/);
+  assert.match(cfg, /languages:\s*\n\s*- pt-BR/);
+});
+
+test('Microsoft Store assets and build workflow are present without replacing the normal Windows release', () => {
+  for (const asset of ['StoreLogo.png','Square150x150Logo.png','Square44x44Logo.png','Wide310x150Logo.png']) {
+    assert.ok(fs.existsSync(path.join(root, 'build', 'appx', asset)), `Asset Store ausente: ${asset}`);
+  }
+  const storeWorkflow = read('.github/workflows/windows-store-package.yml');
+  const releaseWorkflow = read('.github/workflows/windows-release.yml');
+  assert.match(storeWorkflow, /workflow_dispatch:/);
+  assert.match(storeWorkflow, /electron-builder --win appx --x64 --config electron-builder\.store\.yml/);
+  assert.match(storeWorkflow, /Vyzium-Store-3\.2\.1-x64/);
+  assert.match(releaseWorkflow, /npm run build/);
+  assert.match(releaseWorkflow, /Vyzium-Setup\.exe/);
+});
