@@ -109,7 +109,7 @@ def _styles(xlwt):
 def _build_print_sheet(book, xlwt, data, result, st):
     """Compact first sheet intended for screen review and printing."""
     supplier_count = len(data['suppliers'])
-    columns = 5 + supplier_count * 3 + 3
+    columns = 5 + supplier_count * 3 + 7
     sheet = book.add_sheet('Mapa para impressão')
     _page_setup(sheet, fit_width=1 if supplier_count <= 3 else 2, repeat_row=4)
 
@@ -125,8 +125,10 @@ def _build_print_sheet(book, xlwt, data, result, st):
         ('Economia', Decimal(result['saving']), True),
         ('Itens sem cotação', result['unquoted'], False),
     ]
-    # Four compact metric blocks spread across the available width.
-    block = max(1, columns // 4)
+    # Keep the metric layout anchored to the historical core columns so adding
+    # audit/decision columns at the right never shifts the printed summary.
+    core_columns = 5 + supplier_count * 3 + 3
+    block = max(1, core_columns // 4)
     for idx, (label, value, cash) in enumerate(metrics):
         c0 = idx * block
         c1 = last_col if idx == 3 else min(last_col, c0 + block - 1)
@@ -139,7 +141,7 @@ def _build_print_sheet(book, xlwt, data, result, st):
     headings = ['HOTEL', 'SCI', 'ITEM / ESPECIFICAÇÃO', 'QTD.', 'UN.']
     for supplier in data['suppliers']:
         headings += [f"{supplier['name']}\nInicial", f"{supplier['name']}\nNegociado", f"{supplier['name']}\nDesc. %"]
-    headings += ['VENCEDOR', 'VALOR FINAL', 'ECONOMIA']
+    headings += ['FORNECEDOR ESCOLHIDO', 'VALOR FINAL', 'ECONOMIA', 'PRAZO ESCOLHIDO', 'MOTIVO DA ESCOLHA', 'OBSERVAÇÃO DA ESCOLHA', 'DIF. VS MENOR PREÇO']
     for col, value in enumerate(headings):
         sheet.write(4, col, value, st['header'])
     sheet.row(4).height_mismatch = True
@@ -157,6 +159,10 @@ def _build_print_sheet(book, xlwt, data, result, st):
     sheet.col(end).width = 5200
     sheet.col(end + 1).width = 3600
     sheet.col(end + 2).width = 3400
+    sheet.col(end + 3).width = 3800
+    sheet.col(end + 4).width = 4700
+    sheet.col(end + 5).width = 7000
+    sheet.col(end + 6).width = 3900
 
     sheet.set_panes_frozen(True)
     sheet.set_horz_split_pos(5)
@@ -203,9 +209,13 @@ def _build_print_sheet(book, xlwt, data, result, st):
         if chosen:
             sheet.write(row, result_col + 1, float(Decimal(chosen['net'])), st['winner_cash'])
             sheet.write(row, result_col + 2, float(Decimal(chosen['saving'])), st['winner_cash'])
+            sheet.write(row, result_col + 3, chosen.get('delivery', ''), plain)
+            sheet.write(row, result_col + 4, comparison.get('selection_reason', ''), plain)
+            sheet.write(row, result_col + 5, comparison.get('selection_note', ''), plain)
+            sheet.write(row, result_col + 6, float(Decimal(comparison.get('opportunity_cost', '0'))), cash)
         else:
-            sheet.write(row, result_col + 1, '', cash)
-            sheet.write(row, result_col + 2, '', cash)
+            for off in range(1, 7):
+                sheet.write(row, result_col + off, '', cash if off in (1, 2, 6) else plain)
         sheet.row(row).height_mismatch = True
         sheet.row(row).height = 640 if (item.get('note') or item.get('purchase_type')) else 420
     return sheet
@@ -220,7 +230,8 @@ def _build_detail_sheet(book, xlwt, data, result, st):
     headings = ['HOTEL', 'SCI', 'COMPRADOR', 'DESCRIÇÃO DO ARTIGO', 'QUANTIDADE', 'UNIDADE', 'TIPO DE COMPRA', 'OBSERVAÇÃO']
     for supplier in data['suppliers']:
         headings += [f"{supplier['name']} — {label}" for label in ('Inicial unitário', 'Negociado unitário', 'Desconto %', 'Bruto R$', 'Economia R$', 'Final R$')]
-    headings += ['VENCEDOR', 'VALOR FINAL R$', 'ECONOMIA R$']
+    headings += ['FORNECEDOR ESCOLHIDO', 'VALOR FINAL R$', 'ECONOMIA R$', 'PRAZO ESCOLHIDO',
+                 'MOTIVO DA ESCOLHA', 'OBSERVAÇÃO DA ESCOLHA', 'DIF. VS MENOR PREÇO R$']
     for col, value in enumerate(headings):
         sheet.write(0, col, value, st['header'])
         sheet.col(col).width = 5500 if col in (0, 2) else 4300
@@ -251,6 +262,10 @@ def _build_detail_sheet(book, xlwt, data, result, st):
         if chosen:
             sheet.write(row, col + 1, float(Decimal(chosen['net'])), st['winner_cash'])
             sheet.write(row, col + 2, float(Decimal(chosen['saving'])), st['winner_cash'])
+            sheet.write(row, col + 3, chosen.get('delivery', ''), plain)
+            sheet.write(row, col + 4, comparison.get('selection_reason', ''), plain)
+            sheet.write(row, col + 5, comparison.get('selection_note', ''), plain)
+            sheet.write(row, col + 6, float(Decimal(comparison.get('opportunity_cost', '0'))), cash)
     return sheet
 
 
@@ -283,8 +298,18 @@ def _build_supplier_summary(book, xlwt, data, result, st):
     sheet.write(row, 0, 'Empates não resolvidos', st['subtitle'])
     sheet.write(row, 1, result['ties'], st['plain'])
     row += 1
+    sheet.write(row, 0, 'Meta de saving', st['subtitle'])
+    sheet.write(row, 1, float(Decimal(result.get('saving_target_percent', '0')) / 100), st['percent'])
+    sheet.write(row, 2, 'Saving atual', st['subtitle'])
+    sheet.write(row, 3, float(Decimal(result.get('saving_percent', '0')) / 100), st['percent'])
+    row += 1
+    sheet.write(row, 0, 'Falta economizar', st['subtitle'])
+    sheet.write(row, 1, float(Decimal(result.get('saving_target_gap', '0'))), st['cash'])
+    sheet.write(row, 2, 'Dif. decisão operacional', st['subtitle'])
+    sheet.write(row, 3, float(Decimal(result.get('opportunity_cost', '0'))), st['cash'])
+    row += 1
     sheet.write(row, 0, 'Critério', st['subtitle'])
-    sheet.write_merge(row, row, 1, 3, 'Menor preço negociado por item. Frete e condições de lote não incluídos.', st['plain'])
+    sheet.write_merge(row, row, 1, 3, 'Menor preço negociado como referência financeira; escolha final pode registrar justificativa operacional.', st['plain'])
     for col, width in enumerate((9500, 5200, 6500, 6500)):
         sheet.col(col).width = width
     return sheet
@@ -293,8 +318,8 @@ def _build_supplier_summary(book, xlwt, data, result, st):
 def build_xls(data, result):
     import xlwt
 
-    detailed_columns = 8 + len(data['suppliers']) * 6 + 3
-    print_columns = 5 + len(data['suppliers']) * 3 + 3
+    detailed_columns = 8 + len(data['suppliers']) * 6 + 7
+    print_columns = 5 + len(data['suppliers']) * 3 + 7
     if max(detailed_columns, print_columns) > 256 or len(data['items']) + 6 > 65536:
         raise ValueError('O formato XLS aceita até 256 colunas e 65.536 linhas. Divida este mapa em mapas menores.')
 

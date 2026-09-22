@@ -212,6 +212,84 @@ class PurchasesTest(unittest.TestCase):
         self.assertEqual(reopened.all('messages')[0]['status'], 'uncertain')
 
 
+    def test_default_saving_target_calculates_price_goal_from_best_initial_quote(self):
+        result = engine.evaluate(self.m)
+        line = result['lines'][0]
+        self.assertEqual(result['saving_target_percent'], '5')
+        self.assertEqual(line['target_price'], '9.03')
+        quote = next(q for q in line['quotes'] if q['supplier_id'] == 's2')
+        self.assertEqual(quote['target_reduction_unit'], '0.47')
+        self.assertFalse(quote['target_met'])
+
+    def test_manual_supplier_choice_can_override_lowest_price_with_reason(self):
+        self.m['quotes'][sample()['id']]['s2']['delivery'] = '2 dias úteis'
+        self.m['awards'] = {sample()['id']: {'supplier_id': 's2', 'reason': 'Prazo de entrega', 'note': 'Hotel precisa receber esta semana'}}
+        saved = self.s.save_map(self.m)
+        line = saved['result']['lines'][0]
+        self.assertEqual(line['chosen']['supplier_id'], 's2')
+        self.assertTrue(line['manual_selection'])
+        self.assertEqual(line['selection_reason'], 'Prazo de entrega')
+        self.assertEqual(line['chosen']['delivery'], '2 dias úteis')
+        self.assertEqual(line['opportunity_cost'], '5.00')
+        self.assertEqual(saved['result']['opportunity_cost'], '5.00')
+
+    def test_manual_choice_above_lowest_price_requires_reason(self):
+        self.m['awards'] = {sample()['id']: {'supplier_id': 's2', 'reason': '', 'note': ''}}
+        with self.assertRaisesRegex(ValueError, 'motivo'):
+            self.s.save_map(self.m)
+
+    def test_delivery_is_optional_and_persists_when_informed(self):
+        self.m['quotes'][sample()['id']]['s1']['delivery'] = '15 dias'
+        saved = self.s.save_map(self.m)
+        self.assertEqual(saved['map']['quotes'][sample()['id']]['s1']['delivery'], '15 dias')
+        self.assertEqual(saved['result']['lines'][0]['quotes'][0]['delivery'], '15 dias')
+
+    def test_negotiation_preview_is_second_message_without_greeting_or_sci(self):
+        p = self.s.negotiation_preview(self.m['id'], 's2')
+        self.assertTrue(p['message'].startswith('Para fecharmos,'))
+        self.assertIn('Consegue fechar esse item no valor abaixo?', p['message'])
+        self.assertIn('Lâmpada — 10 UN', p['message'])
+        self.assertIn('R$ 9,03 unitário', p['message'])
+        self.assertNotIn('Olá', p['message'])
+        self.assertNotIn('SCI', p['message'])
+        self.assertEqual(len(p['targets']), 1)
+
+    def test_negotiation_preview_adapts_to_multiple_items(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = engine.Store(tmp)
+            item1 = sample()
+            item2 = {**sample(), 'id': '3|2|200', 'sci': '2', 'description': 'Cabo PP', 'quantity': '2'}
+            store.put('items', item1['id'], item1)
+            store.put('items', item2['id'], item2)
+            m = store.create_map({'name': 'Dois itens', 'ids': [item1['id'], item2['id']]})
+            m['suppliers'] = [{'id': 's1', 'name': 'Fornecedor A', 'phone': '5585999999999'},
+                              {'id': 's2', 'name': 'Fornecedor B', 'phone': '5585988888888'}]
+            m['quotes'] = {
+                item1['id']: {'s1': {'price': '10', 'negotiated': ''}, 's2': {'price': '11', 'negotiated': ''}},
+                item2['id']: {'s1': {'price': '20', 'negotiated': ''}, 's2': {'price': '22', 'negotiated': ''}},
+            }
+            m = store.save_map(m)['map']
+            p = store.negotiation_preview(m['id'], 's2')
+            self.assertIn('Consegue fechar os itens nos valores abaixo?', p['message'])
+            self.assertIn('Lâmpada — 10 UN', p['message'])
+            self.assertIn('Cabo PP — 2 UN', p['message'])
+            self.assertIn('nesses valores', p['message'])
+            self.assertEqual(len(p['targets']), 2)
+
+    def test_negotiation_send_accepts_edited_message_and_is_deduplicated(self):
+        p = self.s.negotiation_preview(self.m['id'], 's2')
+        custom = 'Para fecharmos, consegue chegar nesse valor? Me confirma por favor.'
+        body = {'map_id': self.m['id'], 'supplier_id': 's2', 'fingerprint': p['fingerprint'],
+                'revision': p['revision'], 'message': custom}
+        with patch('compras_engine.whatsapp_request', side_effect=[{'ready': True}, {'status': 'sent'}]) as bridge:
+            msg = self.s.send_negotiation(body)
+        self.assertEqual(msg['kind'], 'negotiation')
+        self.assertEqual(msg['message'], custom)
+        self.assertEqual(bridge.call_args_list[-1].args[1]['message'], custom)
+        with self.assertRaisesRegex(ValueError, 'já foi enviada'):
+            self.s.send_negotiation(body)
+
+
 class ImportHardeningTest(unittest.TestCase):
     def test_header_can_start_after_report_metadata_rows(self):
         with tempfile.TemporaryDirectory() as tmp:

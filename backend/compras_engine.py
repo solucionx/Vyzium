@@ -28,7 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.2.0')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.2.1')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
@@ -51,6 +51,28 @@ HOTEL_CNPJ = {
     'CARMEL ICARAIZINHO': '45.862.118/0001-67',
     'CARMEL ICARAIZINHO RESORT LTDA': '45.862.118/0001-67',
 }
+
+AWARD_REASONS = (
+    'Prazo de entrega',
+    'Disponibilidade imediata',
+    'Qualidade',
+    'Frete',
+    'Condição de pagamento',
+    'Histórico do fornecedor',
+    'Necessidade do hotel',
+    'Outro',
+)
+
+
+def format_brl(value):
+    value = money(Decimal(value))
+    integer, decimal = f"{value:.2f}".split('.')
+    chunks = []
+    while integer:
+        chunks.append(integer[-3:])
+        integer = integer[:-3]
+    return 'R$ ' + '.'.join(reversed(chunks)) + ',' + decimal
+
 
 
 def hotel_cnpj(company):
@@ -196,10 +218,31 @@ def load_items(path):
                     'missing_deadline': sum(not i['needed'] for i in result)}
 
 
+def _saving_target(data):
+    raw = data.get('saving_target', '5')
+    target = number('5' if raw in ('', None) else raw)
+    if target > Decimal('99.99'):
+        raise ValueError('A meta de saving deve ficar entre 0% e 99,99%.')
+    return target
+
+
 def evaluate(data):
-    """Per-line discounts apply to that line total, never to the supplier basket."""
+    """Evaluate prices without conflating the financial best with the buyer's final choice.
+
+    The cheapest valid final quote remains the financial reference. A buyer may explicitly
+    choose another quoted supplier for an operational reason (delivery, availability, etc.).
+    Saving is always measured against the initial price of the supplier that was actually
+    chosen, while ``opportunity_cost`` records any premium versus the lowest final quote.
+    """
     lines = []
     totals = {s['id']: {'name': s['name'], 'won': 0, 'net': Decimal(0), 'saving': Decimal(0)} for s in data['suppliers']}
+    target_percent = _saving_target(data)
+    total_opportunity_cost = Decimal(0)
+    total_initial_selected = Decimal(0)
+    target_map_value = Decimal(0)
+    target_lines = 0
+    awards = data.get('awards') or {}
+
     for item in data['items']:
         quotes = []
         for supplier in data['suppliers']:
@@ -231,24 +274,73 @@ def evaluate(data):
                 percent = money(saving / gross * 100) if gross else Decimal(0)
             quotes.append({'supplier_id': supplier['id'], 'supplier': supplier['name'], 'gross': str(gross),
                            'saving': str(saving), 'net': str(net), 'initial_price': str(price),
-                           'final_price': str(final_price), 'discount_percent': str(percent)})
+                           'final_price': str(final_price), 'discount_percent': str(percent),
+                           'delivery': text(q.get('delivery'))[:120]})
+
         best = min((Decimal(q['net']) for q in quotes), default=None)
         winners = [q for q in quotes if Decimal(q['net']) == best]
-        selected = data.get('choices', {}).get(item['id'])
-        chosen = next((q for q in winners if q['supplier_id'] == selected), None)
-        if len(winners) == 1:
-            chosen = winners[0]
+        best_initial = min((Decimal(q['initial_price']) for q in quotes), default=None)
+        target_price = None
+        if best_initial is not None:
+            target_price = money(best_initial * (Decimal('1') - target_percent / Decimal('100')))
+            target_map_value += money(target_price * number(item['quantity']))
+            target_lines += 1
+            for quote in quotes:
+                current = Decimal(quote['final_price'])
+                remaining = max(Decimal(0), current - target_price)
+                quote['target_price'] = str(target_price)
+                quote['target_reduction_unit'] = str(money(remaining))
+                quote['required_reduction_percent'] = str(money(remaining / current * 100) if current else Decimal(0))
+                quote['target_met'] = current <= target_price
+
+        award = awards.get(item['id']) if isinstance(awards, dict) else None
+        chosen = None
+        manual_selection = False
+        selection_reason = ''
+        selection_note = ''
+        if isinstance(award, dict) and award.get('supplier_id'):
+            chosen = next((q for q in quotes if q['supplier_id'] == award.get('supplier_id')), None)
+            manual_selection = chosen is not None
+            selection_reason = text(award.get('reason'))[:120]
+            selection_note = text(award.get('note'))[:500]
+        if chosen is None:
+            selected = data.get('choices', {}).get(item['id'])
+            chosen = next((q for q in winners if q['supplier_id'] == selected), None)
+            if len(winners) == 1:
+                chosen = winners[0]
+
+        opportunity_cost = Decimal(0)
         if chosen:
             total = totals[chosen['supplier_id']]
             total['won'] += 1
             total['net'] += Decimal(chosen['net'])
             total['saving'] += Decimal(chosen['saving'])
-        lines.append({'id': item['id'], 'quotes': quotes, 'winners': winners, 'chosen': chosen,
+            total_initial_selected += Decimal(chosen['gross'])
+            if best is not None:
+                opportunity_cost = max(Decimal(0), Decimal(chosen['net']) - best)
+                total_opportunity_cost += opportunity_cost
+
+        lines.append({'id': item['id'], 'quotes': quotes, 'winners': winners, 'financial_winners': winners,
+                      'chosen': chosen, 'manual_selection': manual_selection,
+                      'selection_reason': selection_reason, 'selection_note': selection_note,
+                      'opportunity_cost': str(money(opportunity_cost)),
+                      'target_price': str(target_price) if target_price is not None else '',
                       'state': 'unquoted' if not winners else ('tie' if not chosen else 'winner')})
-    return {'lines': lines, 'suppliers': [{**t, 'id': sid, 'net': str(t['net']), 'saving': str(t['saving'])} for sid, t in totals.items()],
-            'net': str(sum((t['net'] for t in totals.values()), Decimal(0))),
-            'saving': str(sum((t['saving'] for t in totals.values()), Decimal(0))),
-            'unquoted': sum(x['state'] == 'unquoted' for x in lines), 'ties': sum(x['state'] == 'tie' for x in lines)}
+
+    net_total = sum((t['net'] for t in totals.values()), Decimal(0))
+    saving_total = sum((t['saving'] for t in totals.values()), Decimal(0))
+    saving_percent = money(saving_total / total_initial_selected * 100) if total_initial_selected else Decimal(0)
+    target_saving_amount = money(total_initial_selected * target_percent / 100) if total_initial_selected else Decimal(0)
+    target_gap = max(Decimal(0), target_saving_amount - saving_total)
+    return {'lines': lines,
+            'suppliers': [{**t, 'id': sid, 'net': str(t['net']), 'saving': str(t['saving'])} for sid, t in totals.items()],
+            'net': str(net_total), 'saving': str(saving_total), 'gross': str(total_initial_selected),
+            'saving_percent': str(saving_percent), 'saving_target_percent': str(target_percent),
+            'saving_target_amount': str(target_saving_amount), 'saving_target_gap': str(money(target_gap)),
+            'target_map_value': str(money(target_map_value)), 'target_lines': target_lines,
+            'opportunity_cost': str(money(total_opportunity_cost)),
+            'unquoted': sum(x['state'] == 'unquoted' for x in lines),
+            'ties': sum(x['state'] == 'tie' for x in lines)}
 
 
 def whatsapp_request(route, body=None):
@@ -423,7 +515,7 @@ class Store:
                 raise ValueError('Há item em outro mapa ativo. Conclua o mapa anterior antes de reutilizá-lo.')
             data = {'id': uuid.uuid4().hex, 'name': name, 'created': now(), 'revision': 1,
                     'items': [{**catalog[i], 'note': catalog[i].get('note', ''), 'purchase_type': catalog[i].get('purchase_type', '')} for i in ids],
-                    'suppliers': [], 'quotes': {}, 'choices': {}, 'archived': False}
+                    'suppliers': [], 'quotes': {}, 'choices': {}, 'awards': {}, 'saving_target': '5', 'archived': False}
             self.put('maps', data['id'], data)
         return data
 
@@ -482,6 +574,12 @@ class Store:
             data['name'] = text(body.get('name', data['name']))[:160]
             if not data['name']:
                 raise ValueError('Nome do mapa obrigatório.')
+
+            target = number(body.get('saving_target', data.get('saving_target', '5')) or '5')
+            if target > Decimal('99.99'):
+                raise ValueError('A meta de saving deve ficar entre 0% e 99,99%.')
+            data['saving_target'] = str(target)
+
             suppliers = []
             seen = set()
             names = set()
@@ -496,16 +594,21 @@ class Store:
                 seen.add(sid)
                 names.add(norm(name))
             data['suppliers'] = suppliers
+
             notes = {i['id']: i for i in body.get('items', [])}
             for i in data['items']:
                 if i['id'] in notes:
                     i['note'] = text(notes[i['id']].get('note'))[:2000]
                     i['purchase_type'] = text(notes[i['id']].get('purchase_type'))[:100]
+
             raw_quotes = body.get('quotes', {})
             data['quotes'] = {i['id']: {s['id']: raw_quotes.get(i['id'], {}).get(s['id'], {}) for s in suppliers} for i in data['items']}
             for quotes in data['quotes'].values():
                 for sid, q in quotes.items():
                     normalized = {'price': '' if q.get('price') in ('', None) else str(number(q['price']))}
+                    delivery = text(q.get('delivery'))[:120]
+                    if delivery:
+                        normalized['delivery'] = delivery
                     if 'negotiated' in q:
                         # Preço inicial vazio significa que este fornecedor não cotou este item.
                         # Qualquer valor negociado residual é descartado para não participar da comparação.
@@ -513,8 +616,39 @@ class Store:
                     else:
                         normalized.update(discount=str(number(q.get('discount') or 0)), kind=q.get('kind', 'percent'))
                     quotes[sid] = normalized
-            data['choices'] = body.get('choices', {})
-            evaluate(data)
+
+            # Existing `choices` remains the compatibility mechanism for old tie-only maps.
+            data['choices'] = body.get('choices', data.get('choices', {})) or {}
+
+            valid_items = {i['id'] for i in data['items']}
+            valid_suppliers = {s['id'] for s in suppliers}
+            raw_awards = body.get('awards', data.get('awards', {})) or {}
+            awards = {}
+            if not isinstance(raw_awards, dict):
+                raise ValueError('Escolha de fornecedor inválida.')
+            for item_id, award in raw_awards.items():
+                if item_id not in valid_items or not isinstance(award, dict):
+                    continue
+                supplier_id = text(award.get('supplier_id'))
+                if not supplier_id:
+                    continue
+                if supplier_id not in valid_suppliers:
+                    raise ValueError('Fornecedor escolhido não pertence mais a este mapa.')
+                quote = data['quotes'].get(item_id, {}).get(supplier_id, {})
+                if quote.get('price') in ('', None):
+                    raise ValueError('Só é possível escolher um fornecedor que tenha cotado o item.')
+                reason = text(award.get('reason'))[:120]
+                note = text(award.get('note'))[:500]
+                if reason and reason not in AWARD_REASONS:
+                    raise ValueError('Motivo da escolha inválido.')
+                awards[item_id] = {'supplier_id': supplier_id, 'reason': reason, 'note': note}
+            data['awards'] = awards
+
+            result = evaluate(data)
+            for line in result['lines']:
+                if line['manual_selection'] and Decimal(line['opportunity_cost']) > 0 and not line['selection_reason']:
+                    raise ValueError('Informe o motivo ao escolher uma proposta acima do menor preço.')
+
             data['revision'] += 1
             data['updated'] = now()
             self.put('maps', data['id'], data)
@@ -559,6 +693,103 @@ class Store:
         digest = hashlib.sha256((mid + '|' + supplier['phone'] + '|' + message).encode()).hexdigest()
         return {'supplier': supplier, 'message': message, 'fingerprint': digest, 'revision': data['revision']}
 
+    def negotiation_preview(self, mid, sid):
+        detail = self.detail(mid)
+        data = detail['map']
+        result = detail['result']
+        if data['archived']:
+            raise ValueError('Mapa concluído. Negociações só podem ser enviadas em mapas em cotação.')
+        if detail['changes']:
+            raise ValueError('A base mudou para itens deste mapa. Conclua este mapa e crie outro com os dados atuais antes de negociar.')
+        supplier = next((s for s in data['suppliers'] if s['id'] == sid), None)
+        if not supplier:
+            raise ValueError('Fornecedor não encontrado.')
+
+        targets = []
+        items_by_id = {i['id']: i for i in data['items']}
+        for line in result['lines']:
+            quote = next((q for q in line['quotes'] if q['supplier_id'] == sid), None)
+            if not quote or not line.get('target_price'):
+                continue
+            current = Decimal(quote['final_price'])
+            target = Decimal(line['target_price'])
+            if current <= target:
+                continue
+            item = items_by_id[line['id']]
+            targets.append({
+                'item_id': item['id'],
+                'description': item['description'],
+                'quantity': item['quantity'],
+                'unit': item['unit'],
+                'current_price': str(current),
+                'target_price': str(target),
+                'reduction_unit': quote['target_reduction_unit'],
+                'required_reduction_percent': quote['required_reduction_percent'],
+            })
+
+        if not targets:
+            raise ValueError('Este fornecedor não possui itens pendentes de negociação para a meta atual.')
+
+        singular = len(targets) == 1
+        if singular:
+            lines = ['Para fecharmos, preciso que você baixe um pouco esse valor. Consegue fechar esse item no valor abaixo?', '']
+        else:
+            lines = ['Para fecharmos, preciso que você baixe um pouco esses valores. Consegue fechar os itens nos valores abaixo?', '']
+        for target in targets:
+            lines.append(f"{target['description']} — {target['quantity']} {target['unit']}")
+            lines.append(f"{format_brl(target['target_price'])} unitário")
+            lines.append('')
+        lines.append('Se conseguir chegar nesse valor, me confirma por favor.' if singular else 'Se conseguir chegar nesses valores, me confirma por favor.')
+        message = '\n'.join(lines)
+        if len(message) > 60000:
+            raise ValueError('Negociação muito grande para uma mensagem. Divida os itens em mapas menores.')
+        # Fingerprint intentionally binds the preview to the current map revision and target values.
+        context = json.dumps(targets, ensure_ascii=False, sort_keys=True)
+        digest = hashlib.sha256((mid + '|' + sid + '|negotiation|' + str(data['revision']) + '|' + context).encode()).hexdigest()
+        return {'supplier': supplier, 'message': message, 'fingerprint': digest,
+                'revision': data['revision'], 'saving_target': result['saving_target_percent'], 'targets': targets}
+
+    def send_negotiation(self, body):
+        if not self.send_lock.acquire(blocking=False):
+            raise ValueError('Já existe um envio em andamento.')
+        record = None
+        submitted = False
+        try:
+            with self.lock:
+                p = self.negotiation_preview(body['map_id'], body['supplier_id'])
+                if p['fingerprint'] != body.get('fingerprint') or p['revision'] != body.get('revision'):
+                    raise ValueError('A meta ou os valores do mapa mudaram. Atualize a prévia antes de enviar.')
+                if not p['supplier']['phone']:
+                    raise ValueError('Cadastre o WhatsApp deste fornecedor.')
+                message = text(body.get('message'))
+                if not message:
+                    raise ValueError('A mensagem de negociação não pode ficar vazia.')
+                if len(message) > 60000:
+                    raise ValueError('Mensagem muito grande para o WhatsApp.')
+                send_fingerprint = hashlib.sha256((body['map_id'] + '|' + p['supplier']['phone'] + '|negotiation|' + message).encode()).hexdigest()
+                if any(m.get('fingerprint') == send_fingerprint and m.get('status') in ('sent', 'sending', 'uncertain') for m in self.all('messages')):
+                    raise ValueError('Esta negociação já foi enviada ou está incerta. Consulte o Histórico.')
+                record = {'id': uuid.uuid4().hex, 'at': now(), 'map_id': body['map_id'], 'kind': 'negotiation',
+                          'supplier': p['supplier'], 'message': message, 'fingerprint': send_fingerprint,
+                          'revision': p['revision'], 'targets': p['targets'], 'saving_target': p['saving_target'],
+                          'status': 'sending'}
+                self.put('messages', record['id'], record)
+            whatsapp_request('/wait')
+            submitted = True
+            response = whatsapp_request('/send', {'phone': p['supplier']['phone'], 'message': message})
+            record.update(status=response.get('status', 'uncertain'), error=response.get('error', ''), message_id=response.get('message_id'))
+            if record['status'] not in ('sent', 'failed', 'uncertain'):
+                record['status'] = 'uncertain'
+        except Exception as exc:
+            if record is None:
+                raise
+            record.update(status='uncertain' if submitted else 'failed', error=str(exc))
+        finally:
+            if record:
+                self.put('messages', record['id'], record)
+            self.send_lock.release()
+        return record
+
     def send(self, body):
         if not self.send_lock.acquire(blocking=False):
             raise ValueError('Já existe um envio em andamento.')
@@ -573,7 +804,7 @@ class Store:
                     raise ValueError('Cadastre o WhatsApp deste fornecedor.')
                 if any(m['fingerprint'] == p['fingerprint'] and m['status'] in ('sent', 'sending', 'uncertain') for m in self.all('messages')):
                     raise ValueError('Esta solicitação já foi enviada ou está incerta. Consulte o Histórico.')
-                record = {'id': uuid.uuid4().hex, 'at': now(), 'map_id': body['map_id'], **p, 'status': 'sending'}
+                record = {'id': uuid.uuid4().hex, 'at': now(), 'map_id': body['map_id'], 'kind': 'quote', **p, 'status': 'sending'}
                 self.put('messages', record['id'], record)
             whatsapp_request('/wait')
             submitted = True
@@ -605,14 +836,19 @@ class Store:
         m = data['map']
         rows = [['HOTEL', 'SCI', 'TIPO DE COMPRA', 'DESCRIÇÃO', 'QTD', 'UNIDADE', 'OBSERVAÇÃO'] +
                 [f"{s['name']} — {label}" for s in m['suppliers'] for label in ('Preço unitário', 'Total bruto', 'Desconto R$', 'Total líquido')] +
-                ['VENCEDOR', 'VALOR FINAL', 'ECONOMIA R$']]
+                ['FORNECEDOR ESCOLHIDO', 'VALOR FINAL', 'ECONOMIA R$', 'PRAZO ESCOLHIDO', 'MOTIVO DA ESCOLHA', 'OBSERVAÇÃO DA ESCOLHA', 'DIF. VS MENOR PREÇO R$']]
         for i, result in zip(m['items'], data['result']['lines']):
             row = [i['company'], i['sci'], i['purchase_type'], i['description'], i['quantity'], i['unit'], i['note']]
             for s in m['suppliers']:
                 q = next((q for q in result['quotes'] if q['supplier_id'] == s['id']), None)
                 row += [str(m['quotes'][i['id']][s['id']]['price']).replace('.', ','), q['gross'].replace('.', ','), q['saving'].replace('.', ','), q['net'].replace('.', ',')] if q else ['', '', '', '']
             chosen = result['chosen']
-            row += [chosen['supplier'], chosen['net'].replace('.', ','), chosen['saving'].replace('.', ',')] if chosen else [('EMPATE' if result['state'] == 'tie' else 'SEM COTAÇÃO'), '', '']
+            if chosen:
+                row += [chosen['supplier'], chosen['net'].replace('.', ','), chosen['saving'].replace('.', ','),
+                        chosen.get('delivery', ''), result.get('selection_reason', ''), result.get('selection_note', ''),
+                        result.get('opportunity_cost', '0').replace('.', ',')]
+            else:
+                row += [('EMPATE' if result['state'] == 'tie' else 'SEM COTAÇÃO'), '', '', '', '', '', '']
             rows.append(row)
         out = io.StringIO()
         writer = csv.writer(out, delimiter=';')
@@ -666,6 +902,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, s.data_safety_status())
                 if parsed.path == '/preview':
                     return self.reply(200, s.preview(query['id'], query['supplier']))
+                if parsed.path == '/negotiation-preview':
+                    return self.reply(200, s.negotiation_preview(query['id'], query['supplier']))
                 if parsed.path == '/history':
                     return self.reply(200, s.all('messages')[::-1])
                 if parsed.path == '/export':
@@ -698,6 +936,8 @@ class Handler(BaseHTTPRequestHandler):
                     ))
                 if parsed.path == '/send':
                     return self.reply(200, s.send(body))
+                if parsed.path == '/send-negotiation':
+                    return self.reply(200, s.send_negotiation(body))
                 if parsed.path == '/review':
                     return self.reply(200, s.review(body))
             self.reply(404, {'error': 'Operação não encontrada.'})

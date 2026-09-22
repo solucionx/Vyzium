@@ -274,8 +274,8 @@ const ROUTES = {
     POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed', '/data-safety/backup'])
   },
   compras: {
-    GET: new Set(['/health', '/overview', '/items', '/maps', '/map', '/preview', '/history', '/settings', '/export', '/data-safety']),
-    POST: new Set(['/import', '/maps/create', '/maps/save', '/maps/archive', '/settings', '/send', '/review', '/data-safety/backup'])
+    GET: new Set(['/health', '/overview', '/items', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),
+    POST: new Set(['/import', '/maps/create', '/maps/save', '/maps/complete', '/maps/archive', '/maps/delete', '/settings', '/send', '/send-negotiation', '/review', '/data-safety/backup'])
   }
 };
 
@@ -285,7 +285,7 @@ function engineRequestTimeout(moduleName, method, routePath) {
   if (routePath === '/import') return 300000;
   if (routePath === '/export') return 120000;
   if (routePath === '/data-safety/backup') return 120000;
-  if (moduleName === 'compras' && String(method).toUpperCase() === 'POST' && routePath === '/send') return 240000;
+  if (moduleName === 'compras' && String(method).toUpperCase() === 'POST' && ['/send', '/send-negotiation'].includes(routePath)) return 240000;
   return 45000;
 }
 
@@ -337,10 +337,11 @@ async function apiRequest(method, route, body) {
   if (!['followup', 'compras'].includes(activeModule)) throw new Error('Entre em um módulo para realizar esta operação.');
   // Os dois módulos usam a mesma sessão do WhatsApp. Impedir que uma cotação
   // concorra com um lote de follow-up que esteja rodando em segundo plano.
-  if (activeModule === 'compras' && String(method).toUpperCase() === 'POST' && route === '/send') {
+  const routePath = String(route || '').split('?')[0];
+  if (activeModule === 'compras' && String(method).toUpperCase() === 'POST' && ['/send', '/send-negotiation'].includes(routePath)) {
     try {
       const state = await requestEngine('followup', 'GET', '/send-status');
-      if (state?.active) throw new Error('O Acompanhamento possui um lote de WhatsApp em andamento. Aguarde a conclusão antes de enviar uma cotação.');
+      if (state?.active) throw new Error('O Acompanhamento possui um lote de WhatsApp em andamento. Aguarde a conclusão antes de enviar pelo módulo de Compras.');
     } catch (error) {
       if (String(error.message || error).includes('lote de WhatsApp')) throw error;
       // Se o status do motor principal estiver temporariamente indisponível,
