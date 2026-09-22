@@ -1,5 +1,9 @@
 appId: com.vyzium.gestaooperacional
 productName: Vyzium
+# Store-only metadata override: electron-builder v26 injects package metadata into
+# AppxManifest.xml. Keep this text XML-safe without changing the normal NSIS build.
+extraMetadata:
+  description: "Vyzium 3.2.1 - acompanhamento operacional, cotacoes e mapas de compra."
 artifactName: "Vyzium-Store-${version}-${arch}.${ext}"
 directories:
   output: dist-store
