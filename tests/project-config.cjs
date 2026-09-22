@@ -15,7 +15,7 @@ test('package identity remains compatible with the existing Vyzium installation'
 });
 
 
-test('3.2.0 keeps one authoritative release version across package, Python and renderer', () => {
+test('3.2.1 keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -92,7 +92,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.2.0');
+  assert.equal(pkg.version, '3.2.1');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
@@ -216,4 +216,18 @@ test('operational view exposes multi-select filters without changing Compras', (
   assert.match(operational, /urgency:\s*\{title:'Prazo'/);
   assert.match(operational, /control_status:\s*\{title:'Controle'/);
   assert.match(operational, /attendance_status:\s*\{title:'Atendimento'/);
+});
+
+
+test('Compras desktop allowlist covers map completion, deletion and assisted negotiation routes', () => {
+  const main = read('electron/main.js');
+  const requiredGet = ['/negotiation-preview'];
+  const requiredPost = ['/maps/complete', '/maps/delete', '/send-negotiation'];
+  for (const route of requiredGet) {
+    assert.ok(main.includes(`GET: new Set([`) && main.includes(`'${route}'`), `Rota GET ausente no allowlist do Electron: ${route}`);
+  }
+  for (const route of requiredPost) {
+    assert.ok(main.includes(`POST: new Set([`) && main.includes(`'${route}'`), `Rota POST ausente no allowlist do Electron: ${route}`);
+  }
+  assert.match(main, /\['\/send', '\/send-negotiation'\]\.includes\(routePath\)/);
 });
