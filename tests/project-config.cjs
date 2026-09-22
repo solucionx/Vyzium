@@ -249,7 +249,7 @@ test('Microsoft Store assets and build workflow are present without replacing th
   const storeWorkflow = read('.github/workflows/windows-store-package.yml');
   const releaseWorkflow = read('.github/workflows/windows-release.yml');
   assert.match(storeWorkflow, /workflow_dispatch:/);
-  assert.match(storeWorkflow, /electron-builder --win appx --x64 --config electron-builder\.store\.yml/);
+  assert.match(storeWorkflow, /(?:npx\s+)?electron-builder --win appx --x64 --config electron-builder\.store\.yml/);
   assert.match(storeWorkflow, /Vyzium-Store-3\.2\.1-x64/);
   assert.match(releaseWorkflow, /npm run build/);
   assert.match(releaseWorkflow, /Vyzium-Setup\.exe/);
