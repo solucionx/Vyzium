@@ -28,7 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.2.1')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.2.3')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
@@ -570,6 +570,43 @@ class Store:
                 raise ValueError('Mapa concluído: somente consulta e exportação estão disponíveis.')
             if body.get('revision') != data['revision']:
                 raise ValueError('O mapa foi alterado em outra tela. Abra novamente antes de salvar.')
+            # Removal is explicit: a partial/older payload must never delete items by omission.
+            remove_ids = body.get('remove_item_ids', [])
+            if not isinstance(remove_ids, list) or any(not isinstance(i, str) for i in remove_ids):
+                raise ValueError('Seleção de itens para remoção inválida.')
+            removed = set(remove_ids)
+            # Add only current, available catalog rows; never trust imported fields from the renderer.
+            add_ids = body.get('add_item_ids', [])
+            if (not isinstance(add_ids, list)
+                    or any(not isinstance(i, str) or not i for i in add_ids)
+                    or len(set(add_ids)) != len(add_ids)):
+                raise ValueError('Seleção de itens para inclusão inválida.')
+            added = set(add_ids)
+            new_items = []
+            if added:
+                if removed:
+                    raise ValueError('Adicione ou remova itens em operações separadas.')
+                if self.send_lock.locked():
+                    raise ValueError('Aguarde o envio terminar antes de adicionar itens.')
+                if added.intersection(i['id'] for i in data['items']):
+                    raise ValueError('Um item selecionado já está neste mapa. Atualize a seleção.')
+                catalog = {i['id']: i for i in self.catalog()['items']}
+                if any(i not in catalog for i in add_ids):
+                    raise ValueError('Um item deixou de estar disponível na base. Feche e abra a seleção novamente.')
+                if any(catalog[i]['maps'] for i in add_ids):
+                    raise ValueError('Um item já está em outro mapa ativo. Remova-o de lá antes de adicionar aqui.')
+                new_items = [{**catalog[i], 'note': catalog[i].get('note', ''),
+                              'purchase_type': catalog[i].get('purchase_type', '')} for i in add_ids]
+                # Inclusion may omit unchanged editable fields without erasing existing quotes/suppliers.
+                body = {**data, **body}
+            if removed:
+                if self.send_lock.locked():
+                    raise ValueError('Aguarde o envio terminar antes de remover um item.')
+                if not removed.issubset({i['id'] for i in data['items']}):
+                    raise ValueError('Um item não pertence mais a este mapa. Abra o mapa novamente.')
+                data['items'] = [i for i in data['items'] if i['id'] not in removed]
+                if not data['items']:
+                    raise ValueError('O mapa precisa manter ao menos um item. Para remover o último, use Excluir mapa.')
             # Only user-owned fields are editable; imported identity and quantities remain authoritative.
             data['name'] = text(body.get('name', data['name']))[:160]
             if not data['name']:
@@ -619,6 +656,8 @@ class Store:
 
             # Existing `choices` remains the compatibility mechanism for old tie-only maps.
             data['choices'] = body.get('choices', data.get('choices', {})) or {}
+            if removed or added:
+                data['choices'] = {iid: sid for iid, sid in data['choices'].items() if iid not in removed | added}
 
             valid_items = {i['id'] for i in data['items']}
             valid_suppliers = {s['id'] for s in suppliers}
@@ -644,6 +683,10 @@ class Store:
                 awards[item_id] = {'supplier_id': supplier_id, 'reason': reason, 'note': note}
             data['awards'] = awards
 
+            # Existing rows retain their quotes/decisions. Added rows always start without prices.
+            data['items'].extend(new_items)
+            for item in new_items:
+                data['quotes'][item['id']] = {s['id']: {'price': '', 'negotiated': ''} for s in suppliers}
             result = evaluate(data)
             for line in result['lines']:
                 if line['manual_selection'] and Decimal(line['opportunity_cost']) > 0 and not line['selection_reason']:
@@ -651,11 +694,15 @@ class Store:
 
             data['revision'] += 1
             data['updated'] = now()
+            if removed or added:
+                self.create_backup(reason='pre-remove-map-items' if removed else 'pre-add-map-items', automatic=True)
             self.put('maps', data['id'], data)
         return self.detail(data['id'])
 
     def detail(self, mid):
         data = self.get_map(mid)
+        # Stable hotel order also applies to existing maps. Prices/decisions remain keyed by item ID.
+        data['items'] = sorted(data['items'], key=lambda item: norm(item.get('company')))
         current = {i['id']: i for i in self.all('items')}
         changes = []
         for item in data['items']:
@@ -677,12 +724,16 @@ class Store:
         if not supplier:
             raise ValueError('Fornecedor não encontrado.')
         lines = [f"Olá, {supplier['name']}! Poderia cotar os itens abaixo?", f"Mapa: {data['name']}", '']
+        previous_hotel = None
         for n, item in enumerate(data['items'], 1):
             cnpj = hotel_cnpj(item['company'])
             if not cnpj:
                 raise ValueError(f"CNPJ não cadastrado para o hotel {item['company']}. Atualize a associação antes de enviar a cotação.")
-            lines += [f"{n}. {item['description']}", f"Hotel: {item['company']} | CNPJ: {cnpj}",
-                      f"Quantidade: {item['quantity']} {item['unit']}"]
+            hotel = norm(item['company'])
+            if hotel != previous_hotel:
+                lines += [f"Hotel: {item['company']} | CNPJ: {cnpj}", '']
+                previous_hotel = hotel
+            lines += [f"{n}. {item['description']}", f"Quantidade: {item['quantity']} {item['unit']}"]
             if item['note']:
                 lines.append('Observação: ' + item['note'])
             lines.append('')

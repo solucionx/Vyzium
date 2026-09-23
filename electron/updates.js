@@ -1,5 +1,5 @@
 'use strict';
-function createUpdater({app, dialog, getWindow, prepareInstall, promptInstall, platform = process.platform, windowsStore = process.windowsStore === true, autoUpdater = require('electron-updater').autoUpdater}) {
+function createUpdater({app, dialog, getWindow, prepareInstall, promptInstall, platform = process.platform, autoUpdater = require('electron-updater').autoUpdater}) {
   let busy = false, ready = false;
   const notify = message => {
     const win = getWindow();
@@ -52,7 +52,6 @@ function createUpdater({app, dialog, getWindow, prepareInstall, promptInstall, p
   }
   return {async check() {
     if (busy) return;
-    if (windowsStore) { notify('Atualizações são gerenciadas pela Microsoft Store.'); return; }
     if (!app.isPackaged || platform !== 'win32' || process.env.PORTABLE_EXECUTABLE_FILE) {
       notify('Para atualizar, use o Vyzium instalado pelo instalador do Windows.'); return;
     }
