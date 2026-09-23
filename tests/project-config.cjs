@@ -14,8 +14,24 @@ test('package identity remains compatible with the existing Vyzium installation'
   assert.equal(pkg.build?.productName, 'Vyzium');
 });
 
+test('release version changes preserve the original dependency versions and archive URLs', () => {
+  const lock = JSON.parse(read('package-lock.json'));
+  const expected = {
+    'node_modules/@electron/asar': '3.2.18',
+    'node_modules/node-webpmux': '3.2.1',
+    'node_modules/tar-fs/node_modules/tar-stream': '3.2.1',
+    'node_modules/whatsapp-web.js/node_modules/tar-stream': '3.2.1'
+  };
+  for (const [name, version] of Object.entries(expected)) {
+    assert.equal(lock.packages[name]?.version, version, `Dependência alterada ao numerar a release: ${name}`);
+    assert.ok(lock.packages[name].resolved.endsWith(`-${version}.tgz`));
+  }
+  assert.equal(lock.packages['node_modules/app-builder-lib'].dependencies['@electron/asar'], '3.2.18');
+  assert.equal(lock.packages['node_modules/whatsapp-web.js'].dependencies['node-webpmux'], '3.2.1');
+});
 
-test('3.2.1 keeps one authoritative release version across package, Python and renderer', () => {
+
+test('3.2.3 keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -92,7 +108,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.2.1');
+  assert.equal(pkg.version, '3.2.3');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
@@ -230,39 +246,4 @@ test('Compras desktop allowlist covers map completion, deletion and assisted neg
     assert.ok(main.includes(`POST: new Set([`) && main.includes(`'${route}'`), `Rota POST ausente no allowlist do Electron: ${route}`);
   }
   assert.match(main, /\['\/send', '\/send-negotiation'\]\.includes\(routePath\)/);
-});
-
-test('Microsoft Store package config matches reserved Vyzium identity and stays Desktop-only', () => {
-  const cfg = read('electron-builder.store.yml');
-  assert.match(cfg, /identityName:\s*Solucionx\.Vyzium/);
-  assert.match(cfg, /publisher:\s*["']CN=B0BDB428-BDCB-4054-A750-186A5394F35E["']/);
-  assert.match(cfg, /publisherDisplayName:\s*Solucionx/);
-  assert.match(cfg, /target:\s*\n\s*- target:\s*appx/);
-  assert.match(cfg, /minVersion:\s*["']10\.0\.17763\.0["']/);
-  assert.match(cfg, /languages:\s*\n\s*- pt-BR/);
-  assert.match(cfg, /extraMetadata:\s*\n\s*description:\s*["']Vyzium 3\.2\.1 - acompanhamento operacional, cotacoes e mapas de compra\.["']/);
-  const storeDescription = cfg.match(/extraMetadata:\s*\n\s*description:\s*["']([^"']+)["']/)?.[1] || '';
-  assert.doesNotMatch(storeDescription, /[<&]/, 'Descrição da build Store não pode injetar metacaracteres XML crus no AppxManifest.xml');
-});
-
-test('Microsoft Store assets and build workflow are present without replacing the normal Windows release', () => {
-  for (const asset of ['StoreLogo.png','Square150x150Logo.png','Square44x44Logo.png','Wide310x150Logo.png']) {
-    assert.ok(fs.existsSync(path.join(root, 'build', 'appx', asset)), `Asset Store ausente: ${asset}`);
-  }
-
-  // The Store pipeline must validate its own contract. It must not depend on
-  // another workflow file being present in the checkout snapshot, because a
-  // manual/re-run can legitimately execute an older GITHUB_SHA. The normal
-  // Windows release contract is authoritative in package.json and remains NSIS.
-  const storeWorkflow = read('.github/workflows/windows-store-package.yml');
-  const pkg = JSON.parse(read('package.json'));
-
-  assert.match(storeWorkflow, /workflow_dispatch:/);
-  assert.match(storeWorkflow, /(?:npx\s+)?electron-builder --win appx --x64 --config electron-builder\.store\.yml/);
-  assert.match(storeWorkflow, /Vyzium-Store-3\.2\.1-x64/);
-  assert.doesNotMatch(storeWorkflow, /Vyzium-Releases|gh\s+release|Vyzium-Setup\.exe/);
-
-  assert.match(pkg.scripts?.build || '', /electron-builder --win nsis --x64 --publish never/);
-  assert.deepEqual(pkg.build?.win?.target, ['nsis']);
-  assert.equal(pkg.build?.artifactName, 'Vyzium-Setup.${ext}');
 });

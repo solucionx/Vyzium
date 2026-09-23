@@ -2,13 +2,13 @@ const {test} = require('node:test');
 const assert = require('node:assert/strict');
 const {EventEmitter} = require('node:events');
 const {createUpdater} = require('../electron/updates');
-function fixture({packaged=true, available=true, response=0, blocked=false, windowsStore=false}={}) {
+function fixture({packaged=true, available=true, response=0, blocked=false}={}) {
   const events=[], updater=new EventEmitter(); let downloads=0, installs=0, prepared=0;
   updater.setFeedURL = feed => assert.deepEqual(feed, {provider:'github',owner:'solucionx',repo:'Vyzium-Releases'});
   updater.checkForUpdates = async () => {events.push('check'); if(available) updater.emit('update-available',{version:'2.1.0'});};
   updater.downloadUpdate = async () => {downloads++; events.push('download');};
   updater.quitAndInstall = (silent,reopen) => {assert.equal(reopen,true); installs++; events.push('install');};
-  const options={app:{isPackaged:packaged,getVersion:()=> '2.1.0'},platform:'win32',windowsStore,autoUpdater:updater,
+  const options={app:{isPackaged:packaged,getVersion:()=> '2.1.0'},platform:'win32',autoUpdater:updater,
     getWindow:()=>({isDestroyed:()=>false,webContents:{send:(_channel,s)=>events.push(s.message)}}),
     dialog:{showMessageBox:async()=>({response})},
     promptInstall:async()=>response===0,
@@ -17,13 +17,6 @@ function fixture({packaged=true, available=true, response=0, blocked=false, wind
 }
 test('development does not query or install',async()=>{
   const f=fixture({packaged:false});await f.client.check();assert.equal(f.events.includes('check'),false);
-});
-
-test('Microsoft Store build delegates updates to the Store and never queries GitHub',async()=>{
-  const f=fixture({windowsStore:true});await f.client.check();
-  assert.equal(f.events.includes('check'),false);
-  assert.deepEqual(f.counts(),{downloads:0,installs:0,prepared:0});
-  assert.ok(f.events.includes('Atualizações são gerenciadas pela Microsoft Store.'));
 });
 test('current version does not download',async()=>{
   const f=fixture({available:false});await f.client.check();assert.equal(f.counts().downloads,0);

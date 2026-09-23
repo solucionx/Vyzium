@@ -1,8 +1,23 @@
-# Vyzium 3.2.1 — Full Stable
+# Vyzium 3.2.3 — Full Stable
 
 Versão estável do Vyzium com evolução do módulo Cotação & Mapas. Mantém a base estabilizada de WhatsApp, SQLCipher, Firebase e importações e acrescenta negociação assistida com meta de saving, prazo por fornecedor, escolha justificada do fornecedor, busca e organização dos mapas, conclusão/exclusão segura, exportação XLS preparada para impressão e CNPJ do hotel nas solicitações de cotação.
 
-### Principais correções desta versão
+### Ajuste pontual da versão 3.2.3
+
+- botão **Adicionar itens** dentro de uma cotação existente, com busca, filtros por comprador/hotel e seleção de vários itens;
+- fornecedores, preços, negociações e decisões já registrados são preservados; as edições pendentes são salvas junto e os novos itens entram sem preços;
+- a disponibilidade é conferida novamente pelo backend ao salvar, impedindo duplicação e vínculo simultâneo com outro mapa ativo;
+- um item removido de uma cotação pode ser incluído em outra cotação existente;
+- backup antes da inclusão e testes de integração dos botões até o backend. Detalhes em `docs/VALIDACAO_3.2.3.md`.
+
+### Melhorias preservadas da versão 3.2.2
+
+- botão **Remover item** em cada linha de mapas em cotação, com confirmação, salvamento conjunto das edições e backup antes da exclusão;
+- hotel e CNPJ informados uma vez por grupo na solicitação de cotação;
+- itens da aba de preços organizados automaticamente por hotel, com a mesma sequência nas mensagens e exportações;
+- demais funcionalidades e dependências preservadas. Consulte `docs/VALIDACAO_3.2.3.md` para os testes e limites desta revisão.
+
+### Funcionalidades preservadas
 
 - negociação assistida calcula preço-alvo por item a partir da melhor proposta inicial e da meta de saving configurada;
 - o Vyzium mostra quanto cada fornecedor precisa reduzir em valor unitário e percentual para atingir a meta;
@@ -39,7 +54,7 @@ Versão estável do Vyzium com evolução do módulo Cotação & Mapas. Mantém 
 <p align="center">
   <a href="https://github.com/solucionx/Vyzium-Releases/releases/latest"><img alt="Download para Windows" src="https://img.shields.io/badge/BAIXAR_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white"></a>
   <a href="https://github.com/solucionx/Vyzium-Releases/releases"><img alt="Releases" src="https://img.shields.io/badge/RELEASES-0B3554?style=for-the-badge&logo=github&logoColor=white"></a>
-  <img alt="Versão 3.2.1 Full Stable" src="https://img.shields.io/badge/VERS%C3%83O-3.2.1%20FULL%20STABLE-0B3554?style=for-the-badge">
+  <img alt="Versão 3.2.3 Full Stable" src="https://img.shields.io/badge/VERS%C3%83O-3.2.3%20FULL%20STABLE-0B3554?style=for-the-badge">
   <img alt="Windows 10 e 11" src="https://img.shields.io/badge/WINDOWS-10_%7C_11-007D9C?style=for-the-badge&logo=windows11&logoColor=white">
   <img alt="Dados locais criptografados" src="https://img.shields.io/badge/DADOS-LOCAIS_CRIPTOGRAFADOS-003B73?style=for-the-badge&logo=sqlite&logoColor=white">
 </p>
@@ -504,14 +519,14 @@ Para gerar o instalador localmente:
 
 ## ✦ Release atual e segurança
 
-A versão atual é **3.2.1 Full Stable**. Ela preserva a identidade da instalação (`com.vyzium.gestaooperacional`), mantém a camada Data Safety/SQLCipher e usa a versão do `package.json` como fonte de verdade para o Electron e os motores Python.
+A versão atual é **3.2.3 Full Stable**. Ela preserva a identidade da instalação (`com.vyzium.gestaooperacional`), mantém a camada Data Safety/SQLCipher e usa a versão do `package.json` como fonte de verdade para o Electron e os motores Python.
 
-O gate técnico desta revisão está documentado em `docs/VALIDACAO_3.2.1.md`.
+O gate técnico desta revisão está documentado em `docs/VALIDACAO_3.2.3.md`.
 
 O workflow de release continua manual e gera primeiro uma **Draft**. A tag da release deve corresponder ao `package.json`:
 
 ```text
-v3.2.1
+v3.2.3
 ```
 
 > Antes de publicar para computadores em operação, execute o workflow Windows completo, incluindo os testes SQLCipher, `.xls`, verificação dos motores empacotados e o smoke test real do WhatsApp/Chrome invisível.

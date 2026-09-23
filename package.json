@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.2.1",
-  "description": "Vyzium 3.2.1: evolui Cotação & Mapas com negociação assistida, meta de saving, prazo por fornecedor e escolha justificada do fornecedor, preservando a base estável.",
+  "version": "3.2.3",
+  "description": "Vyzium 3.2.3: evolui Cotação & Mapas com negociação assistida, meta de saving, prazo por fornecedor e escolha justificada do fornecedor, preservando a base estável.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {

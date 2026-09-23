@@ -47,6 +47,9 @@ input:focus,select:focus,textarea:focus {outline:2px solid #00bfa55c;outline-off
 .discount-auto {font-size:11px;color:var(--brown-dark);margin-top:5px;}
 .item-details {font-size:11px;margin-top:5px;}
 .item-details summary {cursor:pointer;color:var(--brown-dark);}
+.remove-item-button {margin-top:8px;padding:4px 8px;font-size:11px;}
+.map-item-picker .filters-grid {grid-template-columns:repeat(3,minmax(130px,1fr));margin-bottom:0;}
+.map-item-picker-table {max-height:34vh;}
 .item-details[open] {min-width:230px;}
 .item-details label {font-size:10px;margin-top:5px;}
 .item-details textarea {width:100%;padding:5px 7px;}

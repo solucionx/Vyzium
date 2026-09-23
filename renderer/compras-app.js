@@ -6,11 +6,13 @@ const qty = v => Number(v).toLocaleString('pt-BR',{maximumFractionDigits:6});
 const statusLabel = {pending:'Pendente',quoting:'Em cotação',approved:'Aprovada',waiting:'Aguardando aprovação'};
 let currentView = 'items', catalog = [], selected = new Set(), page = 0, ui = {filters:{}}, activeMap = null, dirty = false, sending = false, mapListScope = 'active', mapSearch = '';
 let filtered = [], importReport = null, previewData = null, toastTimer, savingSettings = Promise.resolve();
+let removingMapItem = false;
+let addingMapItems = false;
 function toast(message) {$('#toast').textContent=message;$('#toast').classList.add('visible');clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('#toast').classList.remove('visible'),6500);}
 async function api(method,route,body) {try{return await window.followup.api(method,route,body);}catch(e){toast(e.message);throw e;}}
 function on(el,event,fn) {el.addEventListener(event, e=>Promise.resolve().then(()=>fn(e)).catch(err=>{const message=err?.message||String(err||'Erro inesperado.');try{window.followup?.logRendererError?.({page:'compras',message,stack:err?.stack||''});}catch(_){};toast(message);}));}
 function persist() {const snapshot=JSON.parse(JSON.stringify(ui));savingSettings=savingSettings.catch(()=>{}).then(()=>api('POST','/settings',snapshot));return savingSettings;}
-function closeModal() {if(sending||$('#order-modal').classList.contains('hidden'))return;stopWhatsAppPanel();$('#order-modal').classList.add('hidden');}
+function closeModal() {if(sending||addingMapItems||$('#order-modal').classList.contains('hidden'))return;stopWhatsAppPanel();$('#order-modal').classList.add('hidden');}
 function modal(html) {$('#modal-content').innerHTML=html;const title=$('#modal-content h2');if(title)title.id='modal-title';$('#order-modal').classList.remove('hidden');$('#modal-content').querySelector('input,button,select')?.focus();}
 on($('#modal-close'),'click',closeModal);
 document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal();});
@@ -21,7 +23,7 @@ document.addEventListener('keydown',e=>{if(e.key==='Tab'&&!$('#order-modal').cla
 // allowed through, or the renderer would stay put while the main process
 // believed the module had changed.
 let navigationConfirmed = false;
-window.addEventListener('beforeunload',e=>{if(!navigationConfirmed&&(dirty||sending)){e.preventDefault();e.returnValue='';}});
+window.addEventListener('beforeunload',e=>{if(!navigationConfirmed&&(dirty||sending||removingMapItem||addingMapItems)){e.preventDefault();e.returnValue='';}});
 function today() {const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;}
 function days(i) {return PurchaseModel.days(i,today());}
 function dateLabel(v) {return v?v.split('-').reverse().join('/'):'Não informada';}
@@ -50,6 +52,8 @@ function leaveMapDialog(destination) {
  });
 }
 async function confirmUnsavedMap(destination) {
+ if(addingMapItems){toast('Aguarde a inclusão dos itens terminar antes de sair do mapa.');return false;}
+ if(removingMapItem){toast('Aguarde a remoção do item terminar antes de sair do mapa.');return false;}
  if(sending){toast('Aguarde o envio terminar antes de sair do mapa.');return false;}
  if(!dirty)return true;
  const action=await leaveMapDialog(destination);
@@ -80,7 +84,7 @@ async function navigate(view) {
 }
 document.querySelectorAll('.nav-item').forEach(b=>on(b,'click',()=>navigate(b.dataset.view)));
 on($('#import-button'),'click',async()=>{
- if(dirty||sending){toast('Salve o mapa e aguarde o envio antes de importar.');return;}
+ if(dirty||sending||removingMapItem||addingMapItems){toast('Salve o mapa e aguarde a operação atual antes de importar.');return;}
  const path=await window.followup.chooseWorkbook();if(!path)return;
  $('#import-button').disabled=true;$('#import-button').textContent='Importando…';
  try{const r=await api('POST','/import',{path});toast(`${r.eligible} itens elegíveis importados. Mapas existentes preservados.`);selected.clear();await navigate('items');}
@@ -177,6 +181,87 @@ function captureMap() {
 }
 
 async function saveMap() {captureMap();const d=await api('POST','/maps/save',activeMap);activeMap=d.map;dirty=false;renderMap(d);toast('Mapa salvo e comparação atualizada.');return d;}
+async function removeMapItem(itemId) {
+ if(removingMapItem||addingMapItems||sending||!activeMap||activeMap.archived)return;
+ const item=activeMap.items.find(i=>i.id===itemId);if(!item)return;
+ if(activeMap.items.length<=1){toast('O mapa precisa manter ao menos um item. Para remover o último, use Excluir mapa.');return;}
+ if(!confirm(`Remover "${item.description}" (${item.company}) e os preços deste item da cotação?\n\nAs demais alterações preenchidas serão salvas junto. A BASE SCI e as mensagens já enviadas serão preservadas.`))return;
+ captureMap();
+ const content=$('#content'),controls=[...content.querySelectorAll('input,textarea,select,button')].filter(el=>!el.disabled);
+ removingMapItem=true;content.classList.add('busy');controls.forEach(el=>el.disabled=true);
+ try {
+  const d=await api('POST','/maps/save',{...activeMap,remove_item_ids:[itemId]});
+  activeMap=d.map;dirty=false;previewData=null;renderMap(d);
+  toast('Item removido da cotação. Os demais itens foram salvos e recalculados.');
+ } finally {
+  removingMapItem=false;content.classList.remove('busy');controls.filter(el=>el.isConnected).forEach(el=>el.disabled=false);
+ }
+}
+async function addMapItemsDialog() {
+ const button=$('#add-map-items'),map=activeMap;
+ if(button?.disabled||addingMapItems||removingMapItem||sending||!map||map.archived)return;
+ if(button)button.disabled=true;
+ let data;
+ try {data=await api('GET','/items');}
+ finally {if(button?.isConnected)button.disabled=false;}
+ if(currentView!=='map'||activeMap!==map)return;
+ const existing=new Set(map.items.map(i=>i.id));
+ const available=data.items.filter(i=>!existing.has(i.id)&&!i.maps?.length)
+  .sort((a,b)=>a.company.localeCompare(b.company,'pt-BR'));
+ const chosen=new Set(),pageSize=50;
+ let pickerPage=0,visible=[];
+ const options=key=>[...new Set(available.map(i=>i[key]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'pt-BR'));
+ const buyers=options('buyer'),hotels=options('company');
+ const mapBuyers=[...new Set(map.items.map(i=>i.buyer).filter(Boolean))];
+ const defaultBuyer=ui.filters.buyer||(mapBuyers.length===1?mapBuyers[0]:'');
+ modal(`<div class="map-item-picker"><h2>Adicionar itens à cotação</h2><p class="muted">${esc(map.name)} · Selecione itens disponíveis, sem vínculo com outro mapa ativo. As alterações já preenchidas no mapa serão salvas junto.</p><form id="add-map-items-form"><div class="filters-grid"><label>Comprador<select id="add-items-buyer"><option value="">Todos</option>${buyers.map(v=>`<option value="${esc(v)}" ${v===defaultBuyer?'selected':''}>${esc(v)}</option>`).join('')}</select></label><label>Hotel<select id="add-items-hotel"><option value="">Todos</option>${hotels.map(v=>`<option value="${esc(v)}">${esc(v)}</option>`).join('')}</select></label><label>Buscar item ou SCI<input id="add-items-search" placeholder="Descrição, SCI ou artigo" autocomplete="off"></label></div><div class="toolbar"><button type="button" id="add-items-select-page" class="button secondary">Selecionar esta página</button><button type="button" id="add-items-clear" class="button secondary">Limpar seleção</button><span id="add-items-count" class="count" aria-live="polite"></span></div><div id="add-items-table" class="purchase-table map-item-picker-table"></div><div class="pagination"><button type="button" id="add-items-prev" class="button secondary">Anterior</button><span id="add-items-page"></span><button type="button" id="add-items-next" class="button secondary">Próxima</button></div><p id="add-items-error" class="notice hidden" role="alert"></p><div class="toolbar"><button type="submit" id="confirm-add-items" class="button primary" disabled>Adicionar e salvar</button><button type="button" id="cancel-add-items" class="button secondary">Cancelar</button></div></form></div>`);
+ const updateSelection=()=>{
+  $('#add-items-count').textContent=`${chosen.size} selecionados no total`;
+  $('#confirm-add-items').disabled=!chosen.size;
+  $('#confirm-add-items').textContent=chosen.size?`Adicionar ${chosen.size} ${chosen.size===1?'item':'itens'} e salvar`:'Adicionar e salvar';
+  $('#add-items-clear').disabled=!chosen.size;
+ };
+ const draw=()=>{
+  const buyer=$('#add-items-buyer').value,hotel=$('#add-items-hotel').value,search=normalizedSearch($('#add-items-search').value);
+  const matches=available.filter(i=>(!buyer||i.buyer===buyer)&&(!hotel||i.company===hotel)&&(!search||normalizedSearch(`${i.description} ${i.sci} ${i.article}`).includes(search)));
+  const pages=Math.max(1,Math.ceil(matches.length/pageSize));pickerPage=Math.min(pickerPage,pages-1);
+  visible=matches.slice(pickerPage*pageSize,(pickerPage+1)*pageSize);
+  $('#add-items-table').innerHTML=`<table><thead><tr><th>Selecionar</th><th>Hotel / SCI</th><th>Item</th><th>Quantidade</th></tr></thead><tbody>${visible.map(i=>`<tr><td><input type="checkbox" data-add-map-item="${esc(i.id)}" aria-label="Selecionar ${esc(i.description)}" ${chosen.has(i.id)?'checked':''}></td><td><strong>${esc(i.company)}</strong><small>SCI ${esc(i.sci)} · ${esc(i.buyer)}</small></td><td>${esc(i.description)}<small>${esc(i.article)}</small></td><td>${qty(i.quantity)} ${esc(i.unit)}</td></tr>`).join('')||`<tr><td colspan="4">${available.length?'Nenhum item corresponde aos filtros.':'Nenhum item disponível. Remova o item do outro mapa ativo ou importe a base atualizada.'}</td></tr>`}</tbody></table>`;
+  $('#add-items-page').textContent=`${matches.length} disponíveis · Página ${pickerPage+1}/${pages}`;
+  $('#add-items-prev').disabled=pickerPage===0;$('#add-items-next').disabled=pickerPage+1===pages;
+  $('#add-items-select-page').disabled=!visible.length;
+  document.querySelectorAll('[data-add-map-item]').forEach(el=>on(el,'change',()=>{el.checked?chosen.add(el.dataset.addMapItem):chosen.delete(el.dataset.addMapItem);updateSelection();}));
+  updateSelection();
+ };
+ for(const id of ['add-items-buyer','add-items-hotel','add-items-search'])on($('#'+id),id==='add-items-search'?'input':'change',()=>{pickerPage=0;draw();});
+ on($('#add-items-select-page'),'click',()=>{visible.forEach(i=>chosen.add(i.id));draw();});
+ on($('#add-items-clear'),'click',()=>{chosen.clear();draw();});
+ on($('#add-items-prev'),'click',()=>{pickerPage--;draw();});
+ on($('#add-items-next'),'click',()=>{pickerPage++;draw();});
+ on($('#cancel-add-items'),'click',closeModal);
+ // Prevent native form navigation synchronously; on() schedules its callback in a microtask.
+ $('#add-map-items-form').addEventListener('submit',e=>e.preventDefault());
+ on($('#add-map-items-form'),'submit',async e=>{
+  e.preventDefault();
+  if(addingMapItems||removingMapItem||sending||!chosen.size)return;
+  if(currentView!=='map'||activeMap!==map){closeModal();toast('O mapa mudou enquanto a seleção estava aberta. Abra Adicionar itens novamente.');return;}
+  captureMap();
+  const content=$('#content'),controls=[...document.querySelectorAll('#content input,#content textarea,#content select,#content button,#modal-content input,#modal-content select,#modal-content button,#modal-close')].filter(el=>!el.disabled);
+  addingMapItems=true;content.classList.add('busy');controls.forEach(el=>el.disabled=true);
+  $('#add-items-error').classList.add('hidden');$('#confirm-add-items').textContent='Adicionando e salvando…';
+  try {
+   const d=await api('POST','/maps/save',{...activeMap,add_item_ids:[...chosen]});
+   activeMap=d.map;dirty=false;previewData=null;addingMapItems=false;closeModal();renderMap(d);
+   toast(`${chosen.size} ${chosen.size===1?'item adicionado':'itens adicionados'} à cotação. Mapa salvo e recalculado.`);
+  } catch(error) {
+   $('#add-items-error').textContent=error.message;$('#add-items-error').classList.remove('hidden');throw error;
+  } finally {
+   addingMapItems=false;content.classList.remove('busy');controls.filter(el=>el.isConnected).forEach(el=>el.disabled=false);
+   if(!$('#order-modal').classList.contains('hidden'))updateSelection();
+  }
+ });
+ draw();
+}
 const awardReasons=['Prazo de entrega','Disponibilidade imediata','Qualidade','Frete','Condição de pagamento','Histórico do fornecedor','Necessidade do hotel','Outro'];
 async function awardDialog(itemId) {
  const detail=await api('GET','/map?id='+encodeURIComponent(activeMap.id));activeMap=detail.map;
@@ -209,6 +294,7 @@ function renderMap(detail) {
      </div>
      <div class="map-actions">
        <button id="save-map" class="button primary" ${m.archived?'disabled':''}>Salvar e calcular</button>
+       ${m.archived?'':`<button id="add-map-items" class="button secondary">Adicionar itens</button>`}
        <button id="export-map" class="button secondary">Exportar mapa Excel (.xls)</button>
        ${m.archived?'':`<button id="complete-map" class="button secondary">Concluir mapa</button>`}
        <button id="delete-map" class="button danger">Excluir mapa</button>
@@ -220,20 +306,22 @@ function renderMap(detail) {
  </section>
  <section class="panel quote-workbench">
    <div class="quote-workbench-head">
-     <div><span class="section-kicker">ANÁLISE DE PREÇOS</span><h2>Mapa de cotação</h2><p class="muted">Compare preço, negociação e prazo. O menor valor é a referência financeira, mas você pode escolher outra proposta e registrar o motivo.</p></div>
+     <div><span class="section-kicker">ANÁLISE DE PREÇOS</span><h2>Mapa de cotação</h2><p class="muted">Itens organizados por hotel. Compare preço, negociação e prazo. O menor valor é a referência financeira, mas você pode escolher outra proposta e registrar o motivo.</p></div>
      <div class="quote-action-group"><button id="request-negotiation" class="button secondary" ${!m.suppliers.length||m.archived||detail.changes.length?'disabled':''}>Solicitar negociação</button><button id="request-quote" class="button primary" ${!m.suppliers.length||m.archived||detail.changes.length?'disabled':''}>Solicitar cotação por WhatsApp</button></div>
    </div>
-   <div class="purchase-table map-quote-table"><table><thead><tr><th class="sticky-col origin-col">Hotel / SCI</th><th class="sticky-col item-col">Item / especificação</th><th class="sticky-col qty-col">Qtd.</th>${m.suppliers.map(s=>`<th class="supplier-heading"><span class="supplier-initial">${esc((s.name||'?').trim().charAt(0).toUpperCase()||'?')}</span><span>${esc(s.name)}</span></th>`).join('')}<th class="result-heading">Decisão</th></tr></thead><tbody>${m.items.map((i,idx)=>{const line=r.lines[idx],quotedCount=line.quotes.length;return `<tr class="quote-item-row"><td class="sticky-col origin-col origin-cell"><strong>${esc(i.company)}</strong><small>SCI ${esc(i.sci)}</small><small>${esc(i.buyer)}</small><span class="badge ${i.approval==='approved'?'approval-approved':'approval-waiting'}">${statusLabel[i.approval]}</span></td><td class="sticky-col item-col description"><strong>${esc(i.description)}</strong>${i.article?`<small>${esc(i.article)}</small>`:''}<span class="item-quote-progress ${quotedCount?'has-quotes':''}">${quotedCount}/${m.suppliers.length} fornecedores cotaram</span><details class="item-details"><summary>Observação / tipo de compra</summary><label>Tipo de compra<input data-type="${esc(i.id)}" value="${esc(i.purchase_type)}" placeholder="Opcional"></label><label>Observação<textarea data-note="${esc(i.id)}" rows="2" maxlength="2000" placeholder="Marca, especificação, entrega…">${esc(i.note)}</textarea></label></details></td><td class="sticky-col qty-col qty-cell"><strong>${qty(i.quantity)}</strong><small>${esc(i.unit)}</small></td>${m.suppliers.map(s=>{const q=m.quotes[i.id]?.[s.id]||{},calc=line.quotes.find(q=>q.supplier_id===s.id),isChosen=line.chosen?.supplier_id===s.id,isFinancial=(line.financial_winners||line.winners||[]).some(w=>w.supplier_id===s.id),isTie=line.state==='tie'&&isFinancial;const finalValue='negotiated' in q?(q.negotiated??''):(calc?.final_price??'');const target=calc?.target_price?brl(calc.target_price):'';const targetInfo=calc?calc.target_met?`<span class="target-met">Meta de ${Number(r.saving_target_percent).toLocaleString('pt-BR')}% atingida</span>`:`<span>Meta ${target}</span><strong>Falta ${brl(calc.target_reduction_unit)}/un · ${Number(calc.required_reduction_percent).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</strong>`:'';return `<td class="quote-cell ${isChosen?'is-winner':''} ${isTie?'is-tie':''}"><div class="quote-card">${isChosen?'<span class="best-offer-tag">Escolhido</span>':isTie?'<span class="tie-offer-tag">Empatada</span>':isFinancial?'<span class="financial-offer-tag">Menor preço</span>':''}<div class="price-pair"><label>Preço inicial<input aria-label="Preço inicial ${esc(s.name)}" inputmode="decimal" data-price="${s.id}" data-item="${esc(i.id)}" data-original="${esc(q.price??'')}" value="${esc(q.price??'')}" placeholder="R$ 0,00"></label><label>Negociado<input aria-label="Preço negociado ${esc(s.name)}" inputmode="decimal" data-negotiated data-original="${esc(finalValue)}" value="${esc(finalValue)}" placeholder="R$ 0,00"></label></div><label class="delivery-field">Prazo de entrega<input data-delivery value="${esc(q.delivery||'')}" maxlength="120" placeholder="Ex.: 3 dias úteis"></label><div class="quote-insight"><span class="discount-auto ${calc&&Number(calc.discount_percent)>0?'has-discount':''}">${calc?`${Number(calc.discount_percent).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}% de desconto`:'Sem cotação'}</span>${calc?`<span class="quote-saving">Economia ${brl(calc.saving)}</span>`:''}</div>${calc?`<div class="negotiation-target ${calc.target_met?'is-met':''}">${targetInfo}</div>`:''}<div class="quote-total">${calc?`<span>Total do item</span><strong>${brl(calc.net)}</strong>`:'Sem cotação'}</div></div></td>`;}).join('')}<td class="winner-cell result-cell">${line.chosen?`<span class="result-label">${line.manual_selection?'Fornecedor escolhido':'Melhor proposta'}</span><strong>${esc(line.chosen.supplier)}</strong><span class="result-price">${brl(line.chosen.net)}</span>${line.selection_reason?`<small class="decision-reason">${esc(line.selection_reason)}${line.selection_note?` · ${esc(line.selection_note)}`:''}</small>`:''}${Number(line.opportunity_cost)>0?`<small class="decision-premium">+ ${brl(line.opportunity_cost)} vs menor preço</small>`:''}`:line.state==='tie'?`<span class="badge action-attention">Empate</span><small>Escolha o fornecedor para fechar este item.</small>`:'<span class="result-empty">Aguardando cotação</span>'}${line.quotes.length&&!m.archived?`<button class="button secondary choose-supplier-button" data-award="${esc(i.id)}">Escolher fornecedor</button>`:''}</td></tr>`;}).join('')}</tbody></table></div>
+   <div class="purchase-table map-quote-table"><table><thead><tr><th class="sticky-col origin-col">Hotel / SCI</th><th class="sticky-col item-col">Item / especificação</th><th class="sticky-col qty-col">Qtd.</th>${m.suppliers.map(s=>`<th class="supplier-heading"><span class="supplier-initial">${esc((s.name||'?').trim().charAt(0).toUpperCase()||'?')}</span><span>${esc(s.name)}</span></th>`).join('')}<th class="result-heading">Decisão</th></tr></thead><tbody>${m.items.map((i,idx)=>{const line=r.lines[idx],quotedCount=line.quotes.length;return `<tr class="quote-item-row"><td class="sticky-col origin-col origin-cell"><strong>${esc(i.company)}</strong><small>SCI ${esc(i.sci)}</small><small>${esc(i.buyer)}</small><span class="badge ${i.approval==='approved'?'approval-approved':'approval-waiting'}">${statusLabel[i.approval]}</span></td><td class="sticky-col item-col description"><strong>${esc(i.description)}</strong>${i.article?`<small>${esc(i.article)}</small>`:''}<span class="item-quote-progress ${quotedCount?'has-quotes':''}">${quotedCount}/${m.suppliers.length} fornecedores cotaram</span><details class="item-details"><summary>Observação / tipo de compra</summary><label>Tipo de compra<input data-type="${esc(i.id)}" value="${esc(i.purchase_type)}" placeholder="Opcional"></label><label>Observação<textarea data-note="${esc(i.id)}" rows="2" maxlength="2000" placeholder="Marca, especificação, entrega…">${esc(i.note)}</textarea></label></details>${!m.archived?`<button type="button" class="button secondary remove-item-button" data-remove-item="${esc(i.id)}" aria-label="Remover ${esc(i.description)} da cotação" ${m.items.length<=1?'disabled title="O mapa precisa manter ao menos um item. Para remover o último, use Excluir mapa."':''}>Remover item</button>`:''}</td><td class="sticky-col qty-col qty-cell"><strong>${qty(i.quantity)}</strong><small>${esc(i.unit)}</small></td>${m.suppliers.map(s=>{const q=m.quotes[i.id]?.[s.id]||{},calc=line.quotes.find(q=>q.supplier_id===s.id),isChosen=line.chosen?.supplier_id===s.id,isFinancial=(line.financial_winners||line.winners||[]).some(w=>w.supplier_id===s.id),isTie=line.state==='tie'&&isFinancial;const finalValue='negotiated' in q?(q.negotiated??''):(calc?.final_price??'');const target=calc?.target_price?brl(calc.target_price):'';const targetInfo=calc?calc.target_met?`<span class="target-met">Meta de ${Number(r.saving_target_percent).toLocaleString('pt-BR')}% atingida</span>`:`<span>Meta ${target}</span><strong>Falta ${brl(calc.target_reduction_unit)}/un · ${Number(calc.required_reduction_percent).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}%</strong>`:'';return `<td class="quote-cell ${isChosen?'is-winner':''} ${isTie?'is-tie':''}"><div class="quote-card">${isChosen?'<span class="best-offer-tag">Escolhido</span>':isTie?'<span class="tie-offer-tag">Empatada</span>':isFinancial?'<span class="financial-offer-tag">Menor preço</span>':''}<div class="price-pair"><label>Preço inicial<input aria-label="Preço inicial ${esc(s.name)}" inputmode="decimal" data-price="${s.id}" data-item="${esc(i.id)}" data-original="${esc(q.price??'')}" value="${esc(q.price??'')}" placeholder="R$ 0,00"></label><label>Negociado<input aria-label="Preço negociado ${esc(s.name)}" inputmode="decimal" data-negotiated data-original="${esc(finalValue)}" value="${esc(finalValue)}" placeholder="R$ 0,00"></label></div><label class="delivery-field">Prazo de entrega<input data-delivery value="${esc(q.delivery||'')}" maxlength="120" placeholder="Ex.: 3 dias úteis"></label><div class="quote-insight"><span class="discount-auto ${calc&&Number(calc.discount_percent)>0?'has-discount':''}">${calc?`${Number(calc.discount_percent).toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}% de desconto`:'Sem cotação'}</span>${calc?`<span class="quote-saving">Economia ${brl(calc.saving)}</span>`:''}</div>${calc?`<div class="negotiation-target ${calc.target_met?'is-met':''}">${targetInfo}</div>`:''}<div class="quote-total">${calc?`<span>Total do item</span><strong>${brl(calc.net)}</strong>`:'Sem cotação'}</div></div></td>`;}).join('')}<td class="winner-cell result-cell">${line.chosen?`<span class="result-label">${line.manual_selection?'Fornecedor escolhido':'Melhor proposta'}</span><strong>${esc(line.chosen.supplier)}</strong><span class="result-price">${brl(line.chosen.net)}</span>${line.selection_reason?`<small class="decision-reason">${esc(line.selection_reason)}${line.selection_note?` · ${esc(line.selection_note)}`:''}</small>`:''}${Number(line.opportunity_cost)>0?`<small class="decision-premium">+ ${brl(line.opportunity_cost)} vs menor preço</small>`:''}`:line.state==='tie'?`<span class="badge action-attention">Empate</span><small>Escolha o fornecedor para fechar este item.</small>`:'<span class="result-empty">Aguardando cotação</span>'}${line.quotes.length&&!m.archived?`<button class="button secondary choose-supplier-button" data-award="${esc(i.id)}">Escolher fornecedor</button>`:''}</td></tr>`;}).join('')}</tbody></table></div>
  </section>
  <div id="result-wrap">${resultHtml(r,m)}</div>
  </div>`;
  document.querySelectorAll('#edit-name,#saving-target,[data-supplier-name],[data-supplier-phone],[data-note],[data-type],[data-price],[data-negotiated],[data-delivery]').forEach(el=>on(el,'input',()=>{markDirty();document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');refreshDiscounts();}));
  on($('#save-map'),'click',saveMap);
+ if($('#add-map-items'))on($('#add-map-items'),'click',addMapItemsDialog);
  on($('#export-map'),'click',async()=>{if(dirty)await saveMap();if(await window.followup.exportMap(m.id))toast('Mapa exportado.');});
  if($('#complete-map'))on($('#complete-map'),'click',async()=>{if(!confirm('Concluir este mapa de compra? Ele sairá de Em cotação, ficará disponível em Concluídos e os itens poderão ser usados em novos mapas.'))return;if(dirty)await saveMap();await api('POST','/maps/complete',{id:m.id});dirty=false;activeMap=null;mapListScope='completed';toast('Mapa concluído e movido para Concluídos.');await navigate('maps');});
  on($('#delete-map'),'click',async()=>{if(!confirm('Excluir definitivamente este mapa e todas as cotações registradas nele? Mensagens já enviadas permanecem no Histórico. Esta ação não pode ser desfeita pela tela.'))return;await api('POST','/maps/delete',{id:m.id});dirty=false;activeMap=null;toast('Mapa e cotações excluídos.');await navigate('maps');});
  on($('#add-supplier'),'click',()=>{captureMap();m.suppliers.push({id:crypto.randomUUID(),name:`Fornecedor ${m.suppliers.length+1}`,phone:''});renderMap({...detail,result:r});markDirty();});
  document.querySelectorAll('[data-remove-supplier]').forEach(el=>on(el,'click',()=>{if(!confirm('Remover este fornecedor e os preços dele deste mapa?'))return;captureMap();m.suppliers=m.suppliers.filter(s=>s.id!==el.dataset.removeSupplier);for(const [itemId,award] of Object.entries(m.awards||{})){if(award.supplier_id===el.dataset.removeSupplier)delete m.awards[itemId];}renderMap({...detail,result:r});markDirty();}));
+ document.querySelectorAll('[data-remove-item]').forEach(el=>on(el,'click',()=>removeMapItem(el.dataset.removeItem)));
  document.querySelectorAll('[data-award]').forEach(el=>on(el,'click',async()=>{if(dirty)await saveMap();await awardDialog(el.dataset.award);}));
  on($('#request-quote'),'click',async()=>{if(dirty)await saveMap();quoteDialog();});
  on($('#request-negotiation'),'click',async()=>{if(dirty)await saveMap();negotiationDialog();});
@@ -262,7 +350,7 @@ async function renderHistory() {
  document.querySelectorAll('[data-review]').forEach(el=>on(el,'click',async()=>{if(!confirm('Você conferiu esta mensagem na conversa do fornecedor?'))return;await api('POST','/review',{id:el.dataset.review,outcome:el.dataset.outcome});await renderHistory();}));
 }
 async function renderSettings() {
- $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.2.1')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
+ $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.2.3')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
  startWhatsAppPanel();
  on($('#zoom'),'change',async()=>{ui.zoom=Number($('#zoom').value);await window.followup.setZoom(ui.zoom);await persist();});
  const loadSafety=async()=>{try{const state=await api('GET','/data-safety');const protection=state.encrypted?'🔒 Criptografado com SQLCipher':'Banco legado sem criptografia';$('#compras-data-safety').innerHTML=`<strong>${state.integrity?.ok?'✓ Banco íntegro':'⚠ Verificação requer atenção'}</strong> · ${esc(protection)}<br>Schema ${esc(state.schema_version??'—')}`;}catch(e){$('#compras-data-safety').textContent='Não foi possível verificar a segurança do banco.';}};
