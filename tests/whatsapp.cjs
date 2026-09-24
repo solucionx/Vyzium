@@ -67,6 +67,7 @@ test('fatal CacheStorage detector ignores harmless persistence denial but catche
  assert.equal(isFatalCacheStorageError('[storage] storage bucket persistence denied (aquire-persistent-storage-denied)'),false);
  assert.equal(isFatalCacheStorageError("Failed to execute 'open' on 'CacheStorage': Unexpected internal error."),true);
  assert.equal(isFatalCacheStorageError('BackendEventBus: storage_initialization_error (storage-initialization-error)'),true);
+ assert.equal(isFatalCacheStorageError("Failed to execute 'put' on 'Cache': Entry already exists."),true);
 });
 
 test('headed WhatsApp browser uses the proven pre-show Win32 guard on Windows',()=>{
@@ -269,6 +270,88 @@ test('forced headless CacheStorage crash automatically restarts the same profile
  assert.equal(instances[1].options.puppeteer.headless,false);
  assert.equal(instances[1].options.authStrategy.options.clientId,instances[0].options.authStrategy.options.clientId);
  assert.match(s.diagnostics().text,/browser\.storage-fallback-restart/);
+ await s.shutdown();
+});
+
+test('first-connection headed storage crash gets one isolated compatibility retry without touching an established profile', async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-first-storage-recovery-'));
+ t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const instances=[]; const launches=[];
+ class FakePage extends EventEmitter { url(){return 'https://web.whatsapp.com/';} async evaluate(){return {ok:true};} }
+ class Client extends EventEmitter {
+   constructor(options){super();this.options=options;this.pupPage=new FakePage();instances.push(this);}
+   async initialize(){await new Promise(resolve=>{this.releaseInitialize=resolve;});}
+   async destroy(){this.destroyed=true;this.releaseInitialize?.();}
+ }
+ const s=new WhatsAppSession(dir,{
+   library:{Client,LocalAuth:class {constructor(options){this.options=options;}}},
+   qrCode:{toDataURL:async()=> 'data:image/png;base64,test'}, browser:'/test/browser',
+   platform:'win32', forcePreShowGuard:true, storageFallbackDelayMs:5, startupTimeoutMs:5000,
+   launchHiddenHeadedBrowser:async options=>{launches.push(options);return {endpoint:`ws://127.0.0.1:9222/devtools/browser/${launches.length}`,pid:5000+launches.length,stopFile:`/tmp/stop-${launches.length}`};},
+   stopHiddenHeadedBrowser:async()=>{}
+ });
+ s.connect();
+ const firstDeadline=Date.now()+1000; while(instances.length<1 && Date.now()<firstDeadline) await new Promise(r=>setTimeout(r,10));
+ const firstId=instances[0].options.authStrategy.options.clientId;
+ await new Promise(r=>setTimeout(r,140));
+ instances[0].pupPage.emit('console',{type:()=> 'error',text:()=> "Failed to execute 'put' on 'Cache': Entry already exists."});
+ const deadline=Date.now()+1500; while(instances.length<2 && Date.now()<deadline) await new Promise(r=>setTimeout(r,10));
+ assert.equal(instances.length,2);
+ assert.equal(instances[0].destroyed,true);
+ assert.notEqual(instances[1].options.authStrategy.options.clientId,firstId);
+ assert.equal(launches[0].disableStorageBuckets,false);
+ assert.equal(launches[1].disableStorageBuckets,true);
+ assert.equal(s.firstConnectionStorageRecoveryUsed,true);
+ assert.equal(s.sessionState.activeClientId,null);
+ assert.match(s.diagnostics().text,/browser\.first-connection-storage-recovery-restart/);
+ await s.shutdown();
+});
+
+test('production source keeps destructive first-storage recovery single-use while preserving ordinary reconnects',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp.js'),'utf8');
+ assert.match(source,/this\._hasEstablishedSession\(\) \|\| !this\.firstConnectionPending/);
+ assert.match(source,/if \(this\.firstConnectionStorageRecoveryUsed\) return/);
+ assert.match(source,/!this\.firstConnectionPending \|\| this\.firstConnectionStorageRecoveryUsed/);
+ assert.match(source,/first-storage-retry/);
+ assert.match(source,/--disable-features=StorageBuckets/);
+});
+
+test('first-storage compatibility profile keeps retrying transient stalls without rotating profile again', async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-storage-retry-'));
+ t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const instances=[]; const launches=[];
+ class FakePage extends EventEmitter { url(){return 'https://web.whatsapp.com/';} async evaluate(){return {ok:true};} }
+ class Client extends EventEmitter {
+   constructor(options){super();this.options=options;this.pupPage=new FakePage();instances.push(this);}
+   async initialize(){await new Promise(resolve=>{this.releaseInitialize=resolve;});}
+   async destroy(){this.destroyed=true;this.releaseInitialize?.();}
+ }
+ const s=new WhatsAppSession(dir,{
+   library:{Client,LocalAuth:class {constructor(options){this.options=options;}}},
+   qrCode:{toDataURL:async()=> 'data:image/png;base64,test'}, browser:'/test/browser',
+   platform:'win32', forcePreShowGuard:true, storageFallbackDelayMs:5, startupTimeoutMs:5000,
+   reconnectBaseMs:20, reconnectMaxMs:40,
+   launchHiddenHeadedBrowser:async options=>{launches.push(options);return {endpoint:`ws://127.0.0.1:9222/devtools/browser/${launches.length}`,pid:6000+launches.length,stopFile:`/tmp/stop-r-${launches.length}`};},
+   stopHiddenHeadedBrowser:async()=>{}
+ });
+ s.connect();
+ let deadline=Date.now()+1000; while(instances.length<1 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
+ await new Promise(r=>setTimeout(r,140));
+ s.startupTimeoutMs=40;
+ instances[0].pupPage.emit('console',{type:()=> 'error',text:()=> "Failed to execute 'put' on 'Cache': Entry already exists."});
+ deadline=Date.now()+1500; while(instances.length<2 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
+ assert.equal(instances.length>=2,true);
+ const compatibilityId=instances[1].options.authStrategy.options.clientId;
+ assert.equal(launches[1].disableStorageBuckets,true);
+ // Let the compatibility attempt stall. The watchdog must schedule an ordinary
+ // retry using the same fresh profile instead of entering a terminal state.
+ deadline=Date.now()+1500; while(instances.length<3 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
+ assert.equal(instances.length>=3,true);
+ assert.equal(instances[2].options.authStrategy.options.clientId,compatibilityId);
+ assert.equal(launches[2].disableStorageBuckets,true);
+ assert.equal(s.requiresNewQr,false);
+ assert.equal(s.firstConnectionStorageRecoveryUsed,true);
+ assert.match(s.diagnostics().text,/watchdog\.first-connection-retryable/);
  await s.shutdown();
 });
 
@@ -874,4 +957,5 @@ test('established roaming LocalAuth profile migrates once to the local runtime r
  assert.equal(fs.readFileSync(path.join(runtime,`session-${id}`,'token'),'utf8'),'preserve');
  assert.match(s.diagnostics().text,/profile\.runtime-migrated/);
 });
+
 

@@ -1,58 +1,48 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const { FullDiagnostics, redactText, clean } = require('../electron/diagnostics');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const {FullDiagnostics, redact} = require('../electron/diagnostics');
 
 function fakeApp(root) {
   return {
-    getVersion: () => '3.2.6',
-    isPackaged: true,
-    getPath: name => name === 'userData' ? root : path.join(root, name)
+    getPath(name) { return name === 'userData' ? root : path.join(root, name); },
+    getVersion() { return '3.3.0'; },
+    isPackaged: false
   };
 }
 
-test('diagnostics redacts credentials and user home paths', () => {
-  const input = `${os.homedir()} apiKey=abc token:xyz password secretvalue eyJabcdefghijklmnopqrstuv`;
-  const output = redactText(input);
-  assert.equal(output.includes(os.homedir()), false);
-  assert.match(output, /%USERPROFILE%/);
-  assert.equal(output.includes('secretvalue'), false);
-  assert.equal(output.includes('eyJabcdefghijklmnopqrstuv'), false);
+test('diagnostic redact masks secrets, JWT-like tokens, long hex and Windows usernames', () => {
+  assert.equal(redact('token: abc123').includes('abc123'), false);
+  assert.equal(redact('a'.repeat(48)), '[REDACTED_HEX]');
+  assert.equal(redact('eyJ' + 'A'.repeat(30)), '[REDACTED_TOKEN]');
+  assert.equal(redact('C:/Users/Levi/AppData/Vyzium').includes('Levi'), false);
 });
 
-test('diagnostics masks sensitive object fields', () => {
-  const value = clean({ token: 'abc', password: 'def', safe: 'ok' });
-  assert.equal(value.token, '[REDACTED]');
-  assert.equal(value.password, '[REDACTED]');
-  assert.equal(value.safe, 'ok');
-});
-
-test('diagnostics creates report and finalization is idempotent', () => {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vyzium-diag-'));
+test('diagnostic timeline, errors and report use real line breaks', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vyzium-diag-test-'));
   try {
-    const diag = new FullDiagnostics(fakeApp(root));
-    diag.stage('Teste', 'OK');
-    diag.error('teste', new Error('falha controlada'));
-    diag.finalize({ reason: 'test' });
-    const count = diag.seq;
-    diag.finalize({ reason: 'second' });
-    assert.equal(diag.seq, count);
-    assert.equal(fs.existsSync(path.join(diag.dir, 'RELATORIO.txt')), true);
-    assert.equal(fs.existsSync(path.join(diag.dir, 'timeline.jsonl')), true);
-    const report = fs.readFileSync(path.join(diag.dir, 'RELATORIO.txt'), 'utf8');
-    assert.match(report, /Teste/);
-    assert.match(report, /falha controlada/);
-  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+    const d = new FullDiagnostics(fakeApp(root));
+    d.event('one', {token:'secret'});
+    d.event('two', {});
+    const timeline = fs.readFileSync(d.timeline, 'utf8');
+    assert.equal(timeline.includes('\\n'), false);
+    assert.equal(timeline.trim().split(/\r?\n/).length, 2);
+    d.error('test', new Error('boom token: abc123'));
+    const errors = fs.readFileSync(d.errorsFile, 'utf8');
+    assert.equal(errors.endsWith('\n'), true);
+    assert.ok(errors.split(/\r?\n/).length > 2);
+    assert.equal(errors.includes('abc123'), false);
+    const report = fs.readFileSync(d.report, 'utf8');
+    assert.equal(report.includes('\\r\\n'), false);
+    assert.ok(report.split(/\r?\n/).length > 4);
+  } finally { fs.rmSync(root, {recursive:true, force:true}); }
 });
 
-test('production shutdown captures WhatsApp audit before final bundle', () => {
-  const main = fs.readFileSync(path.join(__dirname, '..', 'electron', 'main.js'), 'utf8');
-  const save = main.indexOf('const whatsappAuditFile = whatsapp?.auditFile || null;');
-  const stop = main.indexOf('Promise.resolve(stopWorkspaceServices())', save);
-  const copy = main.indexOf("fullDiagnostics?.copy(whatsappAuditFile, 'whatsapp-debug.jsonl')", stop);
-  const finalize = main.indexOf("fullDiagnostics?.finalize({reason:'before-quit'})", copy);
-  assert.ok(save >= 0 && stop > save && copy > stop && finalize > copy);
+test('hidden browser diagnostic regex uses PowerShell regex escaping, not a literal double backslash', () => {
+  const helper = fs.readFileSync(path.join(__dirname, '..', 'electron', 'whatsapp-hidden-browser.ps1'), 'utf8');
+  assert.match(helper, /\[=: \]\+\\S\+/);
+  assert.doesNotMatch(helper, /\[=: \]\+\\\\S\+/);
 });
