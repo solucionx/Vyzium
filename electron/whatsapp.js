@@ -49,7 +49,7 @@ function resolveHiddenBrowserHelperPath() {
   return bundled;
 }
 
-function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnFn = spawn, timeoutMs = 55000, parentPid = process.pid, helperPath = resolveHiddenBrowserHelperPath()} = {}) {
+function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnFn = spawn, timeoutMs = 55000, parentPid = process.pid, helperPath = resolveHiddenBrowserHelperPath(), diagnosticLog = null} = {}) {
   if (process.platform !== 'win32') return Promise.reject(new Error('O inicializador invisível do Chrome está disponível apenas no Windows.'));
   if (!browser || !fs.existsSync(browser)) return Promise.reject(new Error('Executável do Chrome/Edge não encontrado para o WhatsApp.'));
   if (!userDataDir) return Promise.reject(new Error('Perfil LocalAuth não informado ao inicializador do WhatsApp.'));
@@ -82,7 +82,8 @@ function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnF
         '-UserDataDir', userDataDir,
         '-StopFile', stopFile,
         '-ParentPid', String(parentPid),
-        '-WaitForDevToolsSeconds', '45'
+        '-WaitForDevToolsSeconds', '45',
+        ...(diagnosticLog ? ['-DiagnosticLog', diagnosticLog] : [])
       ], {windowsHide:true, stdio:['ignore','pipe','pipe']});
     } catch (error) {
       finishError(error);
@@ -455,6 +456,7 @@ class WhatsAppSession {
   }
 
   _audit(event, details = {}) {
+    try { this.deps.fullDiagnosticEvent?.(`whatsapp.${String(event)}`, details); } catch (_) {}
     try {
       fs.mkdirSync(this.dataDir, {recursive:true, mode:0o700});
       try {
@@ -1242,7 +1244,8 @@ class WhatsAppSession {
         userDataDir:sessionDir,
         generation,
         parentPid:process.pid,
-        spawnFn:this.deps.spawn || spawn
+        spawnFn:this.deps.spawn || spawn,
+        diagnosticLog:this.deps.hiddenBrowserDiagnosticLog || null
       });
       puppeteerOptions = {
         headless:false,

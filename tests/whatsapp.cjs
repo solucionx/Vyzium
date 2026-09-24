@@ -100,6 +100,33 @@ test('headed WhatsApp browser uses the proven pre-show Win32 guard on Windows',(
  assert.doesNotMatch(helper,/--no-sandbox/);
 });
 
+test('hidden browser guard keeps low idle cost without treating a root-PID handoff as browser death',()=>{
+ const helper=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp-hidden-browser.ps1'),'utf8');
+ const source=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp.js'),'utf8');
+ assert.match(helper,/SetWinEventHook\(EVENT_OBJECT_CREATE[^\n]+\(uint\)rootPid/);
+ assert.match(helper,/SetWinEventHook\(EVENT_OBJECT_SHOW[^\n]+\(uint\)rootPid/);
+ assert.match(helper,/new Timer\(SweepWindows, null, 0, 150\)/);
+ assert.match(helper,/SetSweepInterval\(1500\)/);
+ assert.match(helper,/if \(!force && !NeedsNormalization\(hwnd\)\)/);
+ assert.match(helper,/public static bool HasLiveBrowserProcess\(\)/);
+ assert.match(helper,/RefreshTargetPidSet\(\);[\s\S]*targetPids\.CopyTo\(snapshot\)/);
+ assert.match(helper,/HasLiveBrowserProcess\(\)/);
+ assert.match(helper,/Start-Sleep -Milliseconds 1500/);
+ assert.doesNotMatch(helper,/new Timer\(SweepWindows, null, 0, 200\)/);
+ assert.doesNotMatch(helper,/HasLiveRootProcess\(\)/);
+ assert.doesNotMatch(helper,/Start-Sleep -Milliseconds 500/);
+ // The three speculative 3.2.4 flags are deliberately rolled back: they were
+ // not needed for the CPU gain and are not worth changing first-run behavior.
+ for (const flag of ['--disable-extensions','--disable-sync','--disable-default-apps']) {
+   assert.doesNotMatch(helper,new RegExp(flag.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
+   assert.equal(source.includes(flag),false);
+ }
+ // Reliability switches that were part of the stable headed setup stay intact.
+ for (const flag of ['--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding']) {
+   assert.ok(helper.includes(flag));
+ }
+});
+
 test('hidden launcher never reuses a stale DevToolsActivePort and waits for a live CDP socket',()=>{
  const helper=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp-hidden-browser.ps1'),'utf8');
  const removeIndex=helper.indexOf("Remove-Item -LiteralPath $devToolsFile -Force");
@@ -152,6 +179,36 @@ test('pre-show launcher connects whatsapp-web.js to the same LocalAuth profile w
  assert.equal(s.client.options.authStrategy.options.dataPath,dir);
  await s.shutdown();
  assert.equal(stops.length,1);
+});
+
+test('brand-new machine path auto-starts a provisional LocalAuth profile and reaches QR',async t=>{
+ const metadata=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-clean-meta-'));
+ const runtime=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-clean-runtime-'));
+ t.after(()=>{fs.rmSync(metadata,{recursive:true,force:true});fs.rmSync(runtime,{recursive:true,force:true});});
+ const launches=[];
+ class Client extends EventEmitter {
+  constructor(options){super();this.options=options;this.info={wid:{user:'5500000000000'}};}
+  async initialize(){setTimeout(()=>this.emit('qr','clean-machine-qr'),5);}
+  async destroy(){}
+ }
+ const s=new WhatsAppSession(metadata,{
+  profileDataDir:runtime,
+  library:{Client,LocalAuth:class{constructor(options){this.options=options;}}},
+  qrCode:{toDataURL:async()=> 'data:image/png;base64,clean'},
+  browser:'/test/browser',
+  forcePreShowGuard:true,
+  launchHiddenHeadedBrowser:async options=>{launches.push(options);return {endpoint:'ws://127.0.0.1:9222/devtools/browser/clean',pid:5151,stopFile:'/tmp/clean-stop'};},
+  stopHiddenHeadedBrowser:async()=>{}
+ });
+ assert.equal(s.status().firstConnectionPending,true);
+ s.autoStart();
+ const deadline=Date.now()+1000;
+ while(s.status().status!=='qr' && Date.now()<deadline) await new Promise(r=>setTimeout(r,10));
+ assert.equal(s.status().status,'qr');
+ assert.equal(s.status().qr,'data:image/png;base64,clean');
+ assert.equal(launches.length,1);
+ assert.equal(launches[0].userDataDir,path.join(runtime,`session-${s.authClientId}`));
+ await s.shutdown();
 });
 
 test('startup audit is passive and never runs a CacheStorage probe before QR/ready',()=>{
