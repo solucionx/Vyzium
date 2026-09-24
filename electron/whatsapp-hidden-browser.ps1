@@ -5,7 +5,8 @@ param(
     [Parameter(Mandatory=$true)][string]$StopFile,
     [int]$ParentPid = 0,
     [int]$WaitForDevToolsSeconds = 45,
-    [string]$DiagnosticLog = ''
+    [string]$DiagnosticLog = '',
+    [switch]$DisableStorageBuckets
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,7 +17,7 @@ function Write-Diagnostic([string]$EventName, [string]$Detail = '') {
     try {
         $parent = Split-Path -Parent $DiagnosticLog
         if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        $safe = ($Detail -replace '(?i)(token|secret|password|cookie|authorization|key)[=: ]+\\S+', '$1=[REDACTED]')
+        $safe = ($Detail -replace '(?i)(token|secret|password|cookie|authorization|key)[=: ]+\S+', '$1=[REDACTED]')
         Add-Content -LiteralPath $DiagnosticLog -Value (([DateTime]::UtcNow.ToString('o')) + ' | ' + $EventName + ' | ' + $safe) -Encoding UTF8
     } catch {}
 }
@@ -524,6 +525,11 @@ $argsList = @(
     '--new-window',
     'about:blank'
 )
+if ($DisableStorageBuckets) {
+    # Recovery-only compatibility mode. Never used for an established session.
+    $argsList = @($argsList[0..($argsList.Count-2)]) + '--disable-features=StorageBuckets' + @($argsList[$argsList.Count-1])
+    Write-Diagnostic 'browser.storage-buckets-disabled' 'first-connection recovery'
+}
 $cmdLine = (Quote-Arg $browser) + ' ' + (($argsList | ForEach-Object { Quote-Arg ([string]$_) }) -join ' ')
 $working = Split-Path -Parent $browser
 $launch = $null

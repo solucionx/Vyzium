@@ -49,7 +49,7 @@ function resolveHiddenBrowserHelperPath() {
   return bundled;
 }
 
-function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnFn = spawn, timeoutMs = 55000, parentPid = process.pid, helperPath = resolveHiddenBrowserHelperPath(), diagnosticLog = null} = {}) {
+function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnFn = spawn, timeoutMs = 55000, parentPid = process.pid, helperPath = resolveHiddenBrowserHelperPath(), diagnosticLog = null, disableStorageBuckets = false} = {}) {
   if (process.platform !== 'win32') return Promise.reject(new Error('O inicializador invisível do Chrome está disponível apenas no Windows.'));
   if (!browser || !fs.existsSync(browser)) return Promise.reject(new Error('Executável do Chrome/Edge não encontrado para o WhatsApp.'));
   if (!userDataDir) return Promise.reject(new Error('Perfil LocalAuth não informado ao inicializador do WhatsApp.'));
@@ -83,7 +83,8 @@ function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnF
         '-StopFile', stopFile,
         '-ParentPid', String(parentPid),
         '-WaitForDevToolsSeconds', '45',
-        ...(diagnosticLog ? ['-DiagnosticLog', diagnosticLog] : [])
+        ...(diagnosticLog ? ['-DiagnosticLog', diagnosticLog] : []),
+        ...(disableStorageBuckets ? ['-DisableStorageBuckets'] : [])
       ], {windowsHide:true, stdio:['ignore','pipe','pipe']});
     } catch (error) {
       finishError(error);
@@ -282,7 +283,8 @@ function resolveBrowserMode(deps = {}) {
 function isFatalCacheStorageError(text) {
   const value = String(text || '');
   return /Failed to execute ['"]open['"] on ['"]CacheStorage['"]:\s*Unexpected internal error/i.test(value)
-    || /storage_initialization_error|storage-initialization-error/i.test(value);
+    || /storage_initialization_error|storage-initialization-error/i.test(value)
+    || /Failed to execute ['"]put['"] on ['"]Cache['"]:\s*Entry already exists/i.test(value);
 }
 
 function messageIdentity(message) {
@@ -376,6 +378,7 @@ class WhatsAppSession {
     this.storageFallbackGeneration = null;
     this.storageFallbackDelayMs = Number(deps.storageFallbackDelayMs || 250);
     this.authFailureCount = 0;
+    this.firstConnectionStorageRecoveryUsed = false;
 
     // Session state is transactional: an established profile remains active while
     // a new QR is prepared in a separate pending profile. No boot-time path is
@@ -957,6 +960,57 @@ class WhatsAppSession {
     });
   }
 
+  async _recoverFirstConnectionStorageFailure(generation, client, source = 'console', text = '') {
+    if (generation !== this.generation || this.client !== client) return;
+    // Never touch a committed LocalAuth profile. This recovery is exclusively
+    // for a first/new QR profile that has never reached ready.
+    if (this._hasEstablishedSession() || !this.firstConnectionPending || this.userPaused || this.busy || this.state.status !== 'starting') return;
+    if (this.firstConnectionStorageRecoveryUsed) return;
+    this.firstConnectionStorageRecoveryUsed = true;
+    const failedClientId = this.authClientId;
+    this._audit('browser.first-connection-storage-recovery-start', {generation, source, failedClientId, text:String(text || '').slice(0, 700)});
+
+    const stalledStarting = this.starting;
+    this.generation++;
+    this.client = null;
+    this.starting = null;
+    this._clearStartupWatchdog();
+    this._clearQrWatchdog();
+    if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
+    await this._disposeClient(client, 10000);
+    if (this.userPaused || this.busy) return;
+
+    // Quarantine only the uncommitted profile that just failed. A previously
+    // established profile is never selected by this path and is never deleted.
+    await this._quarantineAuthProfile(failedClientId, 'first-storage');
+    const state = {...this.sessionState};
+    if (state.pendingClientId === failedClientId) state.pendingClientId = null;
+    state.state = state.activeClientId ? 'established' : 'empty';
+    this._writeSessionState(state);
+
+    const freshClientId = this._newAuthClientId();
+    this._setPendingSession(freshClientId, {reason:'first-storage-recovery'});
+    this._setAuthClientId(freshClientId, false);
+    this.state = {status:'offline', qr:null, account:null, error:null};
+    this._audit('browser.first-connection-storage-recovery-restart', {source, freshClientId, disableStorageBuckets:true});
+    this._connectInternal({
+      disableStorageBuckets:true,
+      rotateProfileOnStall:false,
+      stallRetries:0,
+      reason:'first-storage-recovery'
+    }).catch(error => {
+      if (!this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
+        // The destructive recovery above is single-use, but ordinary connection
+        // retries must remain available. Keep the fresh compatibility profile and
+        // retry it with normal backoff instead of quarantining/deleting again.
+        this.requiresNewQr = false;
+        this.state = {status:'offline', qr:null, account:null, error:error?.message || 'O armazenamento local do navegador ainda não ficou disponível. O Vyzium tentará novamente automaticamente.'};
+        this._audit('browser.first-connection-storage-recovery-retryable', {error});
+        this._scheduleReconnect(false);
+      }
+    });
+  }
+
   _armStartupWatchdog(generation, options = {}) {
     this._clearStartupWatchdog();
     const timeout = Math.max(25, Number(options.timeoutMs || this.startupTimeoutMs));
@@ -985,6 +1039,16 @@ class WhatsAppSession {
     if (this.userPaused || this.busy) return;
 
     const retriesLeft = Math.max(0, Number(options.stallRetries || 0));
+    if (this.firstConnectionPending && this.firstConnectionStorageRecoveryUsed) {
+      // Storage/profile recovery is deliberately single-use. From this point on,
+      // a stall is treated as a transient connection failure: preserve the fresh
+      // profile, preserve compatibility mode and retry with bounded backoff.
+      this.requiresNewQr = false;
+      this.state = {status:'offline', qr:null, account:null, error:'O Chrome ainda não concluiu a preparação do WhatsApp. O Vyzium tentará novamente automaticamente.'};
+      this._audit('watchdog.first-connection-retryable', {generation, reason:options.reason || null});
+      this._scheduleReconnect(false);
+      return;
+    }
     if (options.rotateProfileOnStall && retriesLeft > 0) {
       const freshClientId = this._newAuthClientId();
       const disposablePending = this._setPendingSession(freshClientId, {reason:'startup-stall'});
@@ -1149,10 +1213,17 @@ class WhatsAppSession {
 
   async _connectInternal(options = {}) {
     if (this.userPaused || this.starting || ['starting','qr','authenticated','ready'].includes(this.state.status)) return this.status();
+    // Once the one-time first-connect Storage recovery has selected a fresh
+    // compatibility profile, every ordinary retry must keep that same profile
+    // and the StorageBuckets compatibility flag. This prevents both regression
+    // (giving up after one transient failure) and destructive profile loops.
+    const effectiveOptions = (this.firstConnectionPending && this.firstConnectionStorageRecoveryUsed)
+      ? {...options, disableStorageBuckets:true, rotateProfileOnStall:false, stallRetries:0, reason:options.reason || 'first-storage-retry'}
+      : options;
     this.state = {status:'starting', qr:null, account:null, error:null};
     const generation = ++this.generation;
-    this._audit('connection.start', {generation, profile:this.authClientId, options});
-    const starting = this._initializeWithRecovery(generation, options)
+    this._audit('connection.start', {generation, profile:this.authClientId, options:effectiveOptions});
+    const starting = this._initializeWithRecovery(generation, effectiveOptions)
       .catch(error => {
         if (generation === this.generation && !this.userPaused) {
           this.state = {
@@ -1166,14 +1237,14 @@ class WhatsAppSession {
       })
       .finally(() => { if (this.starting === starting) this.starting = null; });
     this.starting = starting;
-    this._armStartupWatchdog(generation, options);
+    this._armStartupWatchdog(generation, effectiveOptions);
     try {
       await starting;
       return this.status();
     } catch (error) {
       if (!this.userPaused && generation === this.generation) {
         this._clearStartupWatchdog();
-        this._scheduleReconnect(false);
+        if (!effectiveOptions.terminalOnFailure && (!this.firstConnectionPending || this.firstConnectionStorageRecoveryUsed)) this._scheduleReconnect(false);
       }
       throw error;
     }
@@ -1191,6 +1262,7 @@ class WhatsAppSession {
     const launchMode = normalizeBrowserMode(options.browserMode) || this.browserMode;
     const headless = launchMode === 'headless';
     const browserArgs = ['--disable-background-timer-throttling','--disable-backgrounding-occluded-windows'];
+    if (options.disableStorageBuckets === true) browserArgs.push('--disable-features=StorageBuckets');
     // Keep native Windows behavior in production, while allowing unit tests to
     // inject a deterministic platform without spawning a real PowerShell/Chrome.
     // forcePreShowGuard still wins so the dedicated pre-show test exercises the
@@ -1245,7 +1317,8 @@ class WhatsAppSession {
         generation,
         parentPid:process.pid,
         spawnFn:this.deps.spawn || spawn,
-        diagnosticLog:this.deps.hiddenBrowserDiagnosticLog || null
+        diagnosticLog:this.deps.hiddenBrowserDiagnosticLog || null,
+        disableStorageBuckets:options.disableStorageBuckets === true
       });
       puppeteerOptions = {
         headless:false,
@@ -1281,10 +1354,15 @@ class WhatsAppSession {
     const triggerFatalStorageRecovery = (source, text) => {
       if (!isFatalCacheStorageError(text)) return;
       this._audit('browser.storage-failure-detected', {generation, mode:launchMode, source, text:String(text || '').slice(0, 900)});
-      if (!headless) return;
       const timer = setTimeout(() => {
-        this._recoverFatalHeadlessStorage(generation, client, source).catch(error => {
-          this._audit('browser.storage-fallback-error', {generation, source, error});
+        if (headless) {
+          this._recoverFatalHeadlessStorage(generation, client, source).catch(error => {
+            this._audit('browser.storage-fallback-error', {generation, source, error});
+          });
+          return;
+        }
+        this._recoverFirstConnectionStorageFailure(generation, client, source, text).catch(error => {
+          this._audit('browser.first-connection-storage-recovery-error', {generation, source, error});
         });
       }, Math.max(0, this.storageFallbackDelayMs));
       timer.unref?.();

@@ -11,6 +11,7 @@ const { FirebaseClient } = require('./firebase-client');
 const { AuthManager } = require('./auth-manager');
 const { SecurityManager } = require('./security-manager');
 const { FullDiagnostics } = require('./diagnostics');
+const { createSentryReporter, shouldPromoteWhatsAppEvent } = require('./sentry-client');
 
 let window;
 let whatsapp;
@@ -20,6 +21,7 @@ let firebaseClient;
 let authManager;
 let securityManager;
 let fullDiagnostics;
+let sentryReporter;
 let workspaceServicesStarted = false;
 let quitting = false;
 let updating = false;
@@ -167,7 +169,6 @@ function startEngine(moduleName) {
         state.url = null;
       }
       killProcessTree(child).catch(() => {});
-      fullDiagnostics?.error(`engine.${moduleName}.timeout`, new Error('Timeout de inicializacao'), {pid:child.pid});
       reject(new Error(`O motor de ${moduleName === 'compras' ? 'Cotação & Mapas' : 'Acompanhamento'} não iniciou a tempo.`));
     }, 20000);
 
@@ -202,7 +203,6 @@ function startEngine(moduleName) {
       fullDiagnostics?.event('engine.stderr', {moduleName, text});
     });
     child.once('error', error => {
-      fullDiagnostics?.error(`engine.${moduleName}.process`, error, {pid:child.pid});
       clearTimeout(timeout);
       if (state.process === child) {
         state.process = null;
@@ -214,7 +214,6 @@ function startEngine(moduleName) {
       }
     });
     child.once('exit', code => {
-      fullDiagnostics?.event('engine.exit', {moduleName, pid:child.pid, code, settled});
       clearTimeout(timeout);
       const wasCurrentProcess = state.process === child;
       if (wasCurrentProcess) {
@@ -299,7 +298,6 @@ function engineRequestTimeout(moduleName, method, routePath) {
 }
 
 async function requestEngine(moduleName, method, route, body) {
-  const requestStartedAt = Date.now();
   const normalizedMethod = String(method || '').toUpperCase();
   const routePath = String(route || '').split('?')[0];
   if (!ROUTES[moduleName]?.[normalizedMethod]?.has(routePath)) throw new Error('Operação local não permitida.');
@@ -314,10 +312,8 @@ async function requestEngine(moduleName, method, route, body) {
     });
     const payload = await response.json();
     if (!response.ok) throw new Error(payload.error || `Erro HTTP ${response.status}`);
-    fullDiagnostics?.event('engine.request-ok', {moduleName, method:normalizedMethod, route:routePath, durationMs:Date.now()-requestStartedAt});
     return payload;
   } catch (error) {
-    fullDiagnostics?.error('engine.request', error, {moduleName, method:normalizedMethod, route:routePath, durationMs:Date.now()-requestStartedAt});
     if (error?.name === 'TimeoutError' || error?.name === 'AbortError') {
       throw new Error(`O motor de ${moduleName === 'compras' ? 'Cotação & Mapas' : 'Acompanhamento'} demorou além do esperado nesta operação.`);
     }
@@ -380,9 +376,8 @@ async function comprasOverview() {
     }, 12000);
     child.stdout.on('data', chunk => { stdout += chunk.toString(); });
     child.stderr.on('data', chunk => { stderr += chunk.toString(); });
-    child.once('error', error => { clearTimeout(timer); fullDiagnostics?.error('security-tool.process', error, {operation}); reject(error); });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
     child.once('exit', code => {
-      fullDiagnostics?.event('security-tool.exit', {operation, code, lastStage});
       clearTimeout(timer);
       if (code !== 0) return reject(new Error(stderr.trim() || 'Não foi possível carregar o resumo de compras.'));
       try {
@@ -420,8 +415,6 @@ async function getOverview() {
 
 
 async function runSecurityTool(args, extraEnv = {}) {
-  const operationName = args[0] || 'security-tool';
-  fullDiagnostics?.event('security-tool.start', {operation:operationName});
   const command = engineCommand('followup');
   return new Promise((resolve, reject) => {
     const child = spawn(command.executable, [...command.args, ...args], {
@@ -439,7 +432,7 @@ async function runSecurityTool(args, extraEnv = {}) {
     let stdout = '';
     let stderr = '';
     let lastStage = '';
-    const operation = operationName;
+    const operation = args[0] || 'security-tool';
     const timeoutMs = operation === 'migrate-db' ? 20 * 60 * 1000 : operation === 'validate-db' ? 2 * 60 * 1000 : 45 * 1000;
     const timer = setTimeout(() => {
       killProcessTree(child).catch(() => {});
@@ -463,9 +456,8 @@ async function runSecurityTool(args, extraEnv = {}) {
         }
       }
     });
-    child.once('error', error => { clearTimeout(timer); fullDiagnostics?.error('security-tool.process', error, {operation}); reject(error); });
+    child.once('error', error => { clearTimeout(timer); reject(error); });
     child.once('exit', code => {
-      fullDiagnostics?.event('security-tool.exit', {operation, code, lastStage});
       clearTimeout(timer);
       if (code !== 0) {
         const numericCode = Number(code);
@@ -513,7 +505,14 @@ async function startWorkspaceServices() {
   fullDiagnostics?.stage('Seguranca e bancos validados', 'OK');
   whatsapp = new WhatsAppSession(securityManager.whatsappDir(), {
     profileDataDir: securityManager.whatsappRuntimeDir(),
-    fullDiagnosticEvent: (event, details) => fullDiagnostics?.event(event, details),
+    fullDiagnosticEvent: (event, details) => {
+      fullDiagnostics?.event(event, details);
+      // Only high-value technical failures are promoted remotely. The reporter
+      // deduplicates them locally, sanitizes details, and never controls recovery.
+      if (shouldPromoteWhatsAppEvent(event)) {
+        try { sentryReporter?.captureException?.(new Error(`WhatsApp technical failure: ${String(event)}`), { source: String(event), details }); } catch (_) {}
+      }
+    },
     hiddenBrowserDiagnosticLog: fullDiagnostics ? path.join(fullDiagnostics.dir, 'hidden-browser.log') : null
   });
   fullDiagnostics?.stage('Sessao WhatsApp criada', 'OK', {diagnosticDirectory:whatsapp.diagnosticDirectory()});
@@ -660,6 +659,11 @@ ipcMain.handle('go-home', async () => {
 ipcMain.handle('app-version', () => app.getVersion());
 ipcMain.handle('renderer-error', (_event, payload = {}) => {
   try {
+    const rendererError = new Error(String(payload.message || 'Erro no renderer').slice(0, 1200));
+    if (payload.stack) rendererError.stack = String(payload.stack).slice(0, 5000);
+    sentryReporter?.captureException?.(rendererError, { source: 'renderer', details: { page: String(payload.page || activeModule || '').slice(0, 80) } });
+  } catch (_) {}
+  try {
     const dir = path.join(app.getPath('userData'), 'logs');
     fs.mkdirSync(dir, { recursive: true });
     const safe = {
@@ -742,6 +746,12 @@ ipcMain.handle('auth-logout', async () => {
 
 app.whenReady().then(async () => {
   fullDiagnostics = new FullDiagnostics(app);
+  // Fail-open remote monitoring: initialization is local-only and cannot block startup.
+  // Any Sentry/network failure is swallowed by the isolated reporter.
+  try {
+    sentryReporter = createSentryReporter({ app, environment: app.isPackaged ? 'production' : 'development' });
+    fullDiagnostics.setRemoteReporter(sentryReporter);
+  } catch (_) { sentryReporter = null; }
   fullDiagnostics.system();
   fullDiagnostics.stage('Electron app.ready', 'OK');
   process.on('uncaughtException', error => fullDiagnostics?.error('process.uncaughtException', error));
@@ -833,20 +843,15 @@ app.whenReady().then(async () => {
 });
 
 app.on('before-quit', event => {
+  try { if (whatsapp?.auditFile) fullDiagnostics?.copy(whatsapp.auditFile, 'whatsapp-debug.jsonl'); } catch (_) {}
+  fullDiagnostics?.finalize({reason:'before-quit'});
   if (quitting) return;
   event.preventDefault();
   app.isQuitting = true;
-  fullDiagnostics?.stage('Encerramento controlado', 'INICIO');
-  const whatsappAuditFile = whatsapp?.auditFile || null;
-  Promise.resolve(stopWorkspaceServices())
-    .catch(error => fullDiagnostics?.error('app.shutdown', error))
-    .finally(() => {
-      try { if (whatsappAuditFile) fullDiagnostics?.copy(whatsappAuditFile, 'whatsapp-debug.jsonl'); } catch (_) {}
-      fullDiagnostics?.stage('Servicos encerrados', 'OK');
-      fullDiagnostics?.finalize({reason:'before-quit'});
-      quitting = true;
-      app.quit();
-    });
+  Promise.resolve(stopWorkspaceServices()).finally(() => {
+    quitting = true;
+    app.quit();
+  });
 });
 
 app.on('window-all-closed', () => {
