@@ -49,7 +49,7 @@ function resolveHiddenBrowserHelperPath() {
   return bundled;
 }
 
-function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnFn = spawn, timeoutMs = 55000, parentPid = process.pid, helperPath = resolveHiddenBrowserHelperPath(), diagnosticLog = null, disableStorageBuckets = false} = {}) {
+function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnFn = spawn, timeoutMs = 55000, parentPid = process.pid, helperPath = resolveHiddenBrowserHelperPath()} = {}) {
   if (process.platform !== 'win32') return Promise.reject(new Error('O inicializador invisível do Chrome está disponível apenas no Windows.'));
   if (!browser || !fs.existsSync(browser)) return Promise.reject(new Error('Executável do Chrome/Edge não encontrado para o WhatsApp.'));
   if (!userDataDir) return Promise.reject(new Error('Perfil LocalAuth não informado ao inicializador do WhatsApp.'));
@@ -82,9 +82,7 @@ function launchHiddenHeadedBrowser({browser, userDataDir, generation = 0, spawnF
         '-UserDataDir', userDataDir,
         '-StopFile', stopFile,
         '-ParentPid', String(parentPid),
-        '-WaitForDevToolsSeconds', '45',
-        ...(diagnosticLog ? ['-DiagnosticLog', diagnosticLog] : []),
-        ...(disableStorageBuckets ? ['-DisableStorageBuckets'] : [])
+        '-WaitForDevToolsSeconds', '45'
       ], {windowsHide:true, stdio:['ignore','pipe','pipe']});
     } catch (error) {
       finishError(error);
@@ -287,6 +285,18 @@ function isFatalCacheStorageError(text) {
     || /Failed to execute ['"]put['"] on ['"]Cache['"]:\s*Entry already exists/i.test(value);
 }
 
+function classifyRecoverableStartupError(error) {
+  const text = String(error?.stack || error?.message || error || '');
+  if (isFatalCacheStorageError(text)) return 'storage';
+  if (/frame got detached|Execution context was destroyed|Cannot find context with specified id|Protocol error.*context/i.test(text)) return 'execution-context';
+  if (/DevToolsActivePort|DevTools|CDP|browserWSEndpoint|WebSocket|ECONNREFUSED|socket hang up/i.test(text)) return 'cdp';
+  if (/encerrou antes do Chrome ficar disponível|Chrome encerrou antes|inicializador invisível|Tempo limite ao preparar o Chrome/i.test(text)) return 'browser-launch';
+  if (/profile.*in use|user data directory is already in use|SingletonLock|SingletonCookie|lock file/i.test(text)) return 'profile-lock';
+  if (/ERR_(INTERNET_DISCONNECTED|NETWORK_CHANGED|NAME_NOT_RESOLVED|CONNECTION_(RESET|TIMED_OUT|CLOSED)|PROXY_CONNECTION_FAILED)|ENETUNREACH|ETIMEDOUT|EAI_AGAIN/i.test(text)) return 'network';
+  if (/Waiting failed|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
+  return null;
+}
+
 function messageIdentity(message) {
   if (!message) return null;
   if (typeof message === 'string') return message.trim() || null;
@@ -339,6 +349,9 @@ class WhatsAppSession {
     this.client = null;
     this.starting = null;
     this.startupWatchdog = null;
+    this.authenticatedWatchdog = null;
+    this.closed = false;
+    this.protectedProfiles = new Set();
     this.startupTimeoutMs = Number(deps.startupTimeoutMs || 120000);
     this.qrWatchdog = null;
     // WhatsApp Web rotates the QR roughly every 20s. If no new `qr` event and no
@@ -378,7 +391,12 @@ class WhatsAppSession {
     this.storageFallbackGeneration = null;
     this.storageFallbackDelayMs = Number(deps.storageFallbackDelayMs || 250);
     this.authFailureCount = 0;
-    this.firstConnectionStorageRecoveryUsed = false;
+    this.selfHealFile = path.join(this.dataDir, 'whatsapp-self-heal.json');
+    this.selfHeal = this._loadSelfHealState();
+    this.startupFailureStreak = 0;
+    this.maxRecoveryCycles = Math.max(2, Number(deps.maxRecoveryCycles) || 3);
+    this.recoveryCooldownMs = Math.max(1000, Number(deps.recoveryCooldownMs) || 300000);
+    this.maxStartupAttempts = Math.max(2, Math.min(5, Number(deps.maxStartupAttempts || 3)));
 
     // Session state is transactional: an established profile remains active while
     // a new QR is prepared in a separate pending profile. No boot-time path is
@@ -414,6 +432,79 @@ class WhatsAppSession {
       platform:process.platform,
       arch:process.arch
     });
+  }
+
+  _loadSelfHealState() {
+    try {
+      const value = JSON.parse(fs.readFileSync(this.selfHealFile, 'utf8'));
+      return value && typeof value === 'object' ? value : {};
+    } catch (_) { return {}; }
+  }
+
+  _saveSelfHealState() {
+    try {
+      fs.mkdirSync(this.dataDir, {recursive:true, mode:0o700});
+      const temp = `${this.selfHealFile}.tmp`;
+      fs.writeFileSync(temp, JSON.stringify(this.selfHeal, null, 2), {encoding:'utf8', mode:0o600});
+      fs.renameSync(temp, this.selfHealFile);
+    } catch (error) { this._audit?.('self-heal.state-write-error', {error}); }
+  }
+
+  _resetSelfHealForReady() {
+    this.startupFailureStreak = 0;
+    this.selfHeal = {lastReadyAt:new Date().toISOString(), profile:this.authClientId};
+    this._saveSelfHealState();
+  }
+
+  _canRepairPendingProfile(reason) {
+    const current = this._validClientId(this.authClientId);
+    const committed = this._validClientId(this.sessionState?.activeClientId);
+    if (!current || current === committed || this.protectedProfiles.has(current) ||
+        this.selfHeal.authenticatedProfile === current || (this.selfHeal.profile === current && this.selfHeal.lastReadyAt)) return false;
+    return this.selfHeal?.destructiveRecoveryUsed !== true;
+  }
+
+  async _repairPendingProfileOnce(generation, client, reason, source = 'runtime') {
+    if (generation !== this.generation || this.client !== client || this.userPaused || this.busy || this.state.status !== 'starting') return false;
+    if (!this._canRepairPendingProfile(reason)) {
+      this._audit('self-heal.profile-repair-skipped', {generation, reason, source, profile:this.authClientId, firstConnectionPending:this.firstConnectionPending});
+      return false;
+    }
+    const oldClientId = this.authClientId;
+    this.selfHeal = {...this.selfHeal, destructiveRecoveryUsed:true, destructiveRecoveryKey:`${oldClientId}:${String(reason || 'unknown')}`, lastRecoveryAt:new Date().toISOString(), lastRecoveryReason:String(reason || 'unknown')};
+    this._saveSelfHealState();
+    this._audit('self-heal.profile-repair-start', {generation, reason, source, profile:oldClientId});
+
+    const stalledStarting = this.starting;
+    const recoveryGeneration = ++this.generation;
+    this.client = null;
+    this.starting = null;
+    this._clearStartupWatchdog();
+    this._clearQrWatchdog();
+    if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
+    await this._disposeClient(client, 10000);
+    if (recoveryGeneration !== this.generation || this.closed || this.userPaused || this.busy) return false;
+
+    // The profile is not authenticated/committed. Quarantine it instead of
+    // deleting it, then create exactly one clean pending profile. Any committed
+    // profile remains untouched and available for rollback.
+    await this._quarantineAuthProfile(oldClientId, `self-heal-${String(reason || 'startup').replace(/[^a-z0-9_-]/gi,'-').slice(0,40)}`);
+    if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return false;
+    const freshClientId = this._newAuthClientId();
+    this._setPendingSession(freshClientId, {reason:`self-heal-${reason}`, previousPending:oldClientId});
+    this._setAuthClientId(freshClientId, false);
+    this.selfHeal = {...this.selfHeal, recoveredFrom:oldClientId, recoveredTo:freshClientId};
+    this._saveSelfHealState();
+    this.state = {status:'offline', qr:null, account:null, error:null};
+    this._audit('self-heal.profile-repair-restart', {reason, source, freshClientId});
+    const nextGeneration = this.generation + 1;
+    this._connectInternal({selfHealRecovery:true, stallRetries:0, rotateProfileOnStall:false}).catch(error => {
+      this._audit('self-heal.profile-repair-restart-error', {reason, source, error});
+      if (nextGeneration === this.generation && !this.closed && !this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
+        this.state = {status:'error', qr:null, account:null, error:'O Vyzium tentou reparar automaticamente o ambiente do WhatsApp, mas a inicialização ainda falhou. O diagnóstico foi preservado para análise.'};
+      }
+    });
+    return true;
   }
 
   status() {
@@ -459,6 +550,8 @@ class WhatsAppSession {
   }
 
   _audit(event, details = {}) {
+    // Observability is deliberately fail-open: reporting can never alter the
+    // WhatsApp lifecycle, browser, profile, watchdog or reconnect behavior.
     try { this.deps.fullDiagnosticEvent?.(`whatsapp.${String(event)}`, details); } catch (_) {}
     try {
       fs.mkdirSync(this.dataDir, {recursive:true, mode:0o700});
@@ -715,8 +808,17 @@ class WhatsAppSession {
       try {
         fs.renameSync(source, destination);
       } catch (_) {
-        fs.cpSync(source, destination, {recursive:true, force:false, errorOnExist:false});
-        fs.rmSync(source, {recursive:true, force:true, maxRetries:12, retryDelay:250});
+        // Publish only a completed copy. A failed copy must not leave a
+        // session-* directory that the next boot mistakes for a usable profile.
+        const staging = `${destination}.migrating-${crypto.randomBytes(6).toString('hex')}`;
+        try {
+          fs.cpSync(source, staging, {recursive:true, force:false, errorOnExist:true});
+          fs.renameSync(staging, destination);
+        } catch (error) {
+          try { fs.rmSync(staging, {recursive:true, force:true}); } catch (_) {}
+          throw error;
+        }
+        // Keep the original as a rollback copy on cross-volume migrations.
       }
       this._audit?.('profile.runtime-migrated', {
         clientId:this.authClientId,
@@ -725,9 +827,9 @@ class WhatsAppSession {
       });
     } catch (error) {
       this._audit?.('profile.runtime-migration-error', {clientId:this.authClientId, error});
-      // Do not invalidate a proven session marker just because migration failed.
-      // initialize() will surface the real browser error and the user can request
-      // a fresh QR, which rotates to a clean local-only profile.
+      // Continue using the original profile, never an empty destination.
+      // The next process start can retry migration when permissions recover.
+      this.profileDataDir = this.dataDir;
     }
   }
 
@@ -850,6 +952,8 @@ class WhatsAppSession {
   }
 
   _clearStartupWatchdog() {
+    if (this.authenticatedWatchdog) clearTimeout(this.authenticatedWatchdog);
+    this.authenticatedWatchdog = null;
     if (this.startupWatchdog) clearTimeout(this.startupWatchdog);
     this.startupWatchdog = null;
   }
@@ -874,6 +978,8 @@ class WhatsAppSession {
 
   async _disposeClient(client, timeout = 10000) {
     if (!client) return;
+    clearInterval(client.__vyziumAuditTimer);
+    client.__vyziumAuditTimer = null;
     const browser = client.pupBrowser;
     const hiddenBrowser = client.__vyziumHiddenBrowser || null;
     let child = null;
@@ -939,74 +1045,24 @@ class WhatsAppSession {
     // not the WhatsApp credentials. The same LocalAuth profile is reopened in
     // a normal Chrome process so the QR/auth flow can continue.
     const stalledStarting = this.starting;
-    this.generation++;
+    const recoveryGeneration = ++this.generation;
     this.client = null;
     this.starting = null;
     this._clearStartupWatchdog();
     this._clearQrWatchdog();
     if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
     await this._disposeClient(client, 8000);
-    if (this.userPaused || this.busy) return;
+    if (recoveryGeneration !== this.generation || this.closed || this.userPaused || this.busy) return;
 
     this.state = {status:'offline', qr:null, account:null, error:null};
     this._audit('browser.storage-fallback-restart', {source, mode:'headed'});
+    const nextGeneration = this.generation + 1;
     this._connectInternal({browserMode:'headed', reason:'fatal-cache-storage'}).catch(error => {
-      if (!this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
+      if (nextGeneration === this.generation && !this.closed && !this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
         this.state = {
           status:'error', qr:null, account:null,
           error:error?.message || 'O Chrome não conseguiu inicializar o armazenamento necessário do WhatsApp.'
         };
-      }
-    });
-  }
-
-  async _recoverFirstConnectionStorageFailure(generation, client, source = 'console', text = '') {
-    if (generation !== this.generation || this.client !== client) return;
-    // Never touch a committed LocalAuth profile. This recovery is exclusively
-    // for a first/new QR profile that has never reached ready.
-    if (this._hasEstablishedSession() || !this.firstConnectionPending || this.userPaused || this.busy || this.state.status !== 'starting') return;
-    if (this.firstConnectionStorageRecoveryUsed) return;
-    this.firstConnectionStorageRecoveryUsed = true;
-    const failedClientId = this.authClientId;
-    this._audit('browser.first-connection-storage-recovery-start', {generation, source, failedClientId, text:String(text || '').slice(0, 700)});
-
-    const stalledStarting = this.starting;
-    this.generation++;
-    this.client = null;
-    this.starting = null;
-    this._clearStartupWatchdog();
-    this._clearQrWatchdog();
-    if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
-    await this._disposeClient(client, 10000);
-    if (this.userPaused || this.busy) return;
-
-    // Quarantine only the uncommitted profile that just failed. A previously
-    // established profile is never selected by this path and is never deleted.
-    await this._quarantineAuthProfile(failedClientId, 'first-storage');
-    const state = {...this.sessionState};
-    if (state.pendingClientId === failedClientId) state.pendingClientId = null;
-    state.state = state.activeClientId ? 'established' : 'empty';
-    this._writeSessionState(state);
-
-    const freshClientId = this._newAuthClientId();
-    this._setPendingSession(freshClientId, {reason:'first-storage-recovery'});
-    this._setAuthClientId(freshClientId, false);
-    this.state = {status:'offline', qr:null, account:null, error:null};
-    this._audit('browser.first-connection-storage-recovery-restart', {source, freshClientId, disableStorageBuckets:true});
-    this._connectInternal({
-      disableStorageBuckets:true,
-      rotateProfileOnStall:false,
-      stallRetries:0,
-      reason:'first-storage-recovery'
-    }).catch(error => {
-      if (!this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
-        // The destructive recovery above is single-use, but ordinary connection
-        // retries must remain available. Keep the fresh compatibility profile and
-        // retry it with normal backoff instead of quarantining/deleting again.
-        this.requiresNewQr = false;
-        this.state = {status:'offline', qr:null, account:null, error:error?.message || 'O armazenamento local do navegador ainda não ficou disponível. O Vyzium tentará novamente automaticamente.'};
-        this._audit('browser.first-connection-storage-recovery-retryable', {error});
-        this._scheduleReconnect(false);
       }
     });
   }
@@ -1030,35 +1086,36 @@ class WhatsAppSession {
     // active session because all event handlers are generation/client guarded.
     const stalledClient = this.client;
     const stalledStarting = this.starting;
-    this.generation++;
+    const recoveryGeneration = ++this.generation;
     this.client = null;
     this.starting = null;
     if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
 
     await this._disposeClient(stalledClient, 8000);
-    if (this.userPaused || this.busy) return;
+    if (recoveryGeneration !== this.generation || this.closed || this.userPaused || this.busy) return;
 
     const retriesLeft = Math.max(0, Number(options.stallRetries || 0));
-    if (this.firstConnectionPending && this.firstConnectionStorageRecoveryUsed) {
-      // Storage/profile recovery is deliberately single-use. From this point on,
-      // a stall is treated as a transient connection failure: preserve the fresh
-      // profile, preserve compatibility mode and retry with bounded backoff.
-      this.requiresNewQr = false;
-      this.state = {status:'offline', qr:null, account:null, error:'O Chrome ainda não concluiu a preparação do WhatsApp. O Vyzium tentará novamente automaticamente.'};
-      this._audit('watchdog.first-connection-retryable', {generation, reason:options.reason || null});
-      this._scheduleReconnect(false);
-      return;
-    }
-    if (options.rotateProfileOnStall && retriesLeft > 0) {
+    this._audit('self-heal.watchdog-eligibility', {retriesLeft, rotateProfileOnStall:Boolean(options.rotateProfileOnStall), stalledClient:Boolean(stalledClient), canRepair:this._canRepairPendingProfile('startup-stall'), authClientId:this.authClientId, activeClientId:this.sessionState?.activeClientId || null, firstConnectionPending:this.firstConnectionPending});
+    if (options.rotateProfileOnStall && retriesLeft > 0 && stalledClient && this._canRepairPendingProfile('startup-stall')) {
+      // _repairPendingProfileOnce expects the current generation/client guards,
+      // but this watchdog has already invalidated them. Perform the same
+      // transactional pending-profile repair here after disposal.
+      const oldClientId = this.authClientId;
+      const key = `${oldClientId}:startup-stall`;
+      this.selfHeal = {...this.selfHeal, destructiveRecoveryUsed:true, destructiveRecoveryKey:key, lastRecoveryAt:new Date().toISOString(), lastRecoveryReason:'startup-stall'};
+      this._saveSelfHealState();
+      await this._quarantineAuthProfile(oldClientId, 'self-heal-startup-stall');
+      if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return;
       const freshClientId = this._newAuthClientId();
-      const disposablePending = this._setPendingSession(freshClientId, {reason:'startup-stall'});
+      this._setPendingSession(freshClientId, {reason:'self-heal-startup-stall', previousPending:oldClientId});
       this._setAuthClientId(freshClientId, false);
-      if (disposablePending) await this._cleanupAuthProfile(disposablePending);
       this.state = {status:'offline', qr:null, account:null, error:null};
-      this._connectInternal({...options, stallRetries:retriesLeft - 1}).catch(() => {});
+      this._audit('self-heal.watchdog-profile-repair', {oldClientId, freshClientId});
+      this._connectInternal({...options, rotateProfileOnStall:false, stallRetries:0, selfHealRecovery:true}).catch(() => {});
       return;
     }
 
+    this._recordStartupFailure('startup-stall');
     this.state = {
       status:'error',
       qr:null,
@@ -1067,56 +1124,80 @@ class WhatsAppSession {
     };
   }
 
+  _recordStartupFailure(reason) {
+    const failures = Math.max(0, Number(this.selfHeal.startupFailures) || 0) + 1;
+    const cooling = failures >= this.maxRecoveryCycles;
+    this.selfHeal = {...this.selfHeal, startupFailures:cooling ? 0 : failures,
+      nextRetryAt:cooling ? Date.now() + this.recoveryCooldownMs : 0,
+      lastFailureReason:String(reason || 'startup').slice(0, 160)};
+    this._saveSelfHealState();
+    if (cooling) this._audit('self-heal.cooldown', {retryAt:this.selfHeal.nextRetryAt});
+  }
+
+  _armAuthenticatedWatchdog(generation, client) {
+    if (this.authenticatedWatchdog) clearTimeout(this.authenticatedWatchdog);
+    this.authenticatedWatchdog = setTimeout(() => {
+      this.authenticatedWatchdog = null;
+      if (generation !== this.generation || this.client !== client || this.closed || this.userPaused || this.busy || this.state.status !== 'authenticated') return;
+      this._audit('watchdog.authenticated-fired', {generation});
+      this._recordStartupFailure('authenticated-stall');
+      // Preserve this profile: scanning the QR may already have persisted credentials.
+      if (this.selfHeal.nextRetryAt > Date.now()) {
+        this._expireAuthenticatedClient(generation, client).catch(error => this._audit('authenticated.cleanup-error', {error}));
+      } else {
+        this.restartConnection().catch(() => this._scheduleReconnect(false));
+      }
+    }, Math.max(25, this.authenticatedTimeoutMs));
+    this.authenticatedWatchdog.unref?.();
+  }
+
+  async _expireAuthenticatedClient(generation, client) {
+    if (generation !== this.generation || this.client !== client) return;
+    const stoppedGeneration = ++this.generation;
+    this.client = null;
+    this.starting = null;
+    await this._disposeClient(client);
+    if (stoppedGeneration !== this.generation || this.closed || this.userPaused) return;
+    this.state = {status:'error', qr:null, account:null, error:'A sincronização do WhatsApp não terminou. A sessão foi preservada; nova tentativa automática em alguns minutos.'};
+    this._scheduleReconnect(false);
+  }
+
   _scheduleReconnect(immediate = false) {
-    if (this.userPaused || this.requiresNewQr || this.reconnectTimer || this.starting || this.busy) return;
+    if (this.closed || this.userPaused || this.requiresNewQr || this.reconnectTimer || this.starting || this.busy) return;
     if (['starting','qr','authenticated'].includes(this.state.status)) return;
     const attempt = this.reconnectAttempts++;
-    const wait = immediate ? 0 : Math.min(this.reconnectMaxMs, this.reconnectBaseMs * Math.max(1, 2 ** Math.min(attempt, 4)));
+    const backoff = immediate ? 0 : Math.min(this.reconnectMaxMs, this.reconnectBaseMs * Math.max(1, 2 ** Math.min(attempt, 4)));
+    const cooldown = Math.max(0, Math.min(this.recoveryCooldownMs, (Number(this.selfHeal.nextRetryAt) || 0) - Date.now()));
+    const wait = Math.max(backoff, cooldown);
     this._audit('reconnect.scheduled', {attempt, wait, immediate});
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      if (this.userPaused || this.busy) return;
+      if (this.closed || this.userPaused || this.requiresNewQr || this.busy) return;
       this._connectInternal().catch(() => this._scheduleReconnect(false));
     }, wait);
     this.reconnectTimer.unref?.();
   }
 
   startMonitoring() {
-    if (this.monitorTimer) return;
-    this.monitorTimer = setInterval(async () => {
-      if (this.userPaused || this.busy || this.starting) return;
-      if (this.state.status === 'qr') return;
-      if (this.state.status === 'authenticated') {
-        if (!this.authenticatedAt) this.authenticatedAt = Date.now();
-        if (Date.now() - this.authenticatedAt < this.authenticatedTimeoutMs) return;
-        // A session can occasionally authenticate but never reach `ready`.
-        // Treat that as a stalled synchronization and renew it silently instead
-        // of leaving a batch waiting forever at the same percentage.
-        try { await this.restartConnection(); }
-        catch (_) { this._scheduleReconnect(false); }
-        return;
-      }
-      if (this.state.status === 'ready') {
-        const healthy = await this.connectionHealthy();
-        if (healthy) {
-          this.consecutiveHealthFailures = 0;
-          this.reconnectAttempts = 0;
-          return;
-        }
-        this.consecutiveHealthFailures += 1;
-        // One delayed getState() is not enough to tear down a healthy-looking
-        // session. Only consecutive failures promote it to offline.
-        if (this.consecutiveHealthFailures < this.healthFailureThreshold) return;
-        this.readyAt = 0;
-        this.state = {status:'offline', qr:null, account:null, error:'Conexão interrompida. O Vyzium está tentando restaurá-la automaticamente.'};
-      }
-      if (['offline','error'].includes(this.state.status)) this._scheduleReconnect(false);
+    if (this.closed || this.monitorTimer) return;
+    this.monitorTimer = setInterval(() => {
+      this.backgroundHealthCheck().catch(error => this._audit('monitor.health-error', {error}));
     }, this.healthIntervalMs);
     this.monitorTimer.unref?.();
   }
 
   async backgroundHealthCheck() {
+    if (this.healthCheckPromise) return this.healthCheckPromise;
+    const pending = this._backgroundHealthCheckInternal();
+    this.healthCheckPromise = pending;
+    try { return await pending; }
+    finally { if (this.healthCheckPromise === pending) this.healthCheckPromise = null; }
+  }
+
+  async _backgroundHealthCheckInternal() {
     this.startMonitoring();
+    const generation = this.generation;
+    if (this.closed) return {healthy:false, paused:true, status:'paused'};
     if (this.userPaused) return {healthy:false, paused:true, status:'paused'};
     if (this.busy || this.starting || ['qr','starting'].includes(this.state.status)) {
       return {healthy:false, paused:false, status:this.state.status};
@@ -1131,6 +1212,9 @@ class WhatsAppSession {
     }
     if (this.state.status === 'ready') {
       const healthy = await this.connectionHealthy();
+      if (generation !== this.generation || this.closed || this.userPaused || this.state.status !== 'ready') {
+        return {healthy:false, paused:this.userPaused || this.closed, status:this.state.status};
+      }
       if (healthy) {
         this.consecutiveHealthFailures = 0;
         this.reconnectAttempts = 0;
@@ -1174,6 +1258,9 @@ class WhatsAppSession {
   }
 
   connect() {
+    if (this.closed) return this.status();
+    this.selfHeal = {...this.selfHeal, startupFailures:0, nextRetryAt:0};
+    this._saveSelfHealState();
     this.userPaused = false;
     this.consecutiveHealthFailures = 0;
     this._savePausedPreference(false);
@@ -1185,47 +1272,48 @@ class WhatsAppSession {
   }
 
   async _initializeWithRecovery(generation, options = {}) {
-    const maxAttempts = 3;
+    const maxAttempts = this.maxStartupAttempts;
     let lastError = null;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      if (generation !== this.generation || this.closed || this.userPaused) return;
       try {
         this._audit('initialize.attempt', {generation, attempt, maxAttempts});
-        return await this.initialize(generation, options);
+        const result = await this.initialize(generation, options);
+        if (generation === this.generation) this.startupFailureStreak = 0;
+        return result;
       } catch (error) {
         lastError = error;
-        this._audit('initialize.attempt-error', {generation, attempt, executionContextError:isExecutionContextError(error), error});
-        if (!isExecutionContextError(error) || generation !== this.generation || this.userPaused || attempt >= maxAttempts) throw error;
-
-        // whatsapp-web.js 1.34.7 can lose its Puppeteer execution context when
-        // WhatsApp Web performs an internal navigation during Client.inject().
-        // Tear down that browser instance and retry with the same LocalAuth
-        // profile. No user data or session is deleted here.
+        const category = classifyRecoverableStartupError(error);
+        this.startupFailureStreak += 1;
+        this._audit('initialize.attempt-error', {generation, attempt, category, executionContextError:isExecutionContextError(error), error});
+        if (generation !== this.generation || this.userPaused || attempt >= maxAttempts) throw error;
+        // Retry only failures for which recreating the browser/CDP transport is
+        // safe. Credentials and committed profiles are never deleted here.
+        if (!['execution-context','cdp','browser-launch','profile-lock','network','bootstrap'].includes(category)) throw error;
         const failedClient = this.client;
         this.client = null;
         if (failedClient) await this._disposeClient(failedClient, 10000);
         if (generation !== this.generation || this.userPaused) return;
         this.state = {status:'starting', qr:null, account:null, error:null};
-        await delay(700 * attempt);
+        const wait = Math.min(8000, 700 * (2 ** (attempt - 1)));
+        this._audit('self-heal.transport-retry', {generation, attempt, category, wait});
+        await delay(wait);
       }
     }
     throw lastError;
   }
 
   async _connectInternal(options = {}) {
-    if (this.userPaused || this.starting || ['starting','qr','authenticated','ready'].includes(this.state.status)) return this.status();
-    // Once the one-time first-connect Storage recovery has selected a fresh
-    // compatibility profile, every ordinary retry must keep that same profile
-    // and the StorageBuckets compatibility flag. This prevents both regression
-    // (giving up after one transient failure) and destructive profile loops.
-    const effectiveOptions = (this.firstConnectionPending && this.firstConnectionStorageRecoveryUsed)
-      ? {...options, disableStorageBuckets:true, rotateProfileOnStall:false, stallRetries:0, reason:options.reason || 'first-storage-retry'}
-      : options;
+    if (this.closed || this.userPaused || this.starting || ['starting','qr','authenticated','ready'].includes(this.state.status)) return this.status();
+    if (Number(this.selfHeal.nextRetryAt) > Date.now()) { this._scheduleReconnect(false); return this.status(); }
+    this.authenticatedAt = 0;
     this.state = {status:'starting', qr:null, account:null, error:null};
     const generation = ++this.generation;
-    this._audit('connection.start', {generation, profile:this.authClientId, options:effectiveOptions});
-    const starting = this._initializeWithRecovery(generation, effectiveOptions)
+    this._audit('connection.start', {generation, profile:this.authClientId, options});
+    const starting = this._initializeWithRecovery(generation, options)
       .catch(error => {
-        if (generation === this.generation && !this.userPaused) {
+        if (generation === this.generation && !this.closed && !this.userPaused) {
+          this._recordStartupFailure(classifyRecoverableStartupError(error));
           this.state = {
             status:'error',
             qr:null,
@@ -1237,22 +1325,23 @@ class WhatsAppSession {
       })
       .finally(() => { if (this.starting === starting) this.starting = null; });
     this.starting = starting;
-    this._armStartupWatchdog(generation, effectiveOptions);
+    this._armStartupWatchdog(generation, options);
     try {
       await starting;
       return this.status();
     } catch (error) {
       if (!this.userPaused && generation === this.generation) {
         this._clearStartupWatchdog();
-        if (!effectiveOptions.terminalOnFailure && (!this.firstConnectionPending || this.firstConnectionStorageRecoveryUsed)) this._scheduleReconnect(false);
+        this._scheduleReconnect(false);
       }
       throw error;
     }
   }
 
   async initialize(generation, options = {}) {
+    if (generation !== this.generation || this.closed || this.userPaused) return;
     if (this.client) await this._disposeClient(this.client, 10000);
-    if (generation !== this.generation) return;
+    if (generation !== this.generation || this.closed || this.userPaused) return;
 
     const {Client, LocalAuth} = this.deps.library || require('whatsapp-web.js');
     const qrCode = this.deps.qrCode || require('qrcode');
@@ -1262,7 +1351,6 @@ class WhatsAppSession {
     const launchMode = normalizeBrowserMode(options.browserMode) || this.browserMode;
     const headless = launchMode === 'headless';
     const browserArgs = ['--disable-background-timer-throttling','--disable-backgrounding-occluded-windows'];
-    if (options.disableStorageBuckets === true) browserArgs.push('--disable-features=StorageBuckets');
     // Keep native Windows behavior in production, while allowing unit tests to
     // inject a deterministic platform without spawning a real PowerShell/Chrome.
     // forcePreShowGuard still wins so the dedicated pre-show test exercises the
@@ -1316,10 +1404,13 @@ class WhatsAppSession {
         userDataDir:sessionDir,
         generation,
         parentPid:process.pid,
-        spawnFn:this.deps.spawn || spawn,
-        diagnosticLog:this.deps.hiddenBrowserDiagnosticLog || null,
-        disableStorageBuckets:options.disableStorageBuckets === true
+        spawnFn:this.deps.spawn || spawn
       });
+      if (generation !== this.generation || this.closed || this.userPaused) {
+        const stopLauncher = this.deps.stopHiddenHeadedBrowser || stopHiddenHeadedBrowser;
+        await Promise.resolve(stopLauncher(hiddenBrowser, 7000)).catch(() => {});
+        return;
+      }
       puppeteerOptions = {
         headless:false,
         browserWSEndpoint:hiddenBrowser.endpoint
@@ -1355,19 +1446,22 @@ class WhatsAppSession {
       if (!isFatalCacheStorageError(text)) return;
       this._audit('browser.storage-failure-detected', {generation, mode:launchMode, source, text:String(text || '').slice(0, 900)});
       const timer = setTimeout(() => {
+        if (!headless && this._canRepairPendingProfile('storage')) {
+          this._repairPendingProfileOnce(generation, client, 'storage', source).catch(error => {
+            this._audit('self-heal.storage-repair-error', {generation, source, error});
+          });
+          return;
+        }
         if (headless) {
           this._recoverFatalHeadlessStorage(generation, client, source).catch(error => {
             this._audit('browser.storage-fallback-error', {generation, source, error});
           });
-          return;
         }
-        this._recoverFirstConnectionStorageFailure(generation, client, source, text).catch(error => {
-          this._audit('browser.first-connection-storage-recovery-error', {generation, source, error});
-        });
       }, Math.max(0, this.storageFallbackDelayMs));
       timer.unref?.();
     };
     const attachRuntimeAudit = () => {
+      if (generation !== this.generation || this.client !== client || this.closed) return;
       try {
         if (client.pupBrowser && client.pupBrowser !== attachedBrowser) {
           attachedBrowser = client.pupBrowser;
@@ -1408,7 +1502,10 @@ class WhatsAppSession {
             this._audit('page.console', {generation, type:message.type?.(), text});
             triggerFatalStorageRecovery('console', text);
           });
-          attachedPage.on?.('pageerror', error => this._audit('page.error', {generation, error}));
+          attachedPage.on?.('pageerror', error => {
+            this._audit('page.error', {generation, error});
+            triggerFatalStorageRecovery('pageerror', error?.message || error);
+          });
           attachedPage.on?.('requestfailed', request => this._audit('page.request-failed', {
             generation,
             url:String(request.url?.() || '').split('?')[0].slice(0, 500),
@@ -1420,6 +1517,8 @@ class WhatsAppSession {
     };
     const runtimeAuditTimer = setInterval(attachRuntimeAudit, 100);
     runtimeAuditTimer.unref?.();
+    client.__vyziumAuditTimer = runtimeAuditTimer;
+    attachRuntimeAudit();
 
     client.on('qr', async value => {
       if (this.client !== client || generation !== this.generation) return;
@@ -1436,7 +1535,9 @@ class WhatsAppSession {
         }
       } catch (error) {
         this._audit('client.qr-image-error', {generation, sequence, error});
-        this.state.error = 'Não foi possível gerar o QR. Tente reconectar.';
+        if (generation === this.generation && this.client === client && sequence === qrSequence && this.state.status === 'qr') {
+          this.state.error = 'Não foi possível gerar o QR. Tente reconectar.';
+        }
       }
     });
 
@@ -1445,6 +1546,10 @@ class WhatsAppSession {
         this._clearStartupWatchdog();
         this._clearQrWatchdog();
         this.authenticatedAt = Date.now();
+        this.protectedProfiles.add(this.authClientId);
+        this.selfHeal = {...this.selfHeal, authenticatedProfile:this.authClientId};
+        this._saveSelfHealState();
+        this._armAuthenticatedWatchdog(generation, client);
         this.state = {status:'authenticated', qr:null, account:null, error:null};
         this._audit('client.authenticated', {generation});
       }
@@ -1462,6 +1567,8 @@ class WhatsAppSession {
         this.consecutiveHealthFailures = 0;
         this.reconnectAttempts = 0;
         this._clearReconnectTimer();
+        this.protectedProfiles.add(this.authClientId);
+        this._resetSelfHealForReady();
         try { this._markSessionEstablished(); }
         catch (_) {
           // Reaching ready proves that the current LocalAuth profile is the one
@@ -1498,6 +1605,7 @@ class WhatsAppSession {
               : 'O novo perfil do WhatsApp não foi autorizado. A sessão anterior foi preservada; gere um novo QR Code para tentar novamente.'
           };
         }
+        this._retireFailedClient(client, generation).catch(error => this._audit('client.auth-cleanup-error', {error}));
       }
     });
 
@@ -1538,7 +1646,7 @@ class WhatsAppSession {
           account:null,
           error:`WhatsApp desconectado${reasonText ? ` (${reasonText})` : ''}. O Vyzium tentará restaurar a conexão automaticamente.`
         };
-        this._scheduleReconnect(false);
+        this._retireFailedClient(client, generation).catch(error => this._audit('client.disconnect-cleanup-error', {error}));
       }
     });
     client.on('loading_screen', (percent, message) => this._audit('client.loading-screen', {generation, percent, message}));
@@ -1555,6 +1663,8 @@ class WhatsAppSession {
       this._audit('client.initialize-resolved', {generation});
     } catch (error) {
       this._audit('client.initialize-rejected', {generation, error});
+      if (isFatalCacheStorageError(error?.message || error) &&
+          await this._repairPendingProfileOnce(generation, client, 'storage', 'initialize')) return;
       throw error;
     } finally {
       clearInterval(runtimeAuditTimer);
@@ -1562,18 +1672,36 @@ class WhatsAppSession {
     }
   }
 
+  async _retireFailedClient(client, generation) {
+    if (generation !== this.generation || this.client !== client) return;
+    const terminalState = {...this.state};
+    const cleanupGeneration = ++this.generation;
+    this.client = null;
+    this.starting?.catch?.(() => {});
+    this.starting = null;
+    this.state = {status:'starting', qr:null, account:null, error:terminalState.error};
+    this._clearReconnectTimer();
+    await this._disposeClient(client, 10000);
+    if (cleanupGeneration !== this.generation || this.closed || this.userPaused) return;
+    this.state = terminalState;
+    this._recordStartupFailure('connection-ended');
+    this._scheduleReconnect(false);
+  }
+
   async _cleanupAfterLogout(client, generation) {
     if (generation !== this.generation || this.client !== client) return;
     const loggedOutClientId = this.authClientId;
-    this.generation++;
+    const cleanupGeneration = ++this.generation;
     this.client = null;
     this.starting = null;
     this._clearStartupWatchdog();
     this._clearQrWatchdog();
     this._audit('logout.cleanup-start', {oldGeneration:generation, loggedOutClientId});
     await this._disposeClient(client, 10000);
+    if (cleanupGeneration !== this.generation || this.closed || this.userPaused) return;
     await this._quarantineAuthProfile(loggedOutClientId, 'logout');
 
+    if (cleanupGeneration !== this.generation || this.closed || this.userPaused) return;
     const state = {...this.sessionState};
     if (state.activeClientId === loggedOutClientId) state.activeClientId = null;
     if (state.pendingClientId === loggedOutClientId) state.pendingClientId = null;
@@ -1586,6 +1714,8 @@ class WhatsAppSession {
   }
 
   async restartConnection() {
+    if (this.closed || this.userPaused) return this.status();
+    this._clearReconnectTimer();
     if (this.busy) throw new Error('Existe um envio em andamento.');
     this._audit('action.restart-connection');
     this._clearStartupWatchdog();
@@ -1600,6 +1730,7 @@ class WhatsAppSession {
     const generation = this.generation;
     this.state = {status:'starting', qr:null, account:null, error:null};
     if (oldClient) await this._disposeClient(oldClient, 10000);
+    if (generation !== this.generation || this.closed || this.userPaused) return this.status();
 
     const starting = this._initializeWithRecovery(generation)
       .catch(error => {
@@ -1623,6 +1754,7 @@ class WhatsAppSession {
   }
 
   async newQr() {
+    if (this.closed) return this.status();
     if (this.busy) throw new Error('Aguarde o envio terminar antes de gerar um novo QR Code.');
     this._audit('action.new-qr', {profile:this.authClientId, active:this.sessionState?.activeClientId || null});
 
@@ -1635,6 +1767,8 @@ class WhatsAppSession {
     this.reconnectAttempts = 0;
     this.authFailureCount = 0;
     this.consecutiveHealthFailures = 0;
+    this.selfHeal = {...this.selfHeal, destructiveRecoveryUsed:false, destructiveRecoveryKey:null, startupFailures:0, nextRetryAt:0, explicitQrCycleAt:new Date().toISOString()};
+    this._saveSelfHealState();
     this.readyAt = 0;
     this.authenticatedAt = 0;
     this.lastHealthCheckAt = 0;
@@ -1643,23 +1777,26 @@ class WhatsAppSession {
     // intact on disk until a different pending profile reaches `ready`.
     const pendingStart = this.starting;
     const oldClient = this.client;
-    this.generation++;
+    const actionGeneration = ++this.generation;
     this.client = null;
     this.starting = null;
     if (pendingStart && typeof pendingStart.catch === 'function') pendingStart.catch(() => {});
     this.state = {status:'starting', qr:null, account:null, error:null};
     await this._disposeClient(oldClient, 8000);
+    if (actionGeneration !== this.generation || this.closed || this.userPaused) return this.status();
 
     const freshClientId = this._newAuthClientId();
     const disposablePending = this._setPendingSession(freshClientId, {reason:'explicit-new-qr'});
     this._setAuthClientId(freshClientId, false);
     if (disposablePending) await this._cleanupAuthProfile(disposablePending);
+    if (actionGeneration !== this.generation || this.closed || this.userPaused) return this.status();
     this._audit('new-qr.profile-prepared', {activeClientId:this.sessionState?.activeClientId || null, freshClientId, pending:true});
 
     this.state = {status:'offline', qr:null, account:null, error:null};
     this.startMonitoring();
+    const nextGeneration = this.generation + 1;
     this._connectInternal({rotateProfileOnStall:true, stallRetries:1}).catch(error => {
-      if (!this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
+      if (nextGeneration === this.generation && !this.closed && !this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
         this.state = {
           status:'error',
           qr:null,
@@ -1693,20 +1830,22 @@ class WhatsAppSession {
   }
 
   async waitReady(timeout = 120000) {
-    if (this.userPaused || this.state.status === 'paused') throw new Error('Conexão pausada. Clique em Retomar conexão para continuar.');
+    if (this.closed || this.userPaused || this.state.status === 'paused') throw new Error('Conexão pausada. Clique em Retomar conexão para continuar.');
 
     // Reuse a healthy session. If it is degraded, restart it once and let the
     // monitor keep it alive in the background from then on.
     if (this.state.status === 'ready') {
       if (!(await this.connectionHealthy())) await this.restartConnection();
     } else {
-      this.connect();
+      // Queue polling is automatic; it must not reset the manual retry budget.
+      this.startMonitoring();
+      this._connectInternal().catch(() => {});
     }
 
     const deadline = Date.now() + timeout;
     while (this.state.status !== 'ready') {
       if (this.state.status === 'error') throw new Error(this.state.error);
-      if (this.state.status === 'paused') throw new Error('Conexão cancelada.');
+      if (this.closed || this.state.status === 'paused') throw new Error('Conexão cancelada.');
       if (Date.now() >= deadline) {
         throw new Error('Conecte pelo QR Code em Configurações e tente enviar novamente. Nenhuma mensagem deste lote foi enviada.');
       }
@@ -1811,6 +1950,9 @@ class WhatsAppSession {
   async pause(force = false) {
     if (this.busy && !force) throw new Error('Aguarde o envio terminar antes de pausar.');
     this._audit('action.pause', {force});
+    const pendingStart = this.starting;
+    this.starting = null;
+    pendingStart?.catch?.(() => {});
     this._clearStartupWatchdog();
     this._clearQrWatchdog();
     this.userPaused = true;
@@ -1825,13 +1967,15 @@ class WhatsAppSession {
     const client = this.client;
     this.client = null;
     if (client) await this._disposeClient(client, 10000);
-    if (this.starting) await bounded(this.starting, 1500).catch(() => {});
-    this.state = {status:'paused',qr:null,account:null,error:null};
+
     return this.status();
   }
 
   async shutdown() {
     this._audit('action.shutdown');
+    this.closed = true;
+    this.starting?.catch?.(() => {});
+    this.starting = null;
     this._clearReconnectTimer();
     this._clearStartupWatchdog();
     this._clearQrWatchdog();
@@ -1889,4 +2033,4 @@ async function startBridge(session, token) {
   return {server, url:`http://127.0.0.1:${server.address().port}`};
 }
 
-module.exports = {WhatsAppSession, startBridge, phoneCandidates, normalizeBrowserMode, resolveBrowserMode, isFatalCacheStorageError, hideWindowsForPid, resolveHiddenBrowserHelperPath, normalizeBrowserWSEndpoint, launchHiddenHeadedBrowser, stopHiddenHeadedBrowser};
+module.exports = {WhatsAppSession, startBridge, phoneCandidates, normalizeBrowserMode, resolveBrowserMode, isFatalCacheStorageError, classifyRecoverableStartupError, hideWindowsForPid, resolveHiddenBrowserHelperPath, normalizeBrowserWSEndpoint, launchHiddenHeadedBrowser, stopHiddenHeadedBrowser};

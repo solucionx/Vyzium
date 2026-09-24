@@ -1,0 +1,430 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> vyzium-gestao-operacional@3.3.3 test
+> npm run test:backend && npm run test:node
+
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> vyzium-gestao-operacional@3.3.3 test:backend
+> python -m unittest discover -s backend -p "test_*.py" -v
+
+test_add_and_remove_in_one_request_is_rejected (test_compras_add_items.AddMapItemsTest.test_add_and_remove_in_one_request_is_rejected) ... ok
+test_add_before_suppliers_are_registered_and_quote_new_row_later (test_compras_add_items.AddMapItemsTest.test_add_before_suppliers_are_registered_and_quote_new_row_later) ... ok
+test_add_preserves_prior_quotes_choices_awards_and_unrelated_data (test_compras_add_items.AddMapItemsTest.test_add_preserves_prior_quotes_choices_awards_and_unrelated_data) ... ok
+test_backup_recovery_and_reopen_preserve_both_versions (test_compras_add_items.AddMapItemsTest.test_backup_recovery_and_reopen_preserve_both_versions) ... ok
+test_encrypted_inclusion_and_backup_roundtrip (test_compras_add_items.AddMapItemsTest.test_encrypted_inclusion_and_backup_roundtrip) ... ok
+test_inclusion_payload_may_omit_unchanged_editable_fields (test_compras_add_items.AddMapItemsTest.test_inclusion_payload_may_omit_unchanged_editable_fields) ... ok
+test_invalid_selections_rejected_without_partial_save_or_backup (test_compras_add_items.AddMapItemsTest.test_invalid_selections_rejected_without_partial_save_or_backup) ... ok
+test_item_from_completed_map_can_be_added_without_changing_history (test_compras_add_items.AddMapItemsTest.test_item_from_completed_map_can_be_added_without_changing_history) ... ok
+test_item_removed_from_catalog_cannot_be_added (test_compras_add_items.AddMapItemsTest.test_item_removed_from_catalog_cannot_be_added) ... ok
+test_move_removed_item_into_existing_map (test_compras_add_items.AddMapItemsTest.test_move_removed_item_into_existing_map) ... ok
+test_new_items_are_authoritative_and_cannot_inherit_prices_or_decisions (test_compras_add_items.AddMapItemsTest.test_new_items_are_authoritative_and_cannot_inherit_prices_or_decisions) ... ok
+test_omitting_add_ids_never_appends_forged_rows (test_compras_add_items.AddMapItemsTest.test_omitting_add_ids_never_appends_forged_rows) ... ok
+test_pending_edits_and_legacy_discount_are_saved_with_addition (test_compras_add_items.AddMapItemsTest.test_pending_edits_and_legacy_discount_are_saved_with_addition) ... ok
+test_preview_export_and_next_save_include_the_added_item (test_compras_add_items.AddMapItemsTest.test_preview_export_and_next_save_include_the_added_item) ... ok
+test_reimport_between_selection_and_save_uses_current_source (test_compras_add_items.AddMapItemsTest.test_reimport_between_selection_and_save_uses_current_source) ... ok
+test_repeated_request_is_rejected_without_duplication (test_compras_add_items.AddMapItemsTest.test_repeated_request_is_rejected_without_duplication) ... ok
+test_revision_completed_map_and_in_progress_send_block_addition (test_compras_add_items.AddMapItemsTest.test_revision_completed_map_and_in_progress_send_block_addition) ... ok
+test_two_simultaneous_maps_cannot_claim_the_same_item (test_compras_add_items.AddMapItemsTest.test_two_simultaneous_maps_cannot_claim_the_same_item) ... ok
+test_validation_backup_and_storage_failures_do_not_partially_add (test_compras_add_items.AddMapItemsTest.test_validation_backup_and_storage_failures_do_not_partially_add) ... ok
+test_accents_and_case_do_not_split_the_same_hotel (test_compras_items.MapItemsTest.test_accents_and_case_do_not_split_the_same_hotel) ... ok
+test_backup_contains_saved_map_before_removal (test_compras_items.MapItemsTest.test_backup_contains_saved_map_before_removal) ... ok
+test_encrypted_map_and_backup_keep_the_existing_encryption (test_compras_items.MapItemsTest.test_encrypted_map_and_backup_keep_the_existing_encryption) ... ok
+test_existing_map_order_is_stable_and_results_follow_item_ids (test_compras_items.MapItemsTest.test_existing_map_order_is_stable_and_results_follow_item_ids) ... ok
+test_exports_keep_hotel_order_and_prices_together (test_compras_items.MapItemsTest.test_exports_keep_hotel_order_and_prices_together) ... ok
+test_invalid_remaining_price_or_backup_failure_keeps_saved_map_intact (test_compras_items.MapItemsTest.test_invalid_remaining_price_or_backup_failure_keeps_saved_map_intact) ... ok
+test_invalid_removal_and_last_item_are_rejected_without_changes (test_compras_items.MapItemsTest.test_invalid_removal_and_last_item_are_rejected_without_changes) ... ok
+test_omitted_items_do_not_mean_removal (test_compras_items.MapItemsTest.test_omitted_items_do_not_mean_removal) ... ok
+test_quote_message_groups_each_hotel_and_cnpj_once (test_compras_items.MapItemsTest.test_quote_message_groups_each_hotel_and_cnpj_once) ... ok
+test_removal_invalidates_preview_and_excludes_item_from_next_message (test_compras_items.MapItemsTest.test_removal_invalidates_preview_and_excludes_item_from_next_message) ... ok
+test_remove_cleans_only_its_quotes_and_keeps_other_data_and_pending_edits (test_compras_items.MapItemsTest.test_remove_cleans_only_its_quotes_and_keeps_other_data_and_pending_edits) ... ok
+test_stale_revision_completed_map_and_active_send_block_removal (test_compras_items.MapItemsTest.test_stale_revision_completed_map_and_active_send_block_removal) ... ok
+test_header_can_start_after_report_metadata_rows (test_compras_module.ImportHardeningTest.test_header_can_start_after_report_metadata_rows) ... ok
+test_internal_json_table_name_is_allowlisted (test_compras_module.ImportHardeningTest.test_internal_json_table_name_is_allowlisted) ... ok
+test_import_deduplicates_and_blocks_ordered_closed_and_rejected_items (test_compras_module.ImportTest.test_import_deduplicates_and_blocks_ordered_closed_and_rejected_items) ... ok
+test_amount_discount_is_line_total (test_compras_module.PurchasesTest.test_amount_discount_is_line_total) ... ok
+test_complete_map_is_idempotent (test_compras_module.PurchasesTest.test_complete_map_is_idempotent) ... ok
+test_complete_map_moves_to_completed_and_releases_items (test_compras_module.PurchasesTest.test_complete_map_moves_to_completed_and_releases_items) ... ok
+test_connection_failure_is_not_uncertain (test_compras_module.PurchasesTest.test_connection_failure_is_not_uncertain) ... ok
+test_csv_formula_injection_and_values (test_compras_module.PurchasesTest.test_csv_formula_injection_and_values) ... ok
+test_default_saving_target_calculates_price_goal_from_best_initial_quote (test_compras_module.PurchasesTest.test_default_saving_target_calculates_price_goal_from_best_initial_quote) ... ok
+test_delete_map_creates_recovery_backup_before_removal (test_compras_module.PurchasesTest.test_delete_map_creates_recovery_backup_before_removal) ... ok
+test_delete_map_removes_map_and_releases_items (test_compras_module.PurchasesTest.test_delete_map_removes_map_and_releases_items) ... ok
+test_delivery_is_optional_and_persists_when_informed (test_compras_module.PurchasesTest.test_delivery_is_optional_and_persists_when_informed) ... ok
+test_discount_changes_winner (test_compras_module.PurchasesTest.test_discount_changes_winner) ... ok
+test_empty_quote_never_wins (test_compras_module.PurchasesTest.test_empty_quote_never_wins) ... ok
+test_hotel_cnpj_associations_cover_current_base (test_compras_module.PurchasesTest.test_hotel_cnpj_associations_cover_current_base) ... ok
+test_locale_decimal_and_rounding (test_compras_module.PurchasesTest.test_locale_decimal_and_rounding) ... ok
+test_manual_choice_above_lowest_price_requires_reason (test_compras_module.PurchasesTest.test_manual_choice_above_lowest_price_requires_reason) ... ok
+test_manual_supplier_choice_can_override_lowest_price_with_reason (test_compras_module.PurchasesTest.test_manual_supplier_choice_can_override_lowest_price_with_reason) ... ok
+test_map_summaries_include_sci_item_and_article_for_search (test_compras_module.PurchasesTest.test_map_summaries_include_sci_item_and_article_for_search) ... ok
+test_message_has_scope_without_competitor_prices (test_compras_module.PurchasesTest.test_message_has_scope_without_competitor_prices) ... ok
+test_negotiation_preview_adapts_to_multiple_items (test_compras_module.PurchasesTest.test_negotiation_preview_adapts_to_multiple_items) ... ok
+test_negotiation_preview_is_second_message_without_greeting_or_sci (test_compras_module.PurchasesTest.test_negotiation_preview_is_second_message_without_greeting_or_sci) ... ok
+test_negotiation_send_accepts_edited_message_and_is_deduplicated (test_compras_module.PurchasesTest.test_negotiation_send_accepts_edited_message_and_is_deduplicated) ... ok
+test_prevent_duplicate_maps (test_compras_module.PurchasesTest.test_prevent_duplicate_maps) ... ok
+test_quantity_tampering_does_not_change_source (test_compras_module.PurchasesTest.test_quantity_tampering_does_not_change_source) ... ok
+test_reimport_preserves_map_and_detects_changes (test_compras_module.PurchasesTest.test_reimport_preserves_map_and_detects_changes) ... ok
+test_restart_recovers_interrupted_send (test_compras_module.PurchasesTest.test_restart_recovers_interrupted_send) ... ok
+test_revision_prevents_lost_updates (test_compras_module.PurchasesTest.test_revision_prevents_lost_updates) ... ok
+test_sending_is_explicit_and_deduplicated (test_compras_module.PurchasesTest.test_sending_is_explicit_and_deduplicated) ... ok
+test_stale_preview_does_not_send (test_compras_module.PurchasesTest.test_stale_preview_does_not_send) ... ok
+test_tie_requires_choice_and_invalid_choice_does_not_override_price (test_compras_module.PurchasesTest.test_tie_requires_choice_and_invalid_choice_does_not_override_price) ... ok
+test_uncertain_result_requires_review (test_compras_module.PurchasesTest.test_uncertain_result_requires_review) ... ok
+test_unknown_hotel_never_leaks_internal_sci (test_compras_module.PurchasesTest.test_unknown_hotel_never_leaks_internal_sci) ... ok
+test_zero_and_excessive_discount_rejected (test_compras_module.PurchasesTest.test_zero_and_excessive_discount_rejected) ... ok
+test_binary_xls_report_uses_approval_not_necessity (test_compras_v11.V11.test_binary_xls_report_uses_approval_not_necessity) ... ok
+test_blank_initial_means_supplier_did_not_quote_item (test_compras_v11.V11.test_blank_initial_means_supplier_did_not_quote_item) ... ok
+test_buyers_are_dynamic_and_reordering_preserves_identity (test_compras_v11.V11.test_buyers_are_dynamic_and_reordering_preserves_identity) ... ok
+test_deadline_missing_or_conflicting (test_compras_v11.V11.test_deadline_missing_or_conflicting) ... ok
+test_duplicate_report_identity_is_not_silently_summed (test_compras_v11.V11.test_duplicate_report_identity_is_not_silently_summed) ... ok
+test_invalid_and_blank_negotiated_values (test_compras_v11.V11.test_invalid_and_blank_negotiated_values) ... ok
+test_negotiated_unit_price_calculates_percentage_and_total (test_compras_v11.V11.test_negotiated_unit_price_calculates_percentage_and_total) ... ok
+test_new_maps_keep_report_notes_and_type (test_compras_v11.V11.test_new_maps_keep_report_notes_and_type) ... ok
+test_real_xls_export_roundtrips_numbers_and_percent (test_compras_v11.V11.test_real_xls_export_roundtrips_numbers_and_percent) ... ok
+test_batched_copy_preserves_rows_schema_and_sequence (test_crypto_migration.BatchedCopyTests.test_batched_copy_preserves_rows_schema_and_sequence) ... VYZIUM_SECURITY_PROGRESS:{"message":"Criando estrutura do banco criptografado…","module":"followup","stage":"schema"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — critical: 1000/2490 (40%)","module":"followup","stage":"data","current":1000,"total":2515,"percent":40}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — critical: 2000/2490 (80%)","module":"followup","stage":"data","current":2000,"total":2515,"percent":80}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — critical: 2490/2490 (99%)","module":"followup","stage":"data","current":2490,"total":2515,"percent":99}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — notes: 25/25 (100%)","module":"followup","stage":"data","current":2515,"total":2515,"percent":100}
+VYZIUM_SECURITY_PROGRESS:{"message":"Restaurando índices e visualizações…","module":"followup","stage":"schema-objects"}
+ok
+test_data_safety_backup_remains_encrypted (test_crypto_migration.CryptoMigrationTests.test_data_safety_backup_remains_encrypted) ... VYZIUM_SECURITY_STAGE:validar banco legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando banco original…","module":"followup","stage":"legacy-check"}
+VYZIUM_SECURITY_STAGE:criar snapshot legado consistente
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando snapshot consistente sem alterar seus dados…","module":"followup","stage":"snapshot"}
+VYZIUM_SECURITY_STAGE:verificar runtime SQLCipher
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando SQLCipher…","module":"followup","stage":"runtime"}
+VYZIUM_SECURITY_STAGE:abrir snapshot legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Abrindo cópia consistente do banco antigo…","module":"followup","stage":"open-snapshot"}
+VYZIUM_SECURITY_STAGE:criar banco SQLCipher temporário
+VYZIUM_SECURITY_PROGRESS:{"message":"Preparando banco criptografado temporário…","module":"followup","stage":"open-target"}
+VYZIUM_SECURITY_STAGE:copiar snapshot legado para SQLCipher em lotes
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando estrutura do banco criptografado…","module":"followup","stage":"schema"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — schema_migrations: 1/1 (0%)","module":"followup","stage":"data","current":1,"total":251,"percent":0}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — critical: 250/250 (100%)","module":"followup","stage":"data","current":251,"total":251,"percent":100}
+VYZIUM_SECURITY_PROGRESS:{"message":"Restaurando índices e visualizações…","module":"followup","stage":"schema-objects"}
+VYZIUM_SECURITY_STAGE:preservar metadados SQLite
+VYZIUM_SECURITY_STAGE:validar integrity_check do banco criptografado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando integridade do banco criptografado…","module":"followup","stage":"integrity"}
+VYZIUM_SECURITY_STAGE:confirmar que SQLite comum não abre o destino
+VYZIUM_SECURITY_PROGRESS:{"message":"Confirmando que o novo banco exige a chave…","module":"followup","stage":"encryption-check"}
+VYZIUM_SECURITY_STAGE:ativar banco criptografado atomicamente
+VYZIUM_SECURITY_PROGRESS:{"message":"Ativando banco protegido…","module":"followup","stage":"activate"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Finalizando verificação de segurança…","module":"followup","stage":"finalize"}
+ok
+test_plain_database_is_migrated_without_touching_source (test_crypto_migration.CryptoMigrationTests.test_plain_database_is_migrated_without_touching_source) ... VYZIUM_SECURITY_STAGE:validar banco legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando banco original…","module":"followup","stage":"legacy-check"}
+VYZIUM_SECURITY_STAGE:criar snapshot legado consistente
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando snapshot consistente sem alterar seus dados…","module":"followup","stage":"snapshot"}
+VYZIUM_SECURITY_STAGE:verificar runtime SQLCipher
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando SQLCipher…","module":"followup","stage":"runtime"}
+VYZIUM_SECURITY_STAGE:abrir snapshot legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Abrindo cópia consistente do banco antigo…","module":"followup","stage":"open-snapshot"}
+VYZIUM_SECURITY_STAGE:criar banco SQLCipher temporário
+VYZIUM_SECURITY_PROGRESS:{"message":"Preparando banco criptografado temporário…","module":"followup","stage":"open-target"}
+VYZIUM_SECURITY_STAGE:copiar snapshot legado para SQLCipher em lotes
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando estrutura do banco criptografado…","module":"followup","stage":"schema"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — schema_migrations: 1/1 (0%)","module":"followup","stage":"data","current":1,"total":251,"percent":0}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — critical: 250/250 (100%)","module":"followup","stage":"data","current":251,"total":251,"percent":100}
+VYZIUM_SECURITY_PROGRESS:{"message":"Restaurando índices e visualizações…","module":"followup","stage":"schema-objects"}
+VYZIUM_SECURITY_STAGE:preservar metadados SQLite
+VYZIUM_SECURITY_STAGE:validar integrity_check do banco criptografado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando integridade do banco criptografado…","module":"followup","stage":"integrity"}
+VYZIUM_SECURITY_STAGE:confirmar que SQLite comum não abre o destino
+VYZIUM_SECURITY_PROGRESS:{"message":"Confirmando que o novo banco exige a chave…","module":"followup","stage":"encryption-check"}
+VYZIUM_SECURITY_STAGE:ativar banco criptografado atomicamente
+VYZIUM_SECURITY_PROGRESS:{"message":"Ativando banco protegido…","module":"followup","stage":"activate"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Finalizando verificação de segurança…","module":"followup","stage":"finalize"}
+ok
+test_validated_database_requires_correct_key_and_integrity (test_crypto_migration.CryptoMigrationTests.test_validated_database_requires_correct_key_and_integrity) ... VYZIUM_SECURITY_STAGE:validar banco legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando banco original…","module":"followup","stage":"legacy-check"}
+VYZIUM_SECURITY_STAGE:criar snapshot legado consistente
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando snapshot consistente sem alterar seus dados…","module":"followup","stage":"snapshot"}
+VYZIUM_SECURITY_STAGE:verificar runtime SQLCipher
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando SQLCipher…","module":"followup","stage":"runtime"}
+VYZIUM_SECURITY_STAGE:abrir snapshot legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Abrindo cópia consistente do banco antigo…","module":"followup","stage":"open-snapshot"}
+VYZIUM_SECURITY_STAGE:criar banco SQLCipher temporário
+VYZIUM_SECURITY_PROGRESS:{"message":"Preparando banco criptografado temporário…","module":"followup","stage":"open-target"}
+VYZIUM_SECURITY_STAGE:copiar snapshot legado para SQLCipher em lotes
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando estrutura do banco criptografado…","module":"followup","stage":"schema"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — schema_migrations: 1/1 (0%)","module":"followup","stage":"data","current":1,"total":251,"percent":0}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — critical: 250/250 (100%)","module":"followup","stage":"data","current":251,"total":251,"percent":100}
+VYZIUM_SECURITY_PROGRESS:{"message":"Restaurando índices e visualizações…","module":"followup","stage":"schema-objects"}
+VYZIUM_SECURITY_STAGE:preservar metadados SQLite
+VYZIUM_SECURITY_STAGE:validar integrity_check do banco criptografado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando integridade do banco criptografado…","module":"followup","stage":"integrity"}
+VYZIUM_SECURITY_STAGE:confirmar que SQLite comum não abre o destino
+VYZIUM_SECURITY_PROGRESS:{"message":"Confirmando que o novo banco exige a chave…","module":"followup","stage":"encryption-check"}
+VYZIUM_SECURITY_STAGE:ativar banco criptografado atomicamente
+VYZIUM_SECURITY_PROGRESS:{"message":"Ativando banco protegido…","module":"followup","stage":"activate"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Finalizando verificação de segurança…","module":"followup","stage":"finalize"}
+2026-09-24 17:48:54.552: ERROR CORE sqlcipher_page_cipher: hmac check failed for pgno=1
+2026-09-24 17:48:54.552: ERROR CORE sqlite3Codec: error decrypting page 1 data: 1
+2026-09-24 17:48:54.552: ERROR CORE sqlcipher_codec_ctx_set_error 1
+ok
+test_wrong_key_cannot_open_migrated_database (test_crypto_migration.CryptoMigrationTests.test_wrong_key_cannot_open_migrated_database) ... VYZIUM_SECURITY_STAGE:validar banco legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando banco original…","module":"followup","stage":"legacy-check"}
+VYZIUM_SECURITY_STAGE:criar snapshot legado consistente
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando snapshot consistente sem alterar seus dados…","module":"followup","stage":"snapshot"}
+VYZIUM_SECURITY_STAGE:verificar runtime SQLCipher
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando SQLCipher…","module":"followup","stage":"runtime"}
+VYZIUM_SECURITY_STAGE:abrir snapshot legado
+VYZIUM_SECURITY_PROGRESS:{"message":"Abrindo cópia consistente do banco antigo…","module":"followup","stage":"open-snapshot"}
+VYZIUM_SECURITY_STAGE:criar banco SQLCipher temporário
+VYZIUM_SECURITY_PROGRESS:{"message":"Preparando banco criptografado temporário…","module":"followup","stage":"open-target"}
+VYZIUM_SECURITY_STAGE:copiar snapshot legado para SQLCipher em lotes
+VYZIUM_SECURITY_PROGRESS:{"message":"Criando estrutura do banco criptografado…","module":"followup","stage":"schema"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — schema_migrations: 1/1 (0%)","module":"followup","stage":"data","current":1,"total":251,"percent":0}
+VYZIUM_SECURITY_PROGRESS:{"message":"Copiando dados — critical: 250/250 (100%)","module":"followup","stage":"data","current":251,"total":251,"percent":100}
+VYZIUM_SECURITY_PROGRESS:{"message":"Restaurando índices e visualizações…","module":"followup","stage":"schema-objects"}
+VYZIUM_SECURITY_STAGE:preservar metadados SQLite
+VYZIUM_SECURITY_STAGE:validar integrity_check do banco criptografado
+VYZIUM_SECURITY_PROGRESS:{"message":"Verificando integridade do banco criptografado…","module":"followup","stage":"integrity"}
+VYZIUM_SECURITY_STAGE:confirmar que SQLite comum não abre o destino
+VYZIUM_SECURITY_PROGRESS:{"message":"Confirmando que o novo banco exige a chave…","module":"followup","stage":"encryption-check"}
+VYZIUM_SECURITY_STAGE:ativar banco criptografado atomicamente
+VYZIUM_SECURITY_PROGRESS:{"message":"Ativando banco protegido…","module":"followup","stage":"activate"}
+VYZIUM_SECURITY_PROGRESS:{"message":"Finalizando verificação de segurança…","module":"followup","stage":"finalize"}
+2026-09-24 17:48:54.556: ERROR CORE sqlcipher_page_cipher: hmac check failed for pgno=1
+2026-09-24 17:48:54.556: ERROR CORE sqlite3Codec: error decrypting page 1 data: 1
+2026-09-24 17:48:54.556: ERROR CORE sqlcipher_codec_ctx_set_error 1
+ok
+test_corrupted_version_backup_is_not_trusted (test_data_safety.DataSafetyHardeningTests.test_corrupted_version_backup_is_not_trusted) ... ok
+test_pre_update_backup_survives_automatic_pruning (test_data_safety.DataSafetyHardeningTests.test_pre_update_backup_survives_automatic_pruning) ... ok
+test_pre_upgrade_backup_survives_automatic_pruning (test_data_safety.DataSafetyHardeningTests.test_pre_upgrade_backup_survives_automatic_pruning) ... ok
+test_status_revalidates_latest_backup (test_data_safety.DataSafetyHardeningTests.test_status_revalidates_latest_backup) ... ok
+test_tampered_backup_hash_is_not_trusted (test_data_safety.DataSafetyHardeningTests.test_tampered_backup_hash_is_not_trusted) ... ok
+test_backup_is_consistent_and_preserves_rows (test_data_safety.DataSafetyTests.test_backup_is_consistent_and_preserves_rows) ... ok
+test_corrupt_existing_database_is_blocked_without_modification (test_data_safety.DataSafetyTests.test_corrupt_existing_database_is_blocked_without_modification) ... ok
+test_manual_backup_is_not_pruned_with_automatic_backups (test_data_safety.DataSafetyTests.test_manual_backup_is_not_pruned_with_automatic_backups) ... ok
+test_readonly_backup_includes_committed_wal_content (test_data_safety.DataSafetyTests.test_readonly_backup_includes_committed_wal_content) ... ok
+test_version_backup_is_created_only_once (test_data_safety.DataSafetyTests.test_version_backup_is_created_only_once) ... ok
+test_compras_existing_map_is_preserved_and_snapshotted_before_upgrade (test_data_safety.ExistingDatabaseCompatibilityTests.test_compras_existing_map_is_preserved_and_snapshotted_before_upgrade) ... ok
+test_followup_existing_settings_are_preserved_and_snapshotted_before_upgrade (test_data_safety.ExistingDatabaseCompatibilityTests.test_followup_existing_settings_are_preserved_and_snapshotted_before_upgrade) ... ok
+test_compras_import_failure_rolls_back_existing_items (test_data_safety.ImportTransactionSafetyTests.test_compras_import_failure_rolls_back_existing_items) ... ok
+test_followup_import_failure_rolls_back_existing_snapshot (test_data_safety.ImportTransactionSafetyTests.test_followup_import_failure_rolls_back_existing_snapshot) ... ok
+test_compras_newer_schema_is_blocked_before_write (test_data_safety.SchemaDowngradeGuardTests.test_compras_newer_schema_is_blocked_before_write) ... ok
+test_followup_newer_schema_is_blocked_before_write (test_data_safety.SchemaDowngradeGuardTests.test_followup_newer_schema_is_blocked_before_write) ... ok
+test_completed_and_cancelled_never_send (test_engine.ClassificationTests.test_completed_and_cancelled_never_send) ... ok
+test_due_soon_and_boundaries (test_engine.ClassificationTests.test_due_soon_and_boundaries) ... ok
+test_numeric_status_is_authoritative (test_engine.ClassificationTests.test_numeric_status_is_authoritative) ... ok
+test_partial_receipt_remains_eligible (test_engine.ClassificationTests.test_partial_receipt_remains_eligible) ... ok
+test_partial_receipt_without_numeric_status_stays_open (test_engine.ClassificationTests.test_partial_receipt_without_numeric_status_stays_open) ... ok
+test_scheduler_boundary (test_engine.ClassificationTests.test_scheduler_boundary) ... ok
+test_scheduler_retries_failed_day_with_one_hour_backoff (test_engine.ClassificationTests.test_scheduler_retries_failed_day_with_one_hour_backoff) ... {"event": "automatic_run", "result": {"sent": 0, "simulated": 0, "failed": 1, "uncertain": 0, "results": []}}
+ok
+test_attendance_filter_accepts_multiple_statuses (test_engine.ImportTests.test_attendance_filter_accepts_multiple_statuses) ... ok
+test_attendance_summary_states (test_engine.ImportTests.test_attendance_summary_states) ... ok
+test_attendance_text_respects_negative_and_partial_delivery (test_engine.ImportTests.test_attendance_text_respects_negative_and_partial_delivery) ... ok
+test_base_sci_receipts_and_order_detail (test_engine.ImportTests.test_base_sci_receipts_and_order_detail) ... ok
+test_brazilian_legacy_mobile_gets_ninth_digit (test_engine.ImportTests.test_brazilian_legacy_mobile_gets_ninth_digit) ... ok
+test_brazilian_numeric_text_is_parsed_safely (test_engine.ImportTests.test_brazilian_numeric_text_is_parsed_safely) ... ok
+test_document_supplier_key_is_preserved_when_saving_phone (test_engine.ImportTests.test_document_supplier_key_is_preserved_when_saving_phone) ... ok
+test_duplicate_critical_header_is_rejected_without_replacing_snapshot (test_engine.ImportTests.test_duplicate_critical_header_is_rejected_without_replacing_snapshot) ... ok
+test_import_group_and_simulate (test_engine.ImportTests.test_import_group_and_simulate) ... ok
+test_import_repairs_incorrect_excel_dimension (test_engine.ImportTests.test_import_repairs_incorrect_excel_dimension) ... ok
+test_invalid_workbook_has_friendly_error_and_preserves_data (test_engine.ImportTests.test_invalid_workbook_has_friendly_error_and_preserves_data) ... ok
+test_manual_control_survives_daily_import (test_engine.ImportTests.test_manual_control_survives_daily_import) ... ok
+test_marking_order_as_sent_records_date (test_engine.ImportTests.test_marking_order_as_sent_records_date) ... ok
+test_negative_and_partial_delivery_text_never_becomes_completed_by_substring (test_engine.ImportTests.test_negative_and_partial_delivery_text_never_becomes_completed_by_substring) ... ok
+test_new_import_replaces_previous_snapshot (test_engine.ImportTests.test_new_import_replaces_previous_snapshot) ... ok
+test_normalization (test_engine.ImportTests.test_normalization) ... ok
+test_old_normalized_supplier_alias_is_redirected_to_canonical_key (test_engine.ImportTests.test_old_normalized_supplier_alias_is_redirected_to_canonical_key) ... ok
+test_operational_filters_accept_multiple_values (test_engine.ImportTests.test_operational_filters_accept_multiple_values) ... ok
+test_rejected_order_is_visible_but_not_eligible_for_followup (test_engine.ImportTests.test_rejected_order_is_visible_but_not_eligible_for_followup) ... ok
+test_rejected_text_without_numeric_bpm_code_is_not_sent (test_engine.ImportTests.test_rejected_text_without_numeric_bpm_code_is_not_sent) ... ok
+test_startup_migrates_phone_from_old_normalized_alias (test_engine.ImportTests.test_startup_migrates_phone_from_old_normalized_alias) ... ok
+test_supplier_phone_is_reused_for_every_order (test_engine.ImportTests.test_supplier_phone_is_reused_for_every_order) ... ok
+test_action_rules (test_operational.OperationalTests.test_action_rules) ... ok
+test_approval (test_operational.OperationalTests.test_approval) ... ok
+test_import_edit_reimport_and_custom_control (test_operational.OperationalTests.test_import_edit_reimport_and_custom_control) ... ok
+test_presets_persist_and_validate (test_operational.OperationalTests.test_presets_persist_and_validate) ... ok
+test_request_collection_is_available_for_existing_settings (test_operational.OperationalTests.test_request_collection_is_available_for_existing_settings) ... ok
+test_purchase_send_lock_released_when_final_persistence_fails (test_recovery_regressions.RecoveryRegressions.test_purchase_send_lock_released_when_final_persistence_fails) ... ok
+test_rejected_sqlcipher_connection_is_closed (test_recovery_regressions.RecoveryRegressions.test_rejected_sqlcipher_connection_is_closed) ... ok
+test_preparation_requires_local_token (test_updates.UpdatePreparationTests.test_preparation_requires_local_token) ... ok
+test_update_cannot_interrupt_send_and_blocks_new_sends (test_updates.UpdatePreparationTests.test_update_cannot_interrupt_send_and_blocks_new_sends) ... ok
+test_async_job_reports_progress_and_completes_whole_batch (test_whatsapp.WhatsAppBatchQueueTests.test_async_job_reports_progress_and_completes_whole_batch) ... ok
+test_async_status_stays_active_until_worker_finalization_finishes (test_whatsapp.WhatsAppBatchQueueTests.test_async_status_stays_active_until_worker_finalization_finishes) ... ok
+test_internal_failure_after_claim_quarantines_item_before_retry (test_whatsapp.WhatsAppBatchQueueTests.test_internal_failure_after_claim_quarantines_item_before_retry) ... ok
+test_persistent_batch_keeps_queue_and_provider_confirmation (test_whatsapp.WhatsAppBatchQueueTests.test_persistent_batch_keeps_queue_and_provider_confirmation) ... ok
+test_restart_quarantines_inflight_and_resumes_only_queued_messages (test_whatsapp.WhatsAppBatchQueueTests.test_restart_quarantines_inflight_and_resumes_only_queued_messages) ... ok
+test_uncertain_supplier_does_not_stop_remaining_queue (test_whatsapp.WhatsAppBatchQueueTests.test_uncertain_supplier_does_not_stop_remaining_queue) ... ok
+test_connection_failure_becomes_friendly_message (test_whatsapp.WhatsAppBridgeConnectionTests.test_connection_failure_becomes_friendly_message) ... ok
+test_timeout_becomes_friendly_message (test_whatsapp.WhatsAppBridgeConnectionTests.test_timeout_becomes_friendly_message) ... ok
+test_edited_message_cannot_be_empty (test_whatsapp.WhatsAppFlowTests.test_edited_message_cannot_be_empty) ... ok
+test_edited_message_is_the_one_sent_and_logged (test_whatsapp.WhatsAppFlowTests.test_edited_message_is_the_one_sent_and_logged) ... ok
+test_empty_supplier_selection_is_rejected_instead_of_sending_all (test_whatsapp.WhatsAppFlowTests.test_empty_supplier_selection_is_rejected_instead_of_sending_all) ... ok
+test_not_connected_never_sends (test_whatsapp.WhatsAppFlowTests.test_not_connected_never_sends) ... ok
+test_parallel_batch_rejected (test_whatsapp.WhatsAppFlowTests.test_parallel_batch_rejected) ... ok
+test_proven_pre_send_failure_does_not_stop_next_supplier (test_whatsapp.WhatsAppFlowTests.test_proven_pre_send_failure_does_not_stop_next_supplier) ... ok
+test_recheck_eligibility_after_connection (test_whatsapp.WhatsAppFlowTests.test_recheck_eligibility_after_connection) ... ok
+test_simulation_never_contacts_whatsapp (test_whatsapp.WhatsAppFlowTests.test_simulation_never_contacts_whatsapp) ... ok
+test_uncertain_requires_manual_review (test_whatsapp.WhatsAppFlowTests.test_uncertain_requires_manual_review) ... ok
+test_wait_then_send_and_cooldown (test_whatsapp.WhatsAppFlowTests.test_wait_then_send_and_cooldown) ... ok
+test_unreachable_bridge_eventually_aborts (test_whatsapp.WhatsAppWaitBoundTests.test_unreachable_bridge_eventually_aborts) ... ok
+test_user_pause_keeps_waiting_and_then_proceeds (test_whatsapp.WhatsAppWaitBoundTests.test_user_pause_keeps_waiting_and_then_proceeds) ... ok
+
+----------------------------------------------------------------------
+Ran 153 tests in 2.016s
+
+OK
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> vyzium-gestao-operacional@3.3.3 test:node
+> node --test tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs
+
+✔ Firebase refresh token is persisted only through safeStorage protection (3.616766ms)
+✔ unverified account cannot create or attach a workspace (1.264104ms)
+✔ verified cached session may restore only through bounded offline grace (1.05677ms)
+✔ weak password is rejected locally before Firebase registration (0.645817ms)
+✔ diagnostic redact masks secrets, JWT-like tokens, long hex and Windows usernames (1.137362ms)
+✔ diagnostic timeline, errors and report use real line breaks (3.676882ms)
+✔ hidden browser helper stays on the proven stable launcher contract (0.609392ms)
+✔ unwritable diagnostics directory cannot prevent construction or reporting (0.900853ms)
+✔ diagnostic bundle uses a literal directory, verifies output and finalizes once (0.960074ms)
+✔ Firebase client signs in with configured project API key without admin credentials (1.783711ms)
+✔ Firestore value codec preserves nested recovery envelope fields (1.238385ms)
+✔ unknown Firebase errors do not expose successful access (0.610074ms)
+✔ first workspace is deterministic from Firebase UID and recovery stays inside that workspace (2.395437ms)
+✔ package identity remains compatible with the existing Vyzium installation (1.404997ms)
+✔ release version changes preserve the original dependency versions and archive URLs (3.590446ms)
+✔ 3.3.3 keeps one authoritative release version across package, Python and renderer (7.177246ms)
+✔ repository safety blocks operational spreadsheets and WhatsApp session artifacts (0.412584ms)
+✔ Windows installer assets referenced by electron-builder exist (0.405364ms)
+✔ Windows runtime uses the Vyzium taskbar identity and explicit app icon (0.431654ms)
+✔ Windows hidden-browser launcher is unpacked for PowerShell execution (0.317361ms)
+✔ Python requirements include Excel readers and SQLCipher (0.383861ms)
+✔ release packages both Python engines as extraResources (0.398644ms)
+✔ release workflow builds, validates and packages SQLCipher-enabled engines (1.252397ms)
+✔ 3.1 data safety and authentication files are included (0.515471ms)
+✔ WhatsApp dependency remains pinned while the bootstrap fix stays focused (0.661562ms)
+✔ 3.1 keeps updates on the dedicated public releases repository (0.576272ms)
+✔ 3.1 retains legacy database paths only as migration sources and adds workspace paths (0.44895ms)
+✔ update modal uses the visible colored Vyzium mark (0.36957ms)
+✔ private-core workflow publishes only release artifacts to Vyzium-Releases (0.681822ms)
+✔ Firebase client config contains no Admin SDK private credential (0.668583ms)
+✔ Firestore rules default-deny unknown paths and protect recovery envelope by owner (0.987065ms)
+✔ Firestore v3.1 constrains first workspace to Firebase UID and keeps schema immutable from the client (0.314706ms)
+✔ Firebase deployment files point only to the Vyzium production project rules and indexes (0.167163ms)
+✔ recovery material is encrypted locally and interrupted setup cannot silently skip a recovery code (1.547353ms)
+✔ stable desktop build blocks DevTools and hides WhatsApp audit UI (0.411483ms)
+✔ operational view exposes multi-select filters without changing Compras (0.253434ms)
+✔ Compras desktop allowlist covers map completion, deletion and assisted negotiation routes (0.259983ms)
+✔ one SCI per hotel, overdue precedence and no double counting (11.467191ms)
+✔ due day is on time; the following day is overdue (0.300235ms)
+✔ old necessity date never used as approval deadline (0.16481ms)
+✔ dashboard filters restrict buyer and hotel from imported rows (0.256569ms)
+✔ 19 to 15 shows 21.05%; Brazilian decimal and blank negotiated supported (0.300015ms)
+✔ interrupted first-run always reissues a recovery code before activation (98.157893ms)
+✔ prepare reports visible setup stages instead of a generic endless spinner (34.522578ms)
+✔ an unusable local vault fails closed and advertises recovery instead of ready (38.450104ms)
+✔ local encrypted recovery envelope can restore the vault during offline grace (74.856794ms)
+✔ existing protected databases are revalidated before workspace activation (38.507611ms)
+✔ failed partial migration target is quarantined and rebuilt from untouched legacy source (35.757708ms)
+✔ database fingerprint detects same-size changes and WAL changes (0.877198ms)
+✔ active database validation failure never replaces current data with legacy data (34.919268ms)
+✔ password policy requires 12 chars and mixed character classes (1.289042ms)
+✔ workspace root key is 256 bits and module keys are isolated (1.82954ms)
+✔ recovery envelope round-trips root key and rejects wrong code (137.015925ms)
+✔ recovery code accepts formatting differences without changing the key (64.407735ms)
+✔ Sentry DSN parser accepts only valid HTTPS ingestion DSNs (1.315582ms)
+✔ Sentry sanitizer removes explicit sensitive fields and common PII patterns (1.148339ms)
+✔ Sentry reporter is fail-open when transport rejects (13.634353ms)
+✔ Sentry reporter deduplicates identical errors (11.905475ms)
+✔ Sentry event contains technical metadata but no user object (10.61478ms)
+✔ Sentry sanitizer preserves technical versions/timestamps while masking slash paths and complete phones (0.426386ms)
+✔ WhatsApp Sentry promotion list matches real high-value audit events (0.344101ms)
+✔ Sentry ignores expected negotiation idempotency rejection (10.215567ms)
+✔ development does not query or install (2.237447ms)
+✔ current version does not download (0.31672ms)
+✔ download completes and services stop before installer runs (0.565496ms)
+✔ later preserves download and next click does not redownload (0.478685ms)
+✔ active operation blocks installation (0.384442ms)
+✔ network error allows retry and concurrent clicks are ignored (0.312753ms)
+✔ late hidden launcher cannot replace the client after shutdown (13.756517ms)
+✔ pause during new QR disposal wins and preserves the selected profile (4.622088ms)
+✔ logout cleanup cannot overwrite a newer QR generation (5.224309ms)
+✔ authenticated but unresolved initialize is bounded by its own watchdog (70.865908ms)
+✔ a profile that authenticated is never eligible for automatic quarantine (2.372868ms)
+✔ failed ready metadata write still protects the live profile (2.494687ms)
+✔ an old QR encoder rejection cannot change the new generation (5.243669ms)
+✔ repeated startup failures enter cooldown that survives process restart (4.275985ms)
+✔ failed cross-volume profile copy never publishes a partial runtime profile (2.143385ms)
+✔ dispose clears the audit timer even if initialize never resolves (2.599315ms)
+✔ fatal storage rejection repairs a pending profile without needing a console event (3.145773ms)
+✔ auth failure can retire a hung initialize and unblock recovery (2.380434ms)
+✔ network disconnect can retire a hung initialize and unblock recovery (2.431141ms)
+✔ automatic queue polling does not bypass startup cooldown (1.194349ms)
+✔ late health response cannot override pause or count duplicate failures (2.519844ms)
+✔ shutdown promptly releases bridge callers waiting for readiness (252.295501ms)
+✔ patch backports current QR/bootstrap paths to npm 1.34.7 (3.51403ms)
+✔ repairs the malformed v3.1.1 QR closure instead of keeping a broken marked patch (2.273232ms)
+✔ patch is idempotent (0.602553ms)
+✔ patch accepts CRLF source from Windows/npm extraction (0.684347ms)
+✔ socket bootstrap probe tolerates unresolved WA modules instead of aborting WaitTask (2.247562ms)
+✔ QR module probe waits through partial WhatsApp bundle initialization (1.619582ms)
+✔ restored-session hasSynced replay is idempotent and only fires for a synced socket (1.954619ms)
+✔ build verification rejects an incomplete Client.js (2.2656ms)
+✔ browser mode parser defaults to headed and keeps explicit diagnostic overrides (1.61857ms)
+✔ fatal storage detector does not overreact to persistence warning but catches observed Cache failures (0.40338ms)
+✔ Sentry stays observational while self-healing belongs to WhatsApp lifecycle (0.738438ms)
+✔ startup classifier separates recoverable browser, network and storage failures (1.028186ms)
+✔ headed WhatsApp browser uses the proven pre-show Win32 guard on Windows (1.115249ms)
+✔ hidden launcher never reuses a stale DevToolsActivePort and waits for a live CDP socket (0.382048ms)
+✔ CDP endpoint validation rejects PowerShell pipeline arrays and malformed URLs (2.111587ms)
+✔ PowerShell CDP validator suppresses ConnectAsync output before returning the endpoint (0.447567ms)
+✔ pre-show launcher connects whatsapp-web.js to the same LocalAuth profile without switching to headless (7.277788ms)
+✔ startup audit is passive and never runs a CacheStorage probe before QR/ready (0.768153ms)
+✔ audit records the stable-bootstrap lifecycle exposed by the patched client (0.534429ms)
+✔ default first-start watchdog allows the WhatsApp document time to stabilize (2.657954ms)
+✔ forced headless CacheStorage crash automatically restarts the same profile in headed mode (152.355249ms)
+✔ dedicated persistent profile, headed reliability mode, QR, ready and session reuse (4.184495ms)
+✔ audit log exposes bootstrap events without storing raw QR or QR image (6.352408ms)
+✔ never sends before ready; waits for readiness and records completed sendMessage as sent (252.67179ms)
+✔ healthy long-lived ready session is reused instead of being restarted by age (2.614659ms)
+✔ QR wait times out without sending and can be paused (502.492482ms)
+✔ lost response is uncertain and invalid numbers are rejected (5.127949ms)
+✔ completed sendMessage is recorded as sent even when ACK event is missed (1.712092ms)
+✔ completed sendMessage remains sent when an ACK is already present (2.598194ms)
+✔ message id without server ACK is recorded as sent when sendMessage completed (2.58234ms)
+✔ completed sendMessage is kept as sent without waiting for a later ACK (1.807367ms)
+✔ message without stable id is sent when sendMessage completes (2.034891ms)
+✔ missing ACK does not delay the next supplier (2.162655ms)
+✔ concurrent sends rejected (2.039658ms)
+✔ first launch preserves legacy LocalAuth and migrates it non-destructively into session-state (1.300079ms)
+✔ closing before first ready preserves the provisional profile and resumes the same pending client (2.012587ms)
+✔ new QR is transactional: active LocalAuth survives until pending profile reaches ready (24.330958ms)
+✔ LocalAuth profile is reused after ready through the atomic session-state (2.831957ms)
+✔ stale 3.1.20 metadata is migrated without claiming a directory proves authentication (1.407862ms)
+✔ hidden browser shutdown gives Chrome a graceful profile-flush window before forcing the stop flag (41.076662ms)
+✔ bridge requires secret and does not expose QR or session (29.018475ms)
+✔ repairs legacy Brazilian mobile candidate without changing landlines (1.045743ms)
+✔ tries repaired Brazilian mobile when the saved legacy number is not registered (2.291519ms)
+✔ pause preference survives restart and auto monitor stays stopped until resumed (23.395421ms)
+✔ LOGOUT closes the browser before profile cleanup and directs the user to a fresh QR (30.682094ms)
+✔ background monitor restores a dropped session unless user paused it (54.03556ms)
+✔ single transient health failure does not tear down a ready session (2.679717ms)
+✔ bridge health endpoint is authenticated and never exposes QR material (7.54259ms)
+✔ execution-context loss during initialization is retried without deleting LocalAuth data (2106.254152ms)
+✔ stalled new-QR startup is watchdog-recovered with one fresh profile retry (133.643869ms)
+✔ explicit new QR cancels a stuck starting generation without waiting for initialize to finish (42.534022ms)
+✔ renderer keeps Generate new QR available while startup is stuck (0.405944ms)
+✔ the WhatsApp panel exists once and is shared by both modules (0.186152ms)
+✔ o histórico oferece a liberação manual de um envio sem confirmação (0.212071ms)
+✔ o lote expõe a fase de espera pela conexão (0.172531ms)
+✔ separate local runtime directory is used only for Chromium LocalAuth profile (1.615216ms)
+✔ boot never destructively purges LocalAuth profiles merely because metadata is incomplete (1.155119ms)
+✔ established roaming LocalAuth profile migrates once to the local runtime root (0.895776ms)
+✔ headed first-connect storage failure quarantines only pending profile and retries once (164.168992ms)
+ℹ tests 143
+ℹ suites 0
+ℹ pass 143
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3859.020481
+6 verificações de ordenação aprovadas

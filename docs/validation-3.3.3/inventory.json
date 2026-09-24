@@ -1,0 +1,918 @@
+{
+  "source_archive_sha256": "a8f3f638e346de62c8c0be71157670fa329ef3553d99457260b2ace89da347b9",
+  "missing_original_files": [],
+  "files": [
+    {
+      "path": ".firebaserc",
+      "bytes": 59,
+      "sha256": "73c56a9e06cfdfccefea8aa3c672be7d66f0e39d2cd69a01cad282f15b5b5c82",
+      "change": "unchanged"
+    },
+    {
+      "path": ".github/workflows/windows-release.yml",
+      "bytes": 6369,
+      "sha256": "8ce27729d3e9f6ec92cc172f03e67af2e1cb60c433c394970aa925f170bf03b2",
+      "change": "unchanged"
+    },
+    {
+      "path": ".gitignore",
+      "bytes": 645,
+      "sha256": "9587c26bfdcbb551237eb38ee4bcd4c20acd73d4b48f719ccf7b2fb07bb56a85",
+      "change": "unchanged"
+    },
+    {
+      "path": ".puppeteerrc.cjs",
+      "bytes": 117,
+      "sha256": "4181525eea9914eb3fa72c528ad6d59af02f91905f5eced24886e4daaabf7eb3",
+      "change": "unchanged"
+    },
+    {
+      "path": "README.md",
+      "bytes": 26241,
+      "sha256": "22e9bd536d5bab8d90aef9a1031fa3397b6fb4c55ded21d50cdf2f9db6e34ada",
+      "change": "modified"
+    },
+    {
+      "path": "backend/compras_engine.py",
+      "bytes": 54233,
+      "sha256": "4c13daa1601e37dbb5eb77ed01afb10035508b49049bd5a3fad4234afd6371b7",
+      "change": "modified"
+    },
+    {
+      "path": "backend/crypto_migration.py",
+      "bytes": 17393,
+      "sha256": "f4c56a2792c3d30a4febda3458942e4015e5a4e39d5fd7bcf3c2b068c53b0394",
+      "change": "modified"
+    },
+    {
+      "path": "backend/data_safety.py",
+      "bytes": 11848,
+      "sha256": "0df87566facbc880f8e8d251bb5a9952476c6794d6f100a3d81f5fdb395a561c",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/engine.py",
+      "bytes": 134576,
+      "sha256": "cdadac26761eaf3d8b37ab959134a3fb684873972503b43abd3a3458f8109316",
+      "change": "modified"
+    },
+    {
+      "path": "backend/excel_export.py",
+      "bytes": 16460,
+      "sha256": "7b7ad990966ed57716eacb824da23ae1593038a106d3738bbbe1cdb3361528e5",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/requirements.txt",
+      "bytes": 78,
+      "sha256": "5f3b5969b4dc3e2c14a214e7f8f0dab458ec5580167bcfe02e601e264b9c38c2",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/secure_sqlite.py",
+      "bytes": 4577,
+      "sha256": "475337f7b9aeb160468a0e8cd775f9885b402db78c71015ced2f9aef0c037da9",
+      "change": "modified"
+    },
+    {
+      "path": "backend/test_compras_add_items.py",
+      "bytes": 14589,
+      "sha256": "b527d8ea1db87daa11b2af00ae9860852f522d4f9475fc48ffaa2d030bc2f139",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_compras_items.py",
+      "bytes": 11364,
+      "sha256": "1238ee1841ab763f26f2e724975afd1c633820b4bd5eb359baa2b6fd10d8da7d",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_compras_module.py",
+      "bytes": 18068,
+      "sha256": "f6c3a10c7abe0c303f56e0c2814a986f175cf6737fc527db2a8c1f900881b94b",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_compras_v11.py",
+      "bytes": 5944,
+      "sha256": "348a3025dae8394d7f0e0c9b7948fe3623770824a5c299071f6d576bc621c25d",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_crypto_migration.py",
+      "bytes": 6942,
+      "sha256": "e980964955e7d79e8708f97dce84461d10acdc6db5cc95633682b3f8075d142f",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_data_safety.py",
+      "bytes": 17577,
+      "sha256": "6deecbd3ca35c70432c9dd2b2888d61da1d0b3964ea03785aab96ac932cdac69",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_engine.py",
+      "bytes": 23500,
+      "sha256": "4e404322f5930cb3355f42b1ead76fe8bbab943e58fa3cbf484a0f2b8192b5ef",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_operational.py",
+      "bytes": 5648,
+      "sha256": "068f99d0085d09431c52af3243e3c08f48592eefeeb40449c10ae9bc03080353",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_recovery_regressions.py",
+      "bytes": 2109,
+      "sha256": "e902ba71447da01493eafe0464022ad96ada310298b6b994b49dc6f1787aedec",
+      "change": "added"
+    },
+    {
+      "path": "backend/test_updates.py",
+      "bytes": 1271,
+      "sha256": "9f4530dad9a7f63b3f8b6a8040c8ce429c8cdb8b4c68aa60a5bf07a095e58430",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/test_whatsapp.py",
+      "bytes": 19044,
+      "sha256": "00cb4cceff6133d67d74e5cde3fd85557b0a8924f76564fa9880bd0c3a09e0c9",
+      "change": "unchanged"
+    },
+    {
+      "path": "backend/workbook_formats.py",
+      "bytes": 5284,
+      "sha256": "b76c9928d42c4af47effcde582aa862e0243a1c7c6943aa67492cdfb1963a18d",
+      "change": "unchanged"
+    },
+    {
+      "path": "build/icon.ico",
+      "bytes": 116769,
+      "sha256": "a7a25c4f4f8857fa6d4e8a7807d686143a4e6641c2e76e4c108ac50afe0045fe",
+      "change": "unchanged"
+    },
+    {
+      "path": "build/icon.png",
+      "bytes": 32515,
+      "sha256": "5dcc1cf7f4aca080649d247a25004ebeaa973645e3c24873370e83191322517f",
+      "change": "unchanged"
+    },
+    {
+      "path": "build/installer-sidebar-source.jpg",
+      "bytes": 28724,
+      "sha256": "411f518b15e77bc953e8e9047b2c0b4725932fb3af5f3949aa46b54f3ea84d56",
+      "change": "unchanged"
+    },
+    {
+      "path": "build/installer-sidebar.bmp",
+      "bytes": 154542,
+      "sha256": "e97e4cfca13aa499e5f2593bb3f58a2e17d414d2f7c0ef53614b33dd415ed023",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/ANALISE_DOS_ARQUIVOS.md",
+      "bytes": 3062,
+      "sha256": "113bb94f155788fe52dd83d12f65d409afbfa463d375021a6572d160072f0816",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/ARQUITETURA_V3.md",
+      "bytes": 1240,
+      "sha256": "6f7a0b3ecea87ec77a4c5a4b799f148c67dde7e7038a1cae0ca0d8e64f1d0f7a",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/AUDITORIA_3.3.0.md",
+      "bytes": 1498,
+      "sha256": "1b060f01f2d40a45faa36d25a880d0f50a923e24c5bff039647be637daae043b",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/AUDITORIA_3.3.2_SELF_HEALING.md",
+      "bytes": 3736,
+      "sha256": "5825b177fc4ff0537883d56fd46878af1867c63580b76f06bf7a84f3d5c42ea1",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/AUDITORIA_3.3.3.md",
+      "bytes": 17215,
+      "sha256": "183d5e146d3a9d406cd0cd315fb7e422affc0a41b0cba7ea47d5a6ad68de256c",
+      "change": "added"
+    },
+    {
+      "path": "docs/AUDITORIA_CRITICA_DATA_SAFETY_3.0.2.md",
+      "bytes": 5628,
+      "sha256": "969952bbbc5f99b527a0293170e3aa4a6ce2bdc18193ead8384577fdc0d430ec",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/AUDITORIA_SEGURANCA_3.1.md",
+      "bytes": 2308,
+      "sha256": "b2348b8a4d51f51428f0ad6d942e010f0017591a7c98670c7f89eb8f552f3d03",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/AUDITORIA_SENTRY_3.2.8.md",
+      "bytes": 3415,
+      "sha256": "e805f5d5e60c78698e9a1f255654c32c604b6e58442cb8f0dcdc63f5fc598bf6",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/AUDITORIA_V1.2.5.md",
+      "bytes": 1735,
+      "sha256": "eb024ebbc7c578cbc40344447b45c3283e85c1e2c076459489706552b82cb7d6",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/BRIDGE_3.0.3.md",
+      "bytes": 1071,
+      "sha256": "1566fe36e65e30c9c53b9f06f5415dc7b061ef2ffb6ed20c7d15553248d0ba2f",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CENARIOS_ORIGINAIS_3.3.3.md",
+      "bytes": 12594,
+      "sha256": "9fe4a736ac0480fff8a85c7acc95d5484250c737e0797dfb59d3141eaf0ab9b6",
+      "change": "added"
+    },
+    {
+      "path": "docs/CHANGELOG_3.0.2.md",
+      "bytes": 2152,
+      "sha256": "07a66841dd756860424fbb5a57413280c9ba6f910f252de1e7cc1bfc83c931a3",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECAO_3.3.1_WHATSAPP_STABILITY.md",
+      "bytes": 1750,
+      "sha256": "fec3bcbc7d034fa93fc2ae3776fdc1efccab94775cc85e185c5ebc71076ee011",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECAO_WORKFLOW_3.0.1.md",
+      "bytes": 573,
+      "sha256": "3d04534204f74e8cdfbc32221d15020e853924a9395aa3e20756afad72e2d86d",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.1.md",
+      "bytes": 11610,
+      "sha256": "e0d8162443d25b83111d038cbd6a5b3d2e29a27518dcb7e410a80781657e8cc5",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.19-HIDDEN-CHROME.md",
+      "bytes": 1074,
+      "sha256": "a92b25d6d01f6526e94a8f09fa04b76a93ee28e3db4bfe2d694249e3d7fc401b",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.2.md",
+      "bytes": 1267,
+      "sha256": "a647f746deab0cb256af7acdf854fdc710138633a3426c2bc7d0b43a42006afd",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.20-HIDDEN-CHROME-NO-FLASH.md",
+      "bytes": 1155,
+      "sha256": "e61da6055fe1a9c0d529bed0cfa3ea7ad49e53861cb1875d69c40b944adc1a5b",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.21-WHATSAPP-PERSIST.md",
+      "bytes": 958,
+      "sha256": "4672e1c3ffd56f515f8dcf719e8b98b167dd8a751c04b42dc4006370a961cf13",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.22-RELIABLE-CDP.md",
+      "bytes": 619,
+      "sha256": "6df64707c211128aad44e7ae0954de48b2476f6ab8aed931b1931ef3121590e2",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.24-CDP-ENDPOINT.md",
+      "bytes": 1444,
+      "sha256": "933cb197c2bc8d03f4f20edb7d3e0d50c8baa518bd3bad04d40e5e94ae8d76fa",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.3.md",
+      "bytes": 849,
+      "sha256": "ac904ddf0804d24860ad66b228a5a93b0813a43a6ddae19653b6c1eecd3eb6f1",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.5-AUDIT.md",
+      "bytes": 1359,
+      "sha256": "7390d2ed98176cd69d737ca78e1be36829cb8ab405f1898a00fd656c9ce7dce4",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.6-QR-BOOTSTRAP.md",
+      "bytes": 2081,
+      "sha256": "9801fe39100002e7c45646b0d0e2ff46f5ba43574b0f388aca2858bc2d1cca32",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.7-WHATSAPP-STORAGE.md",
+      "bytes": 2653,
+      "sha256": "5cd090f74ae7d455c90ae10154414b9e512e2badb81d58effef1af4bba3b7d76",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/CORRECOES_3.1.8-WHATSAPP-STABLE-BOOT.md",
+      "bytes": 2780,
+      "sha256": "1d9aac337512d11c01a88d5ee3f0db32241ff6e95737e05f2b10d927fd2c0dd0",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/DATA_SAFETY_3.0.2.md",
+      "bytes": 2993,
+      "sha256": "2ca8a2d287d2505059c3a9aa6260c27c2a24009167eec6ef3dfe73ff278377cd",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/DIAGNOSTICO_INTEGRAL_3.2.5.md",
+      "bytes": 772,
+      "sha256": "dc48d309eb68c4b7cb87133b3081d221a2666b650812bc0aadd43858fc4b4ffe",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/FIREBASE_3.1.md",
+      "bytes": 2866,
+      "sha256": "3a34e59d9943c5a6d723035e0c96d410e7638c3ca6a53035e60f2d90cd4a6a95",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/GITHUB_ACTIONS_FIX_3.1.24.md",
+      "bytes": 1681,
+      "sha256": "e5fa27b0cd9d6a93c330857ffe866a7376f44788bc6587c6619abde0c8490e1f",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/MIGRATION_3.1.md",
+      "bytes": 2415,
+      "sha256": "ca030d3f1c80c06c182d176fcc26e4efee492273b591258154ac875d6c40cfb2",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/MIGRATION_CRASH_FIX_3.1.md",
+      "bytes": 1213,
+      "sha256": "3f8add916dc9e6595ff5e9bc2d74e2a5cb462791632eb8b39ed1112f52a9c019",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/RELATORIO_AUDITORIA_3.2.7.md",
+      "bytes": 1992,
+      "sha256": "a2e0317eaa66aeb8955c297834647aeb646df1837c9e19cb1197c154a5ed7dc4",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/RELEASE_3.1.md",
+      "bytes": 1549,
+      "sha256": "5cbde4d036aa5ffc926fae9b656f58496d5afb3e4f736238b4b683a2d824cc6d",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/RELEASE_CHANNEL_3.0.4.md",
+      "bytes": 1372,
+      "sha256": "d48d9c45b8d40f6523eba66df9ef81c628cdf1c361857fa15a4ea4427ea86583",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/REVISAO_ESTABILIDADE_3.0.md",
+      "bytes": 11371,
+      "sha256": "46887c71c6a91b99b97321b5594cc52eb2dad619e4785247fe30080dee4b9825",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/SECURITY_3.1.md",
+      "bytes": 4830,
+      "sha256": "2986e54f8adba2674bf8864c946d2e6f2953f7477617b32cb7ea8916a50754dc",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/TEST_REPORT_3.1.6.md",
+      "bytes": 1835,
+      "sha256": "bd00d606f727a7f5a798f77148d164c566488a8afb722437cc1e66ddbe0c7a70",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/TEST_REPORT_3.1.7.md",
+      "bytes": 1935,
+      "sha256": "7752bfa028bd4ad0af9cf376a3253d2d727e38f724b1772f2595362560194cd7",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/TEST_REPORT_3.1.8.md",
+      "bytes": 1462,
+      "sha256": "489f8d75795fa5ba2f2b58c7edf26bd1d520a66a0b3825293692e173204f643b",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.1.23_FULL_STABLE.md",
+      "bytes": 4074,
+      "sha256": "baf2ae45357f311bc08163fef218a055983c16de8818695d9fe42a88bfd78283",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.1.24_FULL_STABLE.md",
+      "bytes": 2187,
+      "sha256": "42583658ad0f3903bcf889a0b4458f136ab80821245d0e027f1de86e8285468e",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.2.0.md",
+      "bytes": 1761,
+      "sha256": "a499639fea6b41be541c6b715e4d98b984c36ab5f39b99359e69d615de67eedf",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.2.1.md",
+      "bytes": 1604,
+      "sha256": "4188e0d3ee6b123dc42955c5696bbe6df7948a9d03aea203bc36f16a5511ccb8",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.2.2.md",
+      "bytes": 4569,
+      "sha256": "21c02f3e93ac19c46318d6c2a37eff3d73b131ca48f4b0a0771b5a1c1de4ac90",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.2.3.md",
+      "bytes": 7811,
+      "sha256": "9bea24217f3369f6a3022bab09900a010cd8de37ae494cb75c767790d7870c3d",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.2.4.md",
+      "bytes": 3593,
+      "sha256": "168dc533ed33c31662c7069c8350aadad7165e76a4d926f4dd57e1e536dd474b",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.2.5.md",
+      "bytes": 2898,
+      "sha256": "c1dc80b928df1ea5cbb1877a651c77f9f39a56d36da0330741e31019fad1178e",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/VALIDACAO_3.2.7.md",
+      "bytes": 2675,
+      "sha256": "66f666644ff11dbc9cba10c76b898beb50ee96195a68c219f4f8a16f6b6a48f7",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/npm-audit-3.3.3.json",
+      "bytes": 35053,
+      "sha256": "c154de4324e928eb66c02f56245773cafdfc86c15138ca6820e96e71637de7fe",
+      "change": "added"
+    },
+    {
+      "path": "docs/readme/controle-operacional.png",
+      "bytes": 187170,
+      "sha256": "abe616cbc1590e9d7f9eb20c0d1269eccbe20fcf7035d31e714c9b9c12e49a5c",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/readme/dashboard.png",
+      "bytes": 206534,
+      "sha256": "6af95d96ccbc8b73a239c0acbdda5d2ce0bf579e5b7ca4fbc720172a15cc8649",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/readme/visao-geral.png",
+      "bytes": 233072,
+      "sha256": "9643109f4f8fc240a69ac4b0ebaf84fd73b0263da60ca03da25652ff4508a012",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/readme/vyzium-banner.svg",
+      "bytes": 3462,
+      "sha256": "1b4d4ddca0d9fb8da94cd4f82dd9896d2770b0321f9f2b4f522df7000519e067",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/readme/vyzium-mark-white.svg",
+      "bytes": 369,
+      "sha256": "cf8e6776c1c5562d79c67ab7e479247bcf757043d0599122ab61b190a6a406ce",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/readme/vyzium-mark.svg",
+      "bytes": 705,
+      "sha256": "75e4413fdc903ba2b8462cfefc3c608c0efd28c8516486293dfd4a2923d4ddf0",
+      "change": "unchanged"
+    },
+    {
+      "path": "docs/validation-3.3.3/compras-integration.log",
+      "bytes": 2839,
+      "sha256": "2327482164fddcac75b26e706e552b41ee074405fb183285852e0fdb45729a2d",
+      "change": "added"
+    },
+    {
+      "path": "docs/validation-3.3.3/tests.log",
+      "bytes": 45776,
+      "sha256": "cd23438b63be9aa130ae8afb54141d66d61099c995d431dfa1dbd12acafc9319",
+      "change": "added"
+    },
+    {
+      "path": "docs/validation-3.3.3/whatsapp-patch.log",
+      "bytes": 277,
+      "sha256": "48ec88f61fed43af4955435b451453bbc878afce6cb50df792c7f843a47261fd",
+      "change": "added"
+    },
+    {
+      "path": "electron/auth-manager.js",
+      "bytes": 7437,
+      "sha256": "32d6aa93c6061f3e89b2610a8719f8ac0177a7c48ab1c126065f531c30e8c846",
+      "change": "unchanged"
+    },
+    {
+      "path": "electron/diagnostics.js",
+      "bytes": 6389,
+      "sha256": "cd857d33e3c835ee48334ca90bd134f3c9e4f48696af65ecab69a82171c3cbbe",
+      "change": "modified"
+    },
+    {
+      "path": "electron/firebase-client.js",
+      "bytes": 10882,
+      "sha256": "fea67971e0f47c0e911777b19622c8cbfdba01eaa3d056b1cb4cd6397ef04f1f",
+      "change": "unchanged"
+    },
+    {
+      "path": "electron/firebase-config.js",
+      "bytes": 338,
+      "sha256": "0d09ae2e1a12262a2c5a2895f03f7e2d96ecff2ab0347a4a08a19fe6609026be",
+      "change": "unchanged"
+    },
+    {
+      "path": "electron/main.js",
+      "bytes": 37180,
+      "sha256": "b566f7af16dfa61ffd5e93fb3078162c847d40ca9ce644970a93ee7b0402b7a3",
+      "change": "modified"
+    },
+    {
+      "path": "electron/preload.js",
+      "bytes": 2372,
+      "sha256": "a5c1f120bfb5de14994e174579287e3fcbdecc5a62daa125173f1855162d6c9b",
+      "change": "unchanged"
+    },
+    {
+      "path": "electron/security-core.js",
+      "bytes": 3171,
+      "sha256": "a6f2caf25d19ce5cee2ef955200316c96ed9af335df086f7a096e097fd2f6a26",
+      "change": "unchanged"
+    },
+    {
+      "path": "electron/security-manager.js",
+      "bytes": 22830,
+      "sha256": "169a28f85b5477dec3d937e59c027d4da7ce99c2f8a53badffa9bd45db7dc634",
+      "change": "modified"
+    },
+    {
+      "path": "electron/sentry-client.js",
+      "bytes": 8142,
+      "sha256": "83431cba612b1253363554f3eac1c1de1ada00e992540889dece4328cf6a79ab",
+      "change": "unchanged"
+    },
+    {
+      "path": "electron/updates.js",
+      "bytes": 3478,
+      "sha256": "7017ae2f48568701934c7ea9332d26205d46950674450de02871cfbf3979adb1",
+      "change": "unchanged"
+    },
+    {
+      "path": "electron/whatsapp-hidden-browser.ps1",
+      "bytes": 26347,
+      "sha256": "8c951c80c36bf2f9d51fefaa1ada4d4f9af1970d6449003d18e009cf5659d9e0",
+      "change": "modified"
+    },
+    {
+      "path": "electron/whatsapp.js",
+      "bytes": 94697,
+      "sha256": "964e3416f7f84b30bdbeb8f4cec97f87ccdc2502f594a7ad902563ab9a213132",
+      "change": "modified"
+    },
+    {
+      "path": "firebase/firestore.indexes.json",
+      "bytes": 44,
+      "sha256": "6742255415c36daf631b52f233039190af819205cc41fa58d07dd7d9e180c2b9",
+      "change": "unchanged"
+    },
+    {
+      "path": "firebase/firestore.rules",
+      "bytes": 8484,
+      "sha256": "ba872be1da3fc803ac1a86a9541c8f3814abc4265dfe9b1b2e7a2b9504340c29",
+      "change": "unchanged"
+    },
+    {
+      "path": "firebase.json",
+      "bytes": 115,
+      "sha256": "63c66bf2a1a47560e6b8e7ccb548e8b643d6170a36f3d61af77c480b25105916",
+      "change": "unchanged"
+    },
+    {
+      "path": "package-lock.json",
+      "bytes": 244058,
+      "sha256": "836f89082f5cae1fda8372dc94c9d03488ab5c0d4b0f362794b77c3a69009752",
+      "change": "modified"
+    },
+    {
+      "path": "package.json",
+      "bytes": 2489,
+      "sha256": "e3b8c632aec77b589b30d87627b16e5af6279a0ec5f622703d0cedfe3a18a7fa",
+      "change": "modified"
+    },
+    {
+      "path": "renderer/account.js",
+      "bytes": 1145,
+      "sha256": "d4be0b989be13ab626fbcf086244c96dc008555c78d2941c9067d6242b98b23b",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/acompanhamento.html",
+      "bytes": 7138,
+      "sha256": "bb787c78038a8b83e0b6184252b8ede2f474c7793f83a23fd31a4b4445cfb5a6",
+      "change": "modified"
+    },
+    {
+      "path": "renderer/app.js",
+      "bytes": 52791,
+      "sha256": "06adcb8ff2ca2def8f96086c31b475c04e6f6f1d2cb3f5a7c6758d15e6e2b724",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/assets/overview-hero.jpg",
+      "bytes": 141963,
+      "sha256": "090b0c2a22389af96e52d0d6a220af50cb1a387ceab593c547c4c428a0f8abdb",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/assets/vyzium-logo-full.png",
+      "bytes": 163901,
+      "sha256": "49666e50cce9a469f693f246ddf66193333fd2c169ebfb9e5b4a0d4c784bc702",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/assets/vyzium-mark-icon.png",
+      "bytes": 61270,
+      "sha256": "a6bf52502bb25fe058ce7700f99c0c64947dde71d837a824b69a28cd8d65c574",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/assets/vyzium-mark-white.svg",
+      "bytes": 369,
+      "sha256": "cf8e6776c1c5562d79c67ab7e479247bcf757043d0599122ab61b190a6a406ce",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/assets/vyzium-mark.svg",
+      "bytes": 705,
+      "sha256": "75e4413fdc903ba2b8462cfefc3c608c0efd28c8516486293dfd4a2923d4ddf0",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/auth.css",
+      "bytes": 5388,
+      "sha256": "bf9731a18f948072ab747613901762b35781406941e1ad80e79d4cac012c8165",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/auth.html",
+      "bytes": 7962,
+      "sha256": "d5c6e793b00bb1601e2c19640b3c56e24c80bf5e4681eb3af83ca4b2a9a71f0f",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/auth.js",
+      "bytes": 7429,
+      "sha256": "b9d7cc51e20e068da1316f7c2959fac74cd580c3bf7053a2ca6f027cb2bdb295",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/compras-app.js",
+      "bytes": 57419,
+      "sha256": "dfa3686a9b665767c4688b3e1ce5c55b2dd0aebf0db0dceae4f874f169c5579b",
+      "change": "modified"
+    },
+    {
+      "path": "renderer/compras.css",
+      "bytes": 26890,
+      "sha256": "ab5fee5183793b43c1883eb32c65a00e2e9f40c1e655770b99c5587ac8ac4e5f",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/compras.html",
+      "bytes": 6465,
+      "sha256": "6dd8a757468293cf0af20d01f131089813076b26e72cc02d3c0a56196018e8b0",
+      "change": "modified"
+    },
+    {
+      "path": "renderer/home.css",
+      "bytes": 3815,
+      "sha256": "db05fbede0e758a0c6cde04ef5f6ac67657ff17fd1db28338a6069a4f35f4f1c",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/home.js",
+      "bytes": 2626,
+      "sha256": "4a2d10bcea64a8fffea223a014d84003b065bdcc20cad5564bfeead04b59c8ff",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/index.html",
+      "bytes": 6079,
+      "sha256": "7a313695a319396fc623759dea95198671cbe5b90a04b7d92e31171aeab14f5c",
+      "change": "modified"
+    },
+    {
+      "path": "renderer/module-switch.js",
+      "bytes": 2286,
+      "sha256": "ce1b8048ce7e6c6251db27fd5b3481975cc820d45404faf33ee1ab1b2480ebe9",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/operational.js",
+      "bytes": 13279,
+      "sha256": "b65265bb8715e9b7d5bc24f1340d4b1f332a5842fba5e6a5057c4ae268fa6c8e",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/purchase-model.js",
+      "bytes": 3075,
+      "sha256": "555829df0137f39062061a88ff88092e57e7063719f6b0ba5e05dbbcd872fb5b",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/styles.css",
+      "bytes": 54078,
+      "sha256": "e205a95617962f76fc6eb9c9bd29cb15df23e2a66a6224ecc0e44482a6e1c1c8",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/updates.js",
+      "bytes": 1823,
+      "sha256": "3c12f1b301782775913e151ec09b3dfbd366aae8db9f83b3a71277c7fc0a05eb",
+      "change": "unchanged"
+    },
+    {
+      "path": "renderer/version.js",
+      "bytes": 1114,
+      "sha256": "12523a1944ef8a299dde25b4b8abeefc24c2b2323c744a9729e16163855804eb",
+      "change": "modified"
+    },
+    {
+      "path": "renderer/whatsapp.js",
+      "bytes": 4684,
+      "sha256": "a9c7db0157d3c647ba6e8c2863b3650a8a3329e2ebedeef6dc0ac7d3434747e1",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/build-app.ps1",
+      "bytes": 403,
+      "sha256": "3bf92d8d9dd9d5aaf8f6b0a618017062164e4d02a708cb6e30d5c2abbfcef16f",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/build-engine.ps1",
+      "bytes": 1534,
+      "sha256": "3af568211bfef80698ece298e654ed9cf545a07862db2b4ea52267ff6dc8d540",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/diagnose-whatsapp.js",
+      "bytes": 2774,
+      "sha256": "1b252362f52138e4c6633afdeede7134f47834d63fbc11debf4b799f80c0371b",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/patch-whatsapp-web.js",
+      "bytes": 24226,
+      "sha256": "3014c15b277ab90f1b617df04eb66c75a880ec8d9959579a985d55070a95fec4",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/start-dev.ps1",
+      "bytes": 814,
+      "sha256": "08fb6e971a5d7b6849a6a43da47ecdf0087e99fd26866a488a3b3eb16b85f27f",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/verify-engines.ps1",
+      "bytes": 1284,
+      "sha256": "496e14b3bface1f10fff0cef3f07ce5d6a0e18f9de4848668859d83b1c5709f1",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/verify-packaged-engines.ps1",
+      "bytes": 1105,
+      "sha256": "04ba8dfa9cc56576392fd464406a22ab3919de4d87fb179f8f2b6a39c990cddb",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/verify-repository-safety.ps1",
+      "bytes": 2141,
+      "sha256": "f5524f170599cf987c2eb077c0457663f0dbc8576a5973a9c73fd5bf4b489d51",
+      "change": "unchanged"
+    },
+    {
+      "path": "scripts/verify-whatsapp-patch.js",
+      "bytes": 3971,
+      "sha256": "851e0772502b100e319627c34c8996761c98f4d044afd515eaded2f50ed07618",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/auth-manager.cjs",
+      "bytes": 3854,
+      "sha256": "7b543e206c7f912e499ee48d324959af9ea5a795f7e0a1b1592e648b4da1cfa1",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/diagnostics.cjs",
+      "bytes": 3302,
+      "sha256": "d9fe90aea183f74656dddb07f7881a132e2de41b7c1377ae0bb1195fb7ac5ca2",
+      "change": "modified"
+    },
+    {
+      "path": "tests/firebase.cjs",
+      "bytes": 3899,
+      "sha256": "c5a2c3bd5fb3114aee6530c15d3d6710540efa6cc0a28312d8c6057a104daca1",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/integration/quotation-items.cjs",
+      "bytes": 22019,
+      "sha256": "4df720129631f588b38b10ce391416e6651b49c5a71d9da54b0570a379f67329",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/integration/quotation_items_server.py",
+      "bytes": 1407,
+      "sha256": "6bae7b70ca97d2673f05bd004597ec92970903cd59a681d4053d9e235a9aa52f",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/project-config.cjs",
+      "bytes": 12089,
+      "sha256": "3ada14147650b38cfd6044f88a6a7466223e2ac5bafa5423df9f1c29135ca8f6",
+      "change": "modified"
+    },
+    {
+      "path": "tests/purchase-model.cjs",
+      "bytes": 1788,
+      "sha256": "92c36d7d12f20563f62e0007a2b565e0643e560a8aa6cc0b13377a064673c152",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/security-manager.cjs",
+      "bytes": 9348,
+      "sha256": "f672d89ca4c677c0e64a685d251f827e9d14560c1ba683071fa5aaf8f7d99e19",
+      "change": "modified"
+    },
+    {
+      "path": "tests/security.cjs",
+      "bytes": 1707,
+      "sha256": "64cab63bea869e6235d367d6b4634a2a2f5e3a2ebac935abd1893147cff6cb72",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/sentry.cjs",
+      "bytes": 4656,
+      "sha256": "2cf4b7144f37d68f6adfba3fc4a28bf20a95542569051f3d9c3c868fa2d16a19",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/sort.cjs",
+      "bytes": 747,
+      "sha256": "fa0f5f83880274c945e1c814a729f1b520964bc96e302a66dc416d55cb2b9fa6",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/updates.cjs",
+      "bytes": 2878,
+      "sha256": "b8bc1b30ce532335057ef63a195e3e76829681e96e96595ec55d6f62ff1e2c29",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/whatsapp-lifecycle.cjs",
+      "bytes": 8224,
+      "sha256": "299c764786b600f58b1559936c3a97193229ec0836ac6fc24c108fcdf3021844",
+      "change": "added"
+    },
+    {
+      "path": "tests/whatsapp-patch.cjs",
+      "bytes": 14877,
+      "sha256": "68773f78f0bde710526daabf54e6dbeedcab0e66408a131fc692eca8d58d992b",
+      "change": "unchanged"
+    },
+    {
+      "path": "tests/whatsapp.cjs",
+      "bytes": 42003,
+      "sha256": "f011912190f148324e4fd1c96ee473b62703d7a203cca0b08eb963b95112a3af",
+      "change": "unchanged"
+    }
+  ]
+}

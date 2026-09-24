@@ -28,7 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.0')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.3')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
@@ -836,9 +836,11 @@ class Store:
                 raise
             record.update(status='uncertain' if submitted else 'failed', error=str(exc))
         finally:
-            if record:
-                self.put('messages', record['id'], record)
-            self.send_lock.release()
+            try:
+                if record:
+                    self.put('messages', record['id'], record)
+            finally:
+                self.send_lock.release()
         return record
 
     def send(self, body):
@@ -868,9 +870,11 @@ class Store:
                 raise
             record.update(status='uncertain' if submitted else 'failed', error=str(exc))
         finally:
-            if record:
-                self.put('messages', record['id'], record)
-            self.send_lock.release()
+            try:
+                if record:
+                    self.put('messages', record['id'], record)
+            finally:
+                self.send_lock.release()
         return record
 
     def review(self, body):

@@ -24,6 +24,7 @@ let fullDiagnostics;
 let sentryReporter;
 let workspaceServicesStarted = false;
 let quitting = false;
+let shutdownPromise = null;
 let updating = false;
 let activeRequests = 0;
 let navigationBusy = false;
@@ -532,6 +533,7 @@ async function startWorkspaceServices() {
 async function stopWorkspaceServices() {
   await stopAllEngines();
   await Promise.resolve(whatsapp?.shutdown()).catch(() => {});
+  try { if (whatsapp?.auditFile) fullDiagnostics?.copy(whatsapp.auditFile, 'whatsapp-debug.jsonl'); } catch (_) {}
   if (whatsappBridge?.server) {
     await new Promise(resolve => whatsappBridge.server.close(() => resolve())).catch(() => {});
   }
@@ -844,11 +846,19 @@ app.whenReady().then(async () => {
 
 app.on('before-quit', event => {
   try { if (whatsapp?.auditFile) fullDiagnostics?.copy(whatsapp.auditFile, 'whatsapp-debug.jsonl'); } catch (_) {}
-  fullDiagnostics?.finalize({reason:'before-quit'});
-  if (quitting) return;
+  if (quitting) {
+    try { fullDiagnostics?.finalize({reason:'before-quit'}); } catch (_) {}
+    return;
+  }
   event.preventDefault();
+  if (shutdownPromise) return;
   app.isQuitting = true;
-  Promise.resolve(stopWorkspaceServices()).finally(() => {
+  shutdownPromise = Promise.resolve(stopWorkspaceServices()).catch(error => {
+    try { fullDiagnostics?.error('app.shutdown', error); } catch (_) {}
+  }).finally(() => {
+    // Stop the browser before running diagnostic compression. Finalize is
+    // idempotent, including the second before-quit raised by app.quit().
+    try { fullDiagnostics?.finalize({reason:'before-quit'}); } catch (_) {}
     quitting = true;
     app.quit();
   });

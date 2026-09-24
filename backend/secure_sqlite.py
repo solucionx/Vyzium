@@ -93,7 +93,11 @@ def connect(
             con = cipher_sqlite.connect(uri, uri=True, timeout=timeout, check_same_thread=check_same_thread)
         else:
             con = cipher_sqlite.connect(str(target), timeout=timeout, check_same_thread=check_same_thread)
-        _apply_key(con, key_hex)
+        try:
+            _apply_key(con, key_hex)
+        except Exception:
+            con.close()
+            raise
         return con
 
     if readonly:

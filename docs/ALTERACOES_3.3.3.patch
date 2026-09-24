@@ -1,0 +1,1003 @@
+--- 3.3.2/README.md
++++ 3.3.3/README.md
+@@ -1,4 +1,12 @@
+-# Vyzium 3.2.7 — Stable Production
++# Vyzium 3.3.3 — Candidato a produção, recuperação conservadora
++
++Correções de concorrência, preservação de sessão e dados, limites de recuperação e diagnóstico. Base exata: pacote 3.3.2 fornecido nesta auditoria. Interface, ícones e regras operacionais preservados.
++
++**Leia `docs/AUDITORIA_3.3.3.md` antes de publicar.** Testes automatizados não substituem a homologação do instalador no Windows e a confirmação do QR na máquina afetada. Há alertas de dependências registrados em `docs/npm-audit-3.3.3.json`; esta entrega não é uma certificação de segurança corporativa nem uma promessa de autocorreção universal.
++
++## Documentação histórica da base recebida
++
++Os textos abaixo descrevem versões anteriores e não constituem evidência de validação da 3.3.3.
+ 
+ Versão do Vyzium baseada na 3.2.4, preservando Cotação & Mapas, SQLCipher, Firebase e importações, com hotfix de primeira conexão do WhatsApp em instalação limpa sem abandonar a otimização conservadora de CPU do navegador oculto.
+ 
+--- 3.3.2/backend/compras_engine.py
++++ 3.3.3/backend/compras_engine.py
+@@ -28,7 +28,7 @@
+ from secure_sqlite import connect as secure_connect, key_from_env
+ 
+ 
+-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.2')
++APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.3')
+ DB_SCHEMA_VERSION = 1
+ 
+ def norm(value):
+@@ -836,9 +836,11 @@
+                 raise
+             record.update(status='uncertain' if submitted else 'failed', error=str(exc))
+         finally:
+-            if record:
+-                self.put('messages', record['id'], record)
+-            self.send_lock.release()
++            try:
++                if record:
++                    self.put('messages', record['id'], record)
++            finally:
++                self.send_lock.release()
+         return record
+ 
+     def send(self, body):
+@@ -868,9 +870,11 @@
+                 raise
+             record.update(status='uncertain' if submitted else 'failed', error=str(exc))
+         finally:
+-            if record:
+-                self.put('messages', record['id'], record)
+-            self.send_lock.release()
++            try:
++                if record:
++                    self.put('messages', record['id'], record)
++            finally:
++                self.send_lock.release()
+         return record
+ 
+     def review(self, body):
+--- 3.3.2/backend/crypto_migration.py
++++ 3.3.3/backend/crypto_migration.py
+@@ -364,7 +364,7 @@
+     *,
+     key_hex: str,
+     module_name: str,
+-    app_version: str = os.environ.get('VYZIUM_APP_VERSION', '3.3.2'),
++    app_version: str = os.environ.get('VYZIUM_APP_VERSION', '3.3.3'),
+ ) -> dict[str, Any]:
+     source = Path(source_path).expanduser().resolve()
+     target = Path(target_path).expanduser().resolve()
+--- 3.3.2/backend/engine.py
++++ 3.3.3/backend/engine.py
+@@ -60,7 +60,7 @@
+         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
+ 
+ APP_NAME = "Vyzium"
+-APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.3.2")
++APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.3.3")
+ DB_SCHEMA_VERSION = 1
+ DEFAULT_CONTROL_PRESETS = [
+     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
+--- 3.3.2/backend/secure_sqlite.py
++++ 3.3.3/backend/secure_sqlite.py
+@@ -93,7 +93,11 @@
+             con = cipher_sqlite.connect(uri, uri=True, timeout=timeout, check_same_thread=check_same_thread)
+         else:
+             con = cipher_sqlite.connect(str(target), timeout=timeout, check_same_thread=check_same_thread)
+-        _apply_key(con, key_hex)
++        try:
++            _apply_key(con, key_hex)
++        except Exception:
++            con.close()
++            raise
+         return con
+ 
+     if readonly:
+--- 3.3.2/electron/diagnostics.js
++++ 3.3.3/electron/diagnostics.js
+@@ -5,16 +5,16 @@
+ function redact(s){return String(s??'').replace(/(api[_-]?key|token|secret|password|authorization|cookie|db[_-]?key)([\"'\s:=]+)([^\s\"',;}]+)/ig,'$1$2[REDACTED]').replace(/\b[A-Fa-f0-9]{48,}\b/g,'[REDACTED_HEX]').replace(/\beyJ[A-Za-z0-9._-]{20,}\b/g,'[REDACTED_TOKEN]').replace(/([A-Za-z]:[\\/]+Users[\\/]+)[^\\/\r\n]+/ig,'$1[REDACTED_USER]').replace(/(\/home\/)[^/\r\n]+/g,'$1[REDACTED_USER]').slice(0,20000);}
+ function clean(v,d=0){if(d>5)return '[depth-limit]';if(v==null||typeof v==='boolean'||typeof v==='number')return v;if(typeof v==='string')return redact(v);if(v instanceof Error)return err(v);if(Array.isArray(v))return v.slice(0,100).map(x=>clean(x,d+1));if(typeof v==='object'){const o={};for(const [k,x] of Object.entries(v).slice(0,100))o[k]=/password|token|secret|cookie|authorization|dbkey|keyhex/i.test(k)?'[REDACTED]':clean(x,d+1);return o;}return redact(v);}
+ class FullDiagnostics{
+- constructor(app){this.app=app;this.remoteReporter=null;this.boot=`${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;this.started=new Date().toISOString();this.dir=path.join(app.getPath('userData'),'diagnostics',`run-${this.started.replace(/[:.]/g,'-')}-${this.boot}`);fs.mkdirSync(this.dir,{recursive:true,mode:0o700});this.timeline=path.join(this.dir,'timeline.jsonl');this.errorsFile=path.join(this.dir,'errors.log');this.report=path.join(this.dir,'RELATORIO.txt');this.seq=0;this.stages=[];this.errors=[];}
+- event(event,details={}){const x={at:new Date().toISOString(),seq:++this.seq,boot:this.boot,event:String(event),details:clean(details)};try{fs.appendFileSync(this.timeline,JSON.stringify(x)+'\n',{encoding:'utf8',mode:0o600});}catch(_){}return x;}
+- stage(name,status='OK',details={}){this.stages.push({at:new Date().toISOString(),name:String(name),status:String(status),details:clean(details)});this.event('stage.'+String(name).replace(/\s+/g,'-').toLowerCase(),{status,...details});this.writeReport();}
++ constructor(app,deps={}){this.app=app;this.spawnSync=deps.spawnSync||spawnSync;this.platform=deps.platform||process.platform;this.finalized=false;this.remoteReporter=null;this.boot=`${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;this.started=new Date().toISOString();this.dir=path.join(app.getPath('userData'),'diagnostics',`run-${this.started.replace(/[:.]/g,'-')}-${this.boot}`);try{fs.mkdirSync(this.dir,{recursive:true,mode:0o700});}catch(_){}this.timeline=path.join(this.dir,'timeline.jsonl');this.errorsFile=path.join(this.dir,'errors.log');this.report=path.join(this.dir,'RELATORIO.txt');this.seq=0;this.stages=[];this.errors=[];}
++ event(event,details={}){const x={at:new Date().toISOString(),seq:++this.seq,boot:this.boot,event:String(event),details:clean(details)};try{if(fs.existsSync(this.timeline)&&fs.statSync(this.timeline).size>5*1024*1024)fs.renameSync(this.timeline,this.timeline+'.previous');fs.appendFileSync(this.timeline,JSON.stringify(x)+'\n',{encoding:'utf8',mode:0o600});}catch(_){}return x;}
++ stage(name,status='OK',details={}){this.stages.push({at:new Date().toISOString(),name:String(name),status:String(status),details:clean(details)});if(this.stages.length>200)this.stages.shift();this.event('stage.'+String(name).replace(/\s+/g,'-').toLowerCase(),{status,...details});this.writeReport();}
+  setRemoteReporter(reporter){this.remoteReporter=reporter||null;}
+- error(source,e,details={}){try{this.remoteReporter?.captureException?.(e,{source:String(source),details:clean(details)});}catch(_){}const x={at:new Date().toISOString(),source:String(source),error:err(e),details:clean(details)};this.errors.push(x);this.event('error',x);try{fs.appendFileSync(this.errorsFile,JSON.stringify(x,null,2)+'\n','utf8');}catch(_){}this.writeReport();}
++ error(source,e,details={}){try{this.remoteReporter?.captureException?.(e,{source:String(source),details:clean(details)});}catch(_){}const x={at:new Date().toISOString(),source:String(source),error:err(e),details:clean(details)};this.errors.push(x);if(this.errors.length>200)this.errors.shift();this.event('error',x);try{if(fs.existsSync(this.errorsFile)&&fs.statSync(this.errorsFile).size>2*1024*1024)fs.renameSync(this.errorsFile,this.errorsFile+'.previous');fs.appendFileSync(this.errorsFile,JSON.stringify(x,null,2)+'\n','utf8');}catch(_){}this.writeReport();}
+  system(){const x={platform:process.platform,arch:process.arch,node:process.version,electron:process.versions.electron,chromium:process.versions.chrome,appVersion:this.app.getVersion(),packaged:this.app.isPackaged,execPath:process.execPath,resourcesPath:process.resourcesPath,userData:this.app.getPath('userData'),appData:this.app.getPath('appData'),temp:this.app.getPath('temp'),env:{LOCALAPPDATA:Boolean(process.env.LOCALAPPDATA),PROGRAMFILES:Boolean(process.env.PROGRAMFILES),PROGRAMFILES_X86:Boolean(process.env['PROGRAMFILES(X86)'])},os:{type:os.type(),release:os.release(),version:os.version?.(),totalmem:os.totalmem(),freemem:os.freemem(),cpuModels:[...new Set(os.cpus().map(c=>c.model))]}};try{fs.writeFileSync(path.join(this.dir,'system.json'),JSON.stringify(clean(x),null,2),'utf8');}catch(_){}this.event('system.snapshot',x);}
+- processes(){if(process.platform!=='win32')return;try{const r=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',"Get-CimInstance Win32_Process | Where-Object {$_.Name -match 'Vyzium|chrome|msedge|powershell|followup|compras'} | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true,timeout:8000});fs.writeFileSync(path.join(this.dir,'processes.json'),redact(r.stdout||'[]')||'[]','utf8');this.event('process.snapshot',{exitCode:r.status,stderr:redact(r.stderr||'')});}catch(e){this.error('process.snapshot',e);}}
++ processes(){if(this.platform!=='win32')return;try{const r=this.spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',"Get-CimInstance Win32_Process | Where-Object {$_.Name -match 'Vyzium|chrome|msedge|powershell|followup|compras'} | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true,timeout:8000});fs.writeFileSync(path.join(this.dir,'processes.json'),redact(r.stdout||'[]')||'[]','utf8');this.event('process.snapshot',{exitCode:r.status,stderr:redact(r.stderr||'')});}catch(e){this.error('process.snapshot',e);}}
+  writeReport(){const a=['VYZIUM - RELATORIO DE DIAGNOSTICO INTEGRAL',`Versao: ${this.app.getVersion()}`,`Inicio: ${this.started}`,`Boot: ${this.boot}`,'','LINHA DO TEMPO RESUMIDA'];for(const x of this.stages)a.push(`[${x.status}] ${x.at} - ${x.name}${Object.keys(x.details||{}).length?' | '+redact(JSON.stringify(x.details)):''}`);a.push('',`ERROS CAPTURADOS: ${this.errors.length}`);for(const x of this.errors.slice(-30))a.push(`[ERRO] ${x.at} ${x.source}: ${x.error?.message||'sem mensagem'}`);a.push('','Detalhes: timeline.jsonl, system.json, processes.json, errors.log, hidden-browser.log e whatsapp-debug.jsonl.');try{fs.writeFileSync(this.report,a.join('\r\n'),'utf8');}catch(_){}}
+  copy(source,name){try{if(source&&fs.existsSync(source))fs.copyFileSync(source,path.join(this.dir,name));}catch(e){this.error('diagnostics.copy',e,{name});}}
+- bundle(){if(process.platform!=='win32')return null;try{const out=path.join(path.dirname(this.dir),`Vyzium-Diagnostico-${this.boot}.zip`);const esc=x=>String(x).replace(/'/g,"''");const cmd=`Compress-Archive -LiteralPath '${esc(this.dir)}\\*' -DestinationPath '${esc(out)}' -Force`;const r=spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',cmd],{encoding:'utf8',windowsHide:true,timeout:30000});this.event('diagnostics.bundle',{output:out,exitCode:r.status,stderr:redact(r.stderr||'')});return r.status===0?out:null;}catch(e){this.error('diagnostics.bundle',e);return null;}}
+- finalize(extra={}){this.event('diagnostics.finalize',extra);this.processes();this.writeReport();return this.bundle();}
++ bundle(){if(this.platform!=='win32')return null;try{const out=path.join(path.dirname(this.dir),`Vyzium-Diagnostico-${this.boot}.zip`);const esc=x=>String(x).replace(/'/g,"''");const cmd=`Compress-Archive -LiteralPath '${esc(this.dir)}' -DestinationPath '${esc(out)}' -Force`;const r=this.spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',cmd],{encoding:'utf8',windowsHide:true,timeout:30000});this.event('diagnostics.bundle',{output:out,exitCode:r.status,stderr:redact(r.stderr||'')});return r.status===0&&fs.existsSync(out)?out:null;}catch(e){this.error('diagnostics.bundle',e);return null;}}
++ finalize(extra={}){if(this.finalized)return null;this.finalized=true;this.event('diagnostics.finalize',extra);this.processes();this.writeReport();return this.bundle();}
+ }
+ module.exports={FullDiagnostics,clean,redact};
+--- 3.3.2/electron/main.js
++++ 3.3.3/electron/main.js
+@@ -24,6 +24,7 @@
+ let sentryReporter;
+ let workspaceServicesStarted = false;
+ let quitting = false;
++let shutdownPromise = null;
+ let updating = false;
+ let activeRequests = 0;
+ let navigationBusy = false;
+@@ -532,6 +533,7 @@
+ async function stopWorkspaceServices() {
+   await stopAllEngines();
+   await Promise.resolve(whatsapp?.shutdown()).catch(() => {});
++  try { if (whatsapp?.auditFile) fullDiagnostics?.copy(whatsapp.auditFile, 'whatsapp-debug.jsonl'); } catch (_) {}
+   if (whatsappBridge?.server) {
+     await new Promise(resolve => whatsappBridge.server.close(() => resolve())).catch(() => {});
+   }
+@@ -844,11 +846,19 @@
+ 
+ app.on('before-quit', event => {
+   try { if (whatsapp?.auditFile) fullDiagnostics?.copy(whatsapp.auditFile, 'whatsapp-debug.jsonl'); } catch (_) {}
+-  fullDiagnostics?.finalize({reason:'before-quit'});
+-  if (quitting) return;
++  if (quitting) {
++    try { fullDiagnostics?.finalize({reason:'before-quit'}); } catch (_) {}
++    return;
++  }
+   event.preventDefault();
++  if (shutdownPromise) return;
+   app.isQuitting = true;
+-  Promise.resolve(stopWorkspaceServices()).finally(() => {
++  shutdownPromise = Promise.resolve(stopWorkspaceServices()).catch(error => {
++    try { fullDiagnostics?.error('app.shutdown', error); } catch (_) {}
++  }).finally(() => {
++    // Stop the browser before running diagnostic compression. Finalize is
++    // idempotent, including the second before-quit raised by app.quit().
++    try { fullDiagnostics?.finalize({reason:'before-quit'}); } catch (_) {}
+     quitting = true;
+     app.quit();
+   });
+--- 3.3.2/electron/security-manager.js
++++ 3.3.3/electron/security-manager.js
+@@ -2,6 +2,7 @@
+ 
+ const fs = require('fs');
+ const path = require('path');
++const crypto = require('crypto');
+ const {
+   generateRootKey,
+   deriveModuleKey,
+@@ -423,9 +424,10 @@
+               ['validate-db', '--path', target, '--module', moduleName],
+               { VYZIUM_DB_KEY_HEX: keyHex }
+             );
+-          } catch (_) {
+-            quarantined = this._quarantineFailedMigrationTarget(moduleName, target, workspaceId);
+-            targetExists = false;
++          } catch (error) {
++            // An active database contains post-migration customer changes. A
++            // timeout, wrong key or lock must never roll it back to legacy data.
++            throw new Error(`O banco ativo de ${moduleName} não pôde ser validado. Os arquivos atuais foram preservados. Detalhe: ${error?.message || error}`);
+           } finally {
+             keyHex = '';
+           }
+--- 3.3.2/electron/whatsapp-hidden-browser.ps1
++++ 3.3.3/electron/whatsapp-hidden-browser.ps1
+@@ -433,7 +433,8 @@
+ $stopPath = [IO.Path]::GetFullPath($StopFile)
+ $stopParent = Split-Path -Parent $stopPath
+ if ($stopParent) { New-Item -ItemType Directory -Path $stopParent -Force | Out-Null }
+-Remove-Item -LiteralPath $stopPath -Force -ErrorAction SilentlyContinue
++# The unique stop flag is created by Node; never erase a cancellation that
++# arrived while PowerShell was compiling the Win32 helper.
+ 
+ # A reutilização de um perfil LocalAuth deixa DevToolsActivePort no disco em
+ # algumas versões do Chromium. Nunca aceite esse arquivo de uma execução anterior:
+@@ -466,6 +467,7 @@
+ $exitCode = 0
+ 
+ try {
++    if (Test-Path -LiteralPath $stopPath) { throw "Inicialização cancelada pelo Vyzium." }
+     $launch = [VyziumHiddenChromeV3.Native]::LaunchSuspended($browser, $cmdLine, $working)
+     [VyziumHiddenChromeV3.Native]::StartGuard($launch.ProcessId)
+     [VyziumHiddenChromeV3.Native]::Resume($launch)
+@@ -475,6 +477,7 @@
+     $port = 0
+ 
+     while ([DateTime]::UtcNow -lt $deadline) {
++        if (Test-Path -LiteralPath $stopPath) { throw "Inicialização cancelada pelo Vyzium." }
+         if (Test-Path -LiteralPath $devToolsFile -PathType Leaf) {
+             try {
+                 $lines = @(Get-Content -LiteralPath $devToolsFile -ErrorAction Stop)
+--- 3.3.2/electron/whatsapp.js
++++ 3.3.3/electron/whatsapp.js
+@@ -349,6 +349,9 @@
+     this.client = null;
+     this.starting = null;
+     this.startupWatchdog = null;
++    this.authenticatedWatchdog = null;
++    this.closed = false;
++    this.protectedProfiles = new Set();
+     this.startupTimeoutMs = Number(deps.startupTimeoutMs || 120000);
+     this.qrWatchdog = null;
+     // WhatsApp Web rotates the QR roughly every 20s. If no new `qr` event and no
+@@ -391,6 +394,8 @@
+     this.selfHealFile = path.join(this.dataDir, 'whatsapp-self-heal.json');
+     this.selfHeal = this._loadSelfHealState();
+     this.startupFailureStreak = 0;
++    this.maxRecoveryCycles = Math.max(2, Number(deps.maxRecoveryCycles) || 3);
++    this.recoveryCooldownMs = Math.max(1000, Number(deps.recoveryCooldownMs) || 300000);
+     this.maxStartupAttempts = Math.max(2, Math.min(5, Number(deps.maxStartupAttempts || 3)));
+ 
+     // Session state is transactional: an established profile remains active while
+@@ -454,7 +459,8 @@
+   _canRepairPendingProfile(reason) {
+     const current = this._validClientId(this.authClientId);
+     const committed = this._validClientId(this.sessionState?.activeClientId);
+-    if (!current || current === committed) return false;
++    if (!current || current === committed || this.protectedProfiles.has(current) ||
++        this.selfHeal.authenticatedProfile === current || (this.selfHeal.profile === current && this.selfHeal.lastReadyAt)) return false;
+     return this.selfHeal?.destructiveRecoveryUsed !== true;
+   }
+ 
+@@ -470,19 +476,20 @@
+     this._audit('self-heal.profile-repair-start', {generation, reason, source, profile:oldClientId});
+ 
+     const stalledStarting = this.starting;
+-    this.generation++;
++    const recoveryGeneration = ++this.generation;
+     this.client = null;
+     this.starting = null;
+     this._clearStartupWatchdog();
+     this._clearQrWatchdog();
+     if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
+     await this._disposeClient(client, 10000);
+-    if (this.userPaused || this.busy) return false;
++    if (recoveryGeneration !== this.generation || this.closed || this.userPaused || this.busy) return false;
+ 
+     // The profile is not authenticated/committed. Quarantine it instead of
+     // deleting it, then create exactly one clean pending profile. Any committed
+     // profile remains untouched and available for rollback.
+     await this._quarantineAuthProfile(oldClientId, `self-heal-${String(reason || 'startup').replace(/[^a-z0-9_-]/gi,'-').slice(0,40)}`);
++    if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return false;
+     const freshClientId = this._newAuthClientId();
+     this._setPendingSession(freshClientId, {reason:`self-heal-${reason}`, previousPending:oldClientId});
+     this._setAuthClientId(freshClientId, false);
+@@ -490,9 +497,10 @@
+     this._saveSelfHealState();
+     this.state = {status:'offline', qr:null, account:null, error:null};
+     this._audit('self-heal.profile-repair-restart', {reason, source, freshClientId});
++    const nextGeneration = this.generation + 1;
+     this._connectInternal({selfHealRecovery:true, stallRetries:0, rotateProfileOnStall:false}).catch(error => {
+       this._audit('self-heal.profile-repair-restart-error', {reason, source, error});
+-      if (!this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
++      if (nextGeneration === this.generation && !this.closed && !this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
+         this.state = {status:'error', qr:null, account:null, error:'O Vyzium tentou reparar automaticamente o ambiente do WhatsApp, mas a inicialização ainda falhou. O diagnóstico foi preservado para análise.'};
+       }
+     });
+@@ -800,8 +808,17 @@
+       try {
+         fs.renameSync(source, destination);
+       } catch (_) {
+-        fs.cpSync(source, destination, {recursive:true, force:false, errorOnExist:false});
+-        fs.rmSync(source, {recursive:true, force:true, maxRetries:12, retryDelay:250});
++        // Publish only a completed copy. A failed copy must not leave a
++        // session-* directory that the next boot mistakes for a usable profile.
++        const staging = `${destination}.migrating-${crypto.randomBytes(6).toString('hex')}`;
++        try {
++          fs.cpSync(source, staging, {recursive:true, force:false, errorOnExist:true});
++          fs.renameSync(staging, destination);
++        } catch (error) {
++          try { fs.rmSync(staging, {recursive:true, force:true}); } catch (_) {}
++          throw error;
++        }
++        // Keep the original as a rollback copy on cross-volume migrations.
+       }
+       this._audit?.('profile.runtime-migrated', {
+         clientId:this.authClientId,
+@@ -810,9 +827,9 @@
+       });
+     } catch (error) {
+       this._audit?.('profile.runtime-migration-error', {clientId:this.authClientId, error});
+-      // Do not invalidate a proven session marker just because migration failed.
+-      // initialize() will surface the real browser error and the user can request
+-      // a fresh QR, which rotates to a clean local-only profile.
++      // Continue using the original profile, never an empty destination.
++      // The next process start can retry migration when permissions recover.
++      this.profileDataDir = this.dataDir;
+     }
+   }
+ 
+@@ -935,6 +952,8 @@
+   }
+ 
+   _clearStartupWatchdog() {
++    if (this.authenticatedWatchdog) clearTimeout(this.authenticatedWatchdog);
++    this.authenticatedWatchdog = null;
+     if (this.startupWatchdog) clearTimeout(this.startupWatchdog);
+     this.startupWatchdog = null;
+   }
+@@ -959,6 +978,8 @@
+ 
+   async _disposeClient(client, timeout = 10000) {
+     if (!client) return;
++    clearInterval(client.__vyziumAuditTimer);
++    client.__vyziumAuditTimer = null;
+     const browser = client.pupBrowser;
+     const hiddenBrowser = client.__vyziumHiddenBrowser || null;
+     let child = null;
+@@ -1024,19 +1045,20 @@
+     // not the WhatsApp credentials. The same LocalAuth profile is reopened in
+     // a normal Chrome process so the QR/auth flow can continue.
+     const stalledStarting = this.starting;
+-    this.generation++;
++    const recoveryGeneration = ++this.generation;
+     this.client = null;
+     this.starting = null;
+     this._clearStartupWatchdog();
+     this._clearQrWatchdog();
+     if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
+     await this._disposeClient(client, 8000);
+-    if (this.userPaused || this.busy) return;
++    if (recoveryGeneration !== this.generation || this.closed || this.userPaused || this.busy) return;
+ 
+     this.state = {status:'offline', qr:null, account:null, error:null};
+     this._audit('browser.storage-fallback-restart', {source, mode:'headed'});
++    const nextGeneration = this.generation + 1;
+     this._connectInternal({browserMode:'headed', reason:'fatal-cache-storage'}).catch(error => {
+-      if (!this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
++      if (nextGeneration === this.generation && !this.closed && !this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
+         this.state = {
+           status:'error', qr:null, account:null,
+           error:error?.message || 'O Chrome não conseguiu inicializar o armazenamento necessário do WhatsApp.'
+@@ -1064,13 +1086,13 @@
+     // active session because all event handlers are generation/client guarded.
+     const stalledClient = this.client;
+     const stalledStarting = this.starting;
+-    this.generation++;
++    const recoveryGeneration = ++this.generation;
+     this.client = null;
+     this.starting = null;
+     if (stalledStarting && typeof stalledStarting.catch === 'function') stalledStarting.catch(() => {});
+ 
+     await this._disposeClient(stalledClient, 8000);
+-    if (this.userPaused || this.busy) return;
++    if (recoveryGeneration !== this.generation || this.closed || this.userPaused || this.busy) return;
+ 
+     const retriesLeft = Math.max(0, Number(options.stallRetries || 0));
+     this._audit('self-heal.watchdog-eligibility', {retriesLeft, rotateProfileOnStall:Boolean(options.rotateProfileOnStall), stalledClient:Boolean(stalledClient), canRepair:this._canRepairPendingProfile('startup-stall'), authClientId:this.authClientId, activeClientId:this.sessionState?.activeClientId || null, firstConnectionPending:this.firstConnectionPending});
+@@ -1083,6 +1105,7 @@
+       this.selfHeal = {...this.selfHeal, destructiveRecoveryUsed:true, destructiveRecoveryKey:key, lastRecoveryAt:new Date().toISOString(), lastRecoveryReason:'startup-stall'};
+       this._saveSelfHealState();
+       await this._quarantineAuthProfile(oldClientId, 'self-heal-startup-stall');
++      if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return;
+       const freshClientId = this._newAuthClientId();
+       this._setPendingSession(freshClientId, {reason:'self-heal-startup-stall', previousPending:oldClientId});
+       this._setAuthClientId(freshClientId, false);
+@@ -1092,6 +1115,7 @@
+       return;
+     }
+ 
++    this._recordStartupFailure('startup-stall');
+     this.state = {
+       status:'error',
+       qr:null,
+@@ -1100,56 +1124,80 @@
+     };
+   }
+ 
++  _recordStartupFailure(reason) {
++    const failures = Math.max(0, Number(this.selfHeal.startupFailures) || 0) + 1;
++    const cooling = failures >= this.maxRecoveryCycles;
++    this.selfHeal = {...this.selfHeal, startupFailures:cooling ? 0 : failures,
++      nextRetryAt:cooling ? Date.now() + this.recoveryCooldownMs : 0,
++      lastFailureReason:String(reason || 'startup').slice(0, 160)};
++    this._saveSelfHealState();
++    if (cooling) this._audit('self-heal.cooldown', {retryAt:this.selfHeal.nextRetryAt});
++  }
++
++  _armAuthenticatedWatchdog(generation, client) {
++    if (this.authenticatedWatchdog) clearTimeout(this.authenticatedWatchdog);
++    this.authenticatedWatchdog = setTimeout(() => {
++      this.authenticatedWatchdog = null;
++      if (generation !== this.generation || this.client !== client || this.closed || this.userPaused || this.busy || this.state.status !== 'authenticated') return;
++      this._audit('watchdog.authenticated-fired', {generation});
++      this._recordStartupFailure('authenticated-stall');
++      // Preserve this profile: scanning the QR may already have persisted credentials.
++      if (this.selfHeal.nextRetryAt > Date.now()) {
++        this._expireAuthenticatedClient(generation, client).catch(error => this._audit('authenticated.cleanup-error', {error}));
++      } else {
++        this.restartConnection().catch(() => this._scheduleReconnect(false));
++      }
++    }, Math.max(25, this.authenticatedTimeoutMs));
++    this.authenticatedWatchdog.unref?.();
++  }
++
++  async _expireAuthenticatedClient(generation, client) {
++    if (generation !== this.generation || this.client !== client) return;
++    const stoppedGeneration = ++this.generation;
++    this.client = null;
++    this.starting = null;
++    await this._disposeClient(client);
++    if (stoppedGeneration !== this.generation || this.closed || this.userPaused) return;
++    this.state = {status:'error', qr:null, account:null, error:'A sincronização do WhatsApp não terminou. A sessão foi preservada; nova tentativa automática em alguns minutos.'};
++    this._scheduleReconnect(false);
++  }
++
+   _scheduleReconnect(immediate = false) {
+-    if (this.userPaused || this.requiresNewQr || this.reconnectTimer || this.starting || this.busy) return;
++    if (this.closed || this.userPaused || this.requiresNewQr || this.reconnectTimer || this.starting || this.busy) return;
+     if (['starting','qr','authenticated'].includes(this.state.status)) return;
+     const attempt = this.reconnectAttempts++;
+-    const wait = immediate ? 0 : Math.min(this.reconnectMaxMs, this.reconnectBaseMs * Math.max(1, 2 ** Math.min(attempt, 4)));
++    const backoff = immediate ? 0 : Math.min(this.reconnectMaxMs, this.reconnectBaseMs * Math.max(1, 2 ** Math.min(attempt, 4)));
++    const cooldown = Math.max(0, Math.min(this.recoveryCooldownMs, (Number(this.selfHeal.nextRetryAt) || 0) - Date.now()));
++    const wait = Math.max(backoff, cooldown);
+     this._audit('reconnect.scheduled', {attempt, wait, immediate});
+     this.reconnectTimer = setTimeout(() => {
+       this.reconnectTimer = null;
+-      if (this.userPaused || this.busy) return;
++      if (this.closed || this.userPaused || this.requiresNewQr || this.busy) return;
+       this._connectInternal().catch(() => this._scheduleReconnect(false));
+     }, wait);
+     this.reconnectTimer.unref?.();
+   }
+ 
+   startMonitoring() {
+-    if (this.monitorTimer) return;
+-    this.monitorTimer = setInterval(async () => {
+-      if (this.userPaused || this.busy || this.starting) return;
+-      if (this.state.status === 'qr') return;
+-      if (this.state.status === 'authenticated') {
+-        if (!this.authenticatedAt) this.authenticatedAt = Date.now();
+-        if (Date.now() - this.authenticatedAt < this.authenticatedTimeoutMs) return;
+-        // A session can occasionally authenticate but never reach `ready`.
+-        // Treat that as a stalled synchronization and renew it silently instead
+-        // of leaving a batch waiting forever at the same percentage.
+-        try { await this.restartConnection(); }
+-        catch (_) { this._scheduleReconnect(false); }
+-        return;
+-      }
+-      if (this.state.status === 'ready') {
+-        const healthy = await this.connectionHealthy();
+-        if (healthy) {
+-          this.consecutiveHealthFailures = 0;
+-          this.reconnectAttempts = 0;
+-          return;
+-        }
+-        this.consecutiveHealthFailures += 1;
+-        // One delayed getState() is not enough to tear down a healthy-looking
+-        // session. Only consecutive failures promote it to offline.
+-        if (this.consecutiveHealthFailures < this.healthFailureThreshold) return;
+-        this.readyAt = 0;
+-        this.state = {status:'offline', qr:null, account:null, error:'Conexão interrompida. O Vyzium está tentando restaurá-la automaticamente.'};
+-      }
+-      if (['offline','error'].includes(this.state.status)) this._scheduleReconnect(false);
++    if (this.closed || this.monitorTimer) return;
++    this.monitorTimer = setInterval(() => {
++      this.backgroundHealthCheck().catch(error => this._audit('monitor.health-error', {error}));
+     }, this.healthIntervalMs);
+     this.monitorTimer.unref?.();
+   }
+ 
+   async backgroundHealthCheck() {
++    if (this.healthCheckPromise) return this.healthCheckPromise;
++    const pending = this._backgroundHealthCheckInternal();
++    this.healthCheckPromise = pending;
++    try { return await pending; }
++    finally { if (this.healthCheckPromise === pending) this.healthCheckPromise = null; }
++  }
++
++  async _backgroundHealthCheckInternal() {
+     this.startMonitoring();
++    const generation = this.generation;
++    if (this.closed) return {healthy:false, paused:true, status:'paused'};
+     if (this.userPaused) return {healthy:false, paused:true, status:'paused'};
+     if (this.busy || this.starting || ['qr','starting'].includes(this.state.status)) {
+       return {healthy:false, paused:false, status:this.state.status};
+@@ -1164,6 +1212,9 @@
+     }
+     if (this.state.status === 'ready') {
+       const healthy = await this.connectionHealthy();
++      if (generation !== this.generation || this.closed || this.userPaused || this.state.status !== 'ready') {
++        return {healthy:false, paused:this.userPaused || this.closed, status:this.state.status};
++      }
+       if (healthy) {
+         this.consecutiveHealthFailures = 0;
+         this.reconnectAttempts = 0;
+@@ -1207,6 +1258,9 @@
+   }
+ 
+   connect() {
++    if (this.closed) return this.status();
++    this.selfHeal = {...this.selfHeal, startupFailures:0, nextRetryAt:0};
++    this._saveSelfHealState();
+     this.userPaused = false;
+     this.consecutiveHealthFailures = 0;
+     this._savePausedPreference(false);
+@@ -1221,10 +1275,11 @@
+     const maxAttempts = this.maxStartupAttempts;
+     let lastError = null;
+     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
++      if (generation !== this.generation || this.closed || this.userPaused) return;
+       try {
+         this._audit('initialize.attempt', {generation, attempt, maxAttempts});
+         const result = await this.initialize(generation, options);
+-        this.startupFailureStreak = 0;
++        if (generation === this.generation) this.startupFailureStreak = 0;
+         return result;
+       } catch (error) {
+         lastError = error;
+@@ -1249,13 +1304,16 @@
+   }
+ 
+   async _connectInternal(options = {}) {
+-    if (this.userPaused || this.starting || ['starting','qr','authenticated','ready'].includes(this.state.status)) return this.status();
++    if (this.closed || this.userPaused || this.starting || ['starting','qr','authenticated','ready'].includes(this.state.status)) return this.status();
++    if (Number(this.selfHeal.nextRetryAt) > Date.now()) { this._scheduleReconnect(false); return this.status(); }
++    this.authenticatedAt = 0;
+     this.state = {status:'starting', qr:null, account:null, error:null};
+     const generation = ++this.generation;
+     this._audit('connection.start', {generation, profile:this.authClientId, options});
+     const starting = this._initializeWithRecovery(generation, options)
+       .catch(error => {
+-        if (generation === this.generation && !this.userPaused) {
++        if (generation === this.generation && !this.closed && !this.userPaused) {
++          this._recordStartupFailure(classifyRecoverableStartupError(error));
+           this.state = {
+             status:'error',
+             qr:null,
+@@ -1281,8 +1339,9 @@
+   }
+ 
+   async initialize(generation, options = {}) {
++    if (generation !== this.generation || this.closed || this.userPaused) return;
+     if (this.client) await this._disposeClient(this.client, 10000);
+-    if (generation !== this.generation) return;
++    if (generation !== this.generation || this.closed || this.userPaused) return;
+ 
+     const {Client, LocalAuth} = this.deps.library || require('whatsapp-web.js');
+     const qrCode = this.deps.qrCode || require('qrcode');
+@@ -1347,6 +1406,11 @@
+         parentPid:process.pid,
+         spawnFn:this.deps.spawn || spawn
+       });
++      if (generation !== this.generation || this.closed || this.userPaused) {
++        const stopLauncher = this.deps.stopHiddenHeadedBrowser || stopHiddenHeadedBrowser;
++        await Promise.resolve(stopLauncher(hiddenBrowser, 7000)).catch(() => {});
++        return;
++      }
+       puppeteerOptions = {
+         headless:false,
+         browserWSEndpoint:hiddenBrowser.endpoint
+@@ -1397,6 +1461,7 @@
+       timer.unref?.();
+     };
+     const attachRuntimeAudit = () => {
++      if (generation !== this.generation || this.client !== client || this.closed) return;
+       try {
+         if (client.pupBrowser && client.pupBrowser !== attachedBrowser) {
+           attachedBrowser = client.pupBrowser;
+@@ -1437,7 +1502,10 @@
+             this._audit('page.console', {generation, type:message.type?.(), text});
+             triggerFatalStorageRecovery('console', text);
+           });
+-          attachedPage.on?.('pageerror', error => this._audit('page.error', {generation, error}));
++          attachedPage.on?.('pageerror', error => {
++            this._audit('page.error', {generation, error});
++            triggerFatalStorageRecovery('pageerror', error?.message || error);
++          });
+           attachedPage.on?.('requestfailed', request => this._audit('page.request-failed', {
+             generation,
+             url:String(request.url?.() || '').split('?')[0].slice(0, 500),
+@@ -1449,6 +1517,8 @@
+     };
+     const runtimeAuditTimer = setInterval(attachRuntimeAudit, 100);
+     runtimeAuditTimer.unref?.();
++    client.__vyziumAuditTimer = runtimeAuditTimer;
++    attachRuntimeAudit();
+ 
+     client.on('qr', async value => {
+       if (this.client !== client || generation !== this.generation) return;
+@@ -1465,7 +1535,9 @@
+         }
+       } catch (error) {
+         this._audit('client.qr-image-error', {generation, sequence, error});
+-        this.state.error = 'Não foi possível gerar o QR. Tente reconectar.';
++        if (generation === this.generation && this.client === client && sequence === qrSequence && this.state.status === 'qr') {
++          this.state.error = 'Não foi possível gerar o QR. Tente reconectar.';
++        }
+       }
+     });
+ 
+@@ -1474,6 +1546,10 @@
+         this._clearStartupWatchdog();
+         this._clearQrWatchdog();
+         this.authenticatedAt = Date.now();
++        this.protectedProfiles.add(this.authClientId);
++        this.selfHeal = {...this.selfHeal, authenticatedProfile:this.authClientId};
++        this._saveSelfHealState();
++        this._armAuthenticatedWatchdog(generation, client);
+         this.state = {status:'authenticated', qr:null, account:null, error:null};
+         this._audit('client.authenticated', {generation});
+       }
+@@ -1491,6 +1567,7 @@
+         this.consecutiveHealthFailures = 0;
+         this.reconnectAttempts = 0;
+         this._clearReconnectTimer();
++        this.protectedProfiles.add(this.authClientId);
+         this._resetSelfHealForReady();
+         try { this._markSessionEstablished(); }
+         catch (_) {
+@@ -1528,6 +1605,7 @@
+               : 'O novo perfil do WhatsApp não foi autorizado. A sessão anterior foi preservada; gere um novo QR Code para tentar novamente.'
+           };
+         }
++        this._retireFailedClient(client, generation).catch(error => this._audit('client.auth-cleanup-error', {error}));
+       }
+     });
+ 
+@@ -1568,7 +1646,7 @@
+           account:null,
+           error:`WhatsApp desconectado${reasonText ? ` (${reasonText})` : ''}. O Vyzium tentará restaurar a conexão automaticamente.`
+         };
+-        this._scheduleReconnect(false);
++        this._retireFailedClient(client, generation).catch(error => this._audit('client.disconnect-cleanup-error', {error}));
+       }
+     });
+     client.on('loading_screen', (percent, message) => this._audit('client.loading-screen', {generation, percent, message}));
+@@ -1585,6 +1663,8 @@
+       this._audit('client.initialize-resolved', {generation});
+     } catch (error) {
+       this._audit('client.initialize-rejected', {generation, error});
++      if (isFatalCacheStorageError(error?.message || error) &&
++          await this._repairPendingProfileOnce(generation, client, 'storage', 'initialize')) return;
+       throw error;
+     } finally {
+       clearInterval(runtimeAuditTimer);
+@@ -1592,18 +1672,36 @@
+     }
+   }
+ 
++  async _retireFailedClient(client, generation) {
++    if (generation !== this.generation || this.client !== client) return;
++    const terminalState = {...this.state};
++    const cleanupGeneration = ++this.generation;
++    this.client = null;
++    this.starting?.catch?.(() => {});
++    this.starting = null;
++    this.state = {status:'starting', qr:null, account:null, error:terminalState.error};
++    this._clearReconnectTimer();
++    await this._disposeClient(client, 10000);
++    if (cleanupGeneration !== this.generation || this.closed || this.userPaused) return;
++    this.state = terminalState;
++    this._recordStartupFailure('connection-ended');
++    this._scheduleReconnect(false);
++  }
++
+   async _cleanupAfterLogout(client, generation) {
+     if (generation !== this.generation || this.client !== client) return;
+     const loggedOutClientId = this.authClientId;
+-    this.generation++;
++    const cleanupGeneration = ++this.generation;
+     this.client = null;
+     this.starting = null;
+     this._clearStartupWatchdog();
+     this._clearQrWatchdog();
+     this._audit('logout.cleanup-start', {oldGeneration:generation, loggedOutClientId});
+     await this._disposeClient(client, 10000);
++    if (cleanupGeneration !== this.generation || this.closed || this.userPaused) return;
+     await this._quarantineAuthProfile(loggedOutClientId, 'logout');
+ 
++    if (cleanupGeneration !== this.generation || this.closed || this.userPaused) return;
+     const state = {...this.sessionState};
+     if (state.activeClientId === loggedOutClientId) state.activeClientId = null;
+     if (state.pendingClientId === loggedOutClientId) state.pendingClientId = null;
+@@ -1616,6 +1714,8 @@
+   }
+ 
+   async restartConnection() {
++    if (this.closed || this.userPaused) return this.status();
++    this._clearReconnectTimer();
+     if (this.busy) throw new Error('Existe um envio em andamento.');
+     this._audit('action.restart-connection');
+     this._clearStartupWatchdog();
+@@ -1630,6 +1730,7 @@
+     const generation = this.generation;
+     this.state = {status:'starting', qr:null, account:null, error:null};
+     if (oldClient) await this._disposeClient(oldClient, 10000);
++    if (generation !== this.generation || this.closed || this.userPaused) return this.status();
+ 
+     const starting = this._initializeWithRecovery(generation)
+       .catch(error => {
+@@ -1653,6 +1754,7 @@
+   }
+ 
+   async newQr() {
++    if (this.closed) return this.status();
+     if (this.busy) throw new Error('Aguarde o envio terminar antes de gerar um novo QR Code.');
+     this._audit('action.new-qr', {profile:this.authClientId, active:this.sessionState?.activeClientId || null});
+ 
+@@ -1665,7 +1767,7 @@
+     this.reconnectAttempts = 0;
+     this.authFailureCount = 0;
+     this.consecutiveHealthFailures = 0;
+-    this.selfHeal = {...this.selfHeal, destructiveRecoveryUsed:false, destructiveRecoveryKey:null, explicitQrCycleAt:new Date().toISOString()};
++    this.selfHeal = {...this.selfHeal, destructiveRecoveryUsed:false, destructiveRecoveryKey:null, startupFailures:0, nextRetryAt:0, explicitQrCycleAt:new Date().toISOString()};
+     this._saveSelfHealState();
+     this.readyAt = 0;
+     this.authenticatedAt = 0;
+@@ -1675,23 +1777,26 @@
+     // intact on disk until a different pending profile reaches `ready`.
+     const pendingStart = this.starting;
+     const oldClient = this.client;
+-    this.generation++;
++    const actionGeneration = ++this.generation;
+     this.client = null;
+     this.starting = null;
+     if (pendingStart && typeof pendingStart.catch === 'function') pendingStart.catch(() => {});
+     this.state = {status:'starting', qr:null, account:null, error:null};
+     await this._disposeClient(oldClient, 8000);
++    if (actionGeneration !== this.generation || this.closed || this.userPaused) return this.status();
+ 
+     const freshClientId = this._newAuthClientId();
+     const disposablePending = this._setPendingSession(freshClientId, {reason:'explicit-new-qr'});
+     this._setAuthClientId(freshClientId, false);
+     if (disposablePending) await this._cleanupAuthProfile(disposablePending);
++    if (actionGeneration !== this.generation || this.closed || this.userPaused) return this.status();
+     this._audit('new-qr.profile-prepared', {activeClientId:this.sessionState?.activeClientId || null, freshClientId, pending:true});
+ 
+     this.state = {status:'offline', qr:null, account:null, error:null};
+     this.startMonitoring();
++    const nextGeneration = this.generation + 1;
+     this._connectInternal({rotateProfileOnStall:true, stallRetries:1}).catch(error => {
+-      if (!this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
++      if (nextGeneration === this.generation && !this.closed && !this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
+         this.state = {
+           status:'error',
+           qr:null,
+@@ -1725,20 +1830,22 @@
+   }
+ 
+   async waitReady(timeout = 120000) {
+-    if (this.userPaused || this.state.status === 'paused') throw new Error('Conexão pausada. Clique em Retomar conexão para continuar.');
++    if (this.closed || this.userPaused || this.state.status === 'paused') throw new Error('Conexão pausada. Clique em Retomar conexão para continuar.');
+ 
+     // Reuse a healthy session. If it is degraded, restart it once and let the
+     // monitor keep it alive in the background from then on.
+     if (this.state.status === 'ready') {
+       if (!(await this.connectionHealthy())) await this.restartConnection();
+     } else {
+-      this.connect();
++      // Queue polling is automatic; it must not reset the manual retry budget.
++      this.startMonitoring();
++      this._connectInternal().catch(() => {});
+     }
+ 
+     const deadline = Date.now() + timeout;
+     while (this.state.status !== 'ready') {
+       if (this.state.status === 'error') throw new Error(this.state.error);
+-      if (this.state.status === 'paused') throw new Error('Conexão cancelada.');
++      if (this.closed || this.state.status === 'paused') throw new Error('Conexão cancelada.');
+       if (Date.now() >= deadline) {
+         throw new Error('Conecte pelo QR Code em Configurações e tente enviar novamente. Nenhuma mensagem deste lote foi enviada.');
+       }
+@@ -1843,6 +1950,9 @@
+   async pause(force = false) {
+     if (this.busy && !force) throw new Error('Aguarde o envio terminar antes de pausar.');
+     this._audit('action.pause', {force});
++    const pendingStart = this.starting;
++    this.starting = null;
++    pendingStart?.catch?.(() => {});
+     this._clearStartupWatchdog();
+     this._clearQrWatchdog();
+     this.userPaused = true;
+@@ -1857,13 +1967,15 @@
+     const client = this.client;
+     this.client = null;
+     if (client) await this._disposeClient(client, 10000);
+-    if (this.starting) await bounded(this.starting, 1500).catch(() => {});
+-    this.state = {status:'paused',qr:null,account:null,error:null};
++
+     return this.status();
+   }
+ 
+   async shutdown() {
+     this._audit('action.shutdown');
++    this.closed = true;
++    this.starting?.catch?.(() => {});
++    this.starting = null;
+     this._clearReconnectTimer();
+     this._clearStartupWatchdog();
+     this._clearQrWatchdog();
+--- 3.3.2/package-lock.json
++++ 3.3.3/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "vyzium-gestao-operacional",
+-  "version": "3.3.2",
++  "version": "3.3.3",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "vyzium-gestao-operacional",
+-      "version": "3.3.2",
++      "version": "3.3.3",
+       "hasInstallScript": true,
+       "dependencies": {
+         "electron-updater": "6.8.9",
+--- 3.3.2/package.json
++++ 3.3.3/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "vyzium-gestao-operacional",
+-  "version": "3.3.2",
+-  "description": "Vyzium 3.3.2 Production Candidate: WhatsApp self-healing conservador, transacional e Sentry observacional/fail-open.",
++  "version": "3.3.3",
++  "description": "Vyzium 3.3.3 Production Candidate: WhatsApp self-healing conservador, transacional e Sentry observacional/fail-open.",
+   "main": "electron/main.js",
+   "private": true,
+   "scripts": {
+@@ -10,7 +10,7 @@
+     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
+     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
+     "build": "electron-builder --win nsis --x64 --publish never",
+-    "test:node": "node --test tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
++    "test:node": "node --test tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
+     "test": "npm run test:backend && npm run test:node",
+     "postinstall": "node scripts/patch-whatsapp-web.js"
+   },
+--- 3.3.2/renderer/acompanhamento.html
++++ 3.3.3/renderer/acompanhamento.html
+@@ -11,7 +11,7 @@
+   <aside class="sidebar">
+     <div class="brand">
+       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.2</span></div>
++      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.3</span></div>
+     </div>
+     <nav id="navigation">
+       <button class="nav-item nav-home" type="button" data-go-home>
+--- 3.3.2/renderer/compras-app.js
++++ 3.3.3/renderer/compras-app.js
+@@ -350,7 +350,7 @@
+  document.querySelectorAll('[data-review]').forEach(el=>on(el,'click',async()=>{if(!confirm('Você conferiu esta mensagem na conversa do fornecedor?'))return;await api('POST','/review',{id:el.dataset.review,outcome:el.dataset.outcome});await renderHistory();}));
+ }
+ async function renderSettings() {
+- $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.2')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
++ $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.3')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
+  startWhatsAppPanel();
+  on($('#zoom'),'change',async()=>{ui.zoom=Number($('#zoom').value);await window.followup.setZoom(ui.zoom);await persist();});
+  const loadSafety=async()=>{try{const state=await api('GET','/data-safety');const protection=state.encrypted?'🔒 Criptografado com SQLCipher':'Banco legado sem criptografia';$('#compras-data-safety').innerHTML=`<strong>${state.integrity?.ok?'✓ Banco íntegro':'⚠ Verificação requer atenção'}</strong> · ${esc(protection)}<br>Schema ${esc(state.schema_version??'—')}`;}catch(e){$('#compras-data-safety').textContent='Não foi possível verificar a segurança do banco.';}};
+--- 3.3.2/renderer/compras.html
++++ 3.3.3/renderer/compras.html
+@@ -12,7 +12,7 @@
+   <aside class="sidebar">
+     <div class="brand">
+       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.2</span></div>
++      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.3</span></div>
+     </div>
+     <nav id="navigation">
+       <button class="nav-item nav-home" type="button" data-go-home>
+--- 3.3.2/renderer/index.html
++++ 3.3.3/renderer/index.html
+@@ -12,7 +12,7 @@
+   <aside class="sidebar">
+     <div class="brand">
+       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.2</span></div>
++      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.3</span></div>
+     </div>
+     <nav id="navigation">
+       <button class="nav-item active" type="button">
+@@ -39,7 +39,7 @@
+         <h1>Visão geral</h1>
+       </div>
+       <div class="top-actions home-module-actions">
+-        <span class="mode-badge" data-app-version data-app-version-prefix="Versão ">Versão 3.3.2</span>
++        <span class="mode-badge" data-app-version data-app-version-prefix="Versão ">Versão 3.3.3</span>
+       </div>
+     </header>
+ 
+--- 3.3.2/renderer/version.js
++++ 3.3.3/renderer/version.js
+@@ -4,7 +4,7 @@
+ // only as an offline/development fallback so release numbers cannot drift across
+ // Electron, Python engines and the renderer again.
+ (() => {
+-  const fallback = '3.3.2';
++  const fallback = '3.3.3';
+   const valid = value => /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(String(value || '').trim());
+   const paint = version => {
+     const safe = valid(version) ? String(version).trim() : fallback;
+--- 3.3.2/tests/diagnostics.cjs
++++ 3.3.3/tests/diagnostics.cjs
+@@ -9,7 +9,7 @@
+ function fakeApp(root) {
+   return {
+     getPath(name) { return name === 'userData' ? root : path.join(root, name); },
+-    getVersion() { return '3.3.2'; },
++    getVersion() { return '3.3.3'; },
+     isPackaged: false
+   };
+ }
+@@ -47,3 +47,24 @@
+   assert.doesNotMatch(helper, /DiagnosticLog/);
+   assert.match(helper, /WaitForDevToolsSeconds = 45/);
+ });
++
++test('unwritable diagnostics directory cannot prevent construction or reporting', () => {
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-diag-blocked-'));
++ try{
++  fs.writeFileSync(path.join(root,'diagnostics'),'not a directory');
++  const d=new FullDiagnostics(fakeApp(root));
++  assert.doesNotThrow(()=>{d.event('test');d.error('test',new Error('failure'));d.writeReport();});
++ }finally{fs.rmSync(root,{recursive:true,force:true});}
++});
++
++test('diagnostic bundle uses a literal directory, verifies output and finalizes once', () => {
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),"vyzium-diag-quote'-"));
++ try{
++  const calls=[];
++  const d=new FullDiagnostics(fakeApp(root),{platform:'win32',spawnSync:(exe,args)=>{calls.push(args);return {status:0,stdout:'[]'};}});
++  assert.equal(d.finalize(),null,'a successful shell status without a ZIP is not success');
++  const command=calls.find(a=>a.at(-1).includes('Compress-Archive')).at(-1);
++  assert.ok(command.includes("-LiteralPath '"+d.dir.replace(/'/g,"''")+"'"));
++  assert.ok(!command.includes('\\*'));const count=calls.length;d.finalize();assert.equal(calls.length,count);
++ }finally{fs.rmSync(root,{recursive:true,force:true});}
++});
+--- 3.3.2/tests/project-config.cjs
++++ 3.3.3/tests/project-config.cjs
+@@ -31,7 +31,7 @@
+ });
+ 
+ 
+-test('3.3.2 keeps one authoritative release version across package, Python and renderer', () => {
++test('3.3.3 keeps one authoritative release version across package, Python and renderer', () => {
+   const lock = JSON.parse(read('package-lock.json'));
+   assert.equal(lock.version, pkg.version);
+   assert.equal(lock.packages?.['']?.version, pkg.version);
+@@ -108,7 +108,7 @@
+ });
+ 
+ test('3.1 data safety and authentication files are included', () => {
+-  assert.equal(pkg.version, '3.3.2');
++  assert.equal(pkg.version, '3.3.3');
+   for (const rel of [
+     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
+     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
+--- 3.3.2/tests/security-manager.cjs
++++ 3.3.3/tests/security-manager.cjs
+@@ -220,3 +220,28 @@
+     f.cleanup();
+   }
+ });
++
++test('database fingerprint detects same-size changes and WAL changes', () => {
++ const f=fixture();try{
++  const file=path.join(f.root,'fingerprint.db');fs.writeFileSync(file,'AAAA');
++  const first=f.manager._databaseFingerprint(file);fs.writeFileSync(file,'BBBB');
++  const second=f.manager._databaseFingerprint(file);assert.notEqual(first,second);
++  fs.writeFileSync(file+'-wal','committed changes');assert.notEqual(second,f.manager._databaseFingerprint(file));
++ }finally{f.cleanup();}
++});
++
++test('active database validation failure never replaces current data with legacy data', async () => {
++ const f=fixture();try{
++  await f.manager.prepare();await f.manager.finalize();
++  fs.writeFileSync(f.manager.legacyFollowupDb,'OLD legacy');
++  const target=f.manager.moduleDb('followup');fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,'CURRENT customer data');
++  let migrated=false;
++  f.manager.runSecurityTool=async args=>{
++   if(args[0]==='security-check') return {available:true};
++   if(args[0]==='validate-db') throw new Error('transient locked database');
++   if(args[0]==='migrate-db'){migrated=true;fs.writeFileSync(target,'OLD legacy');return {};}
++  };
++  await assert.rejects(f.manager.finalize());assert.equal(migrated,false);
++  assert.equal(fs.readFileSync(target,'utf8'),'CURRENT customer data');
++ }finally{f.cleanup();}
++});

@@ -4,25 +4,11 @@ param(
     [Parameter(Mandatory=$true)][string]$UserDataDir,
     [Parameter(Mandatory=$true)][string]$StopFile,
     [int]$ParentPid = 0,
-    [int]$WaitForDevToolsSeconds = 45,
-    [string]$DiagnosticLog = '',
-    [switch]$DisableStorageBuckets
+    [int]$WaitForDevToolsSeconds = 45
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-
-function Write-Diagnostic([string]$EventName, [string]$Detail = '') {
-    if (-not $DiagnosticLog) { return }
-    try {
-        $parent = Split-Path -Parent $DiagnosticLog
-        if ($parent) { New-Item -ItemType Directory -Path $parent -Force | Out-Null }
-        $safe = ($Detail -replace '(?i)(token|secret|password|cookie|authorization|key)[=: ]+\S+', '$1=[REDACTED]')
-        Add-Content -LiteralPath $DiagnosticLog -Value (([DateTime]::UtcNow.ToString('o')) + ' | ' + $EventName + ' | ' + $safe) -Encoding UTF8
-    } catch {}
-}
-Write-Diagnostic 'helper.start' ('BrowserPath=' + $BrowserPath + '; UserDataDir=' + $UserDataDir + '; ParentPid=' + $ParentPid)
-
 
 function Resolve-BrowserPath([string]$ExplicitPath) {
     if ($ExplicitPath) {
@@ -204,7 +190,6 @@ namespace VyziumHiddenChromeV3 {
         [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
         [DllImport("user32.dll")] static extern bool IsWindow(IntPtr hwnd);
         [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr hwnd);
-        [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr hwnd, out RECT rect);
         [DllImport("user32.dll")] static extern bool ShowWindow(IntPtr hwnd, int command);
         [DllImport("user32.dll", EntryPoint="GetWindowLongPtrW")] static extern IntPtr GetWindowLongPtr64(IntPtr hwnd, int index);
         [DllImport("user32.dll", EntryPoint="SetWindowLongPtrW")] static extern IntPtr SetWindowLongPtr64(IntPtr hwnd, int index, IntPtr value);
@@ -220,7 +205,6 @@ namespace VyziumHiddenChromeV3 {
         [DllImport("kernel32.dll")] static extern uint GetCurrentThreadId();
 
         [StructLayout(LayoutKind.Sequential)] struct POINT { public int x; public int y; }
-        [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
         [StructLayout(LayoutKind.Sequential)] struct MSG { public IntPtr hwnd; public uint message; public IntPtr wParam; public IntPtr lParam; public uint time; public POINT pt; }
 
         [ComImport, Guid("56FDF342-FD6D-11d0-958A-006097C9A090"), InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
@@ -309,19 +293,7 @@ namespace VyziumHiddenChromeV3 {
             }
         }
 
-        public static bool HasLiveBrowserProcess() {
-            // Fast path: in the normal case the original browser PID stays alive,
-            // so this check is effectively free and avoids a process snapshot.
-            try {
-                using (var p = Process.GetProcessById(rootPid)) {
-                    if (!p.HasExited) return true;
-                }
-            } catch { }
-
-            // Chromium/Edge can hand the browser role to a descendant during a
-            // first-run/bootstrap transition.  A dead launcher PID therefore does
-            // not prove that the browser session died.  Only pay for a tree refresh
-            // when the cheap root check fails.
+        public static bool HasLiveTargetProcess() {
             RefreshTargetPidSet();
             uint[] snapshot;
             lock (targetLock) {
@@ -329,41 +301,15 @@ namespace VyziumHiddenChromeV3 {
                 targetPids.CopyTo(snapshot);
             }
             foreach (uint pid in snapshot) {
-                if (pid == (uint)rootPid) continue;
-                try {
-                    using (var p = Process.GetProcessById(unchecked((int)pid))) {
-                        if (!p.HasExited) return true;
-                    }
-                } catch { }
+                try { using (var p = Process.GetProcessById(unchecked((int)pid))) { if (!p.HasExited) return true; } }
+                catch { }
             }
             return false;
         }
 
-        static bool NeedsNormalization(IntPtr hwnd) {
-            try {
-                long style = GetExStyle(hwnd).ToInt64();
-                bool styleOk = (style & WS_EX_TOOLWINDOW) != 0 && (style & WS_EX_APPWINDOW) == 0;
-                RECT rect;
-                bool rectOk = GetWindowRect(hwnd, out rect);
-                bool safelyOffscreen = rectOk && rect.Left <= -10000 && rect.Top <= -10000;
-                return !styleOk || !safelyOffscreen;
-            } catch { return true; }
-        }
-
-        static void NormalizeWindow(IntPtr hwnd, bool force) {
+        static void NormalizeWindow(IntPtr hwnd) {
             try {
                 if (!IsTargetWindow(hwnd)) return;
-
-                // O guardião anterior escondia e mostrava novamente a mesma HWND a cada
-                // 200 ms. Além do custo de EnumWindows/process snapshots, isso mantinha
-                // o Chrome recebendo trabalho de composição sem necessidade. Se a janela
-                // continua com o estilo correto e fora da tela, a varredura de segurança
-                // é deliberadamente idempotente. Eventos CREATE/SHOW continuam forçando
-                // a normalização imediatamente.
-                if (!force && !NeedsNormalization(hwnd)) {
-                    try { if (taskbar != null) taskbar.DeleteTab(hwnd); } catch { }
-                    return;
-                }
 
                 // Microsoft recomenda esconder antes de mudar dinamicamente o estilo de taskbar.
                 bool wasVisible = IsWindowVisible(hwnd);
@@ -393,14 +339,15 @@ namespace VyziumHiddenChromeV3 {
             if (stopping) return;
             try {
                 RefreshTargetPidSet();
-                EnumWindows((hwnd, lp) => { NormalizeWindow(hwnd, false); return true; }, IntPtr.Zero);
+                EnumWindows((hwnd, lp) => { NormalizeWindow(hwnd); return true; }, IntPtr.Zero);
             } catch { }
         }
 
         static void OnWinEvent(IntPtr hook, uint eventType, IntPtr hwnd, int idObject, int idChild, uint eventThread, uint eventTime) {
             if (stopping || hwnd == IntPtr.Zero) return;
             if (idObject != OBJID_WINDOW || idChild != CHILDID_SELF) return;
-            NormalizeWindow(hwnd, true);
+            RefreshTargetPidSet();
+            NormalizeWindow(hwnd);
         }
 
         public static LaunchInfo LaunchSuspended(string app, string commandLine, string workingDirectory) {
@@ -429,14 +376,10 @@ namespace VyziumHiddenChromeV3 {
                     ownerWindow = CreateWindowExW((uint)WS_EX_TOOLWINDOW, "STATIC", "VyziumHiddenOwner", WS_POPUP,
                         -32000, -32000, 1, 1, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero, IntPtr.Zero);
                     try { taskbar = (ITaskbarList)new CTaskbarList(); taskbar.HrInit(); } catch { taskbar = null; }
-                    createHook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_CREATE, IntPtr.Zero, callback, (uint)rootPid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
-                    showHook = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, IntPtr.Zero, callback, (uint)rootPid, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+                    createHook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_CREATE, IntPtr.Zero, callback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+                    showHook = SetWinEventHook(EVENT_OBJECT_SHOW, EVENT_OBJECT_SHOW, IntPtr.Zero, callback, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
                     RefreshTargetPidSet();
-                    // During bootstrap use a short fallback sweep so a child process
-                    // that becomes the browser process is normalized before it can flash
-                    // in the taskbar.  PowerShell slows this timer to 1500 ms as soon as
-                    // the CDP endpoint is validated; the high-frequency phase is startup-only.
-                    sweepTimer = new Timer(SweepWindows, null, 0, 150);
+                    sweepTimer = new Timer(SweepWindows, null, 0, 200);
                     monitorReady.Set();
                     MSG msg;
                     while (!stopping && GetMessage(out msg, IntPtr.Zero, 0, 0) > 0) {
@@ -467,13 +410,6 @@ namespace VyziumHiddenChromeV3 {
             info.ThreadHandle = IntPtr.Zero;
         }
 
-        public static void SetSweepInterval(int milliseconds) {
-            try {
-                int interval = Math.Max(100, milliseconds);
-                if (sweepTimer != null) sweepTimer.Change(0, interval);
-            } catch { }
-        }
-
         public static void StopGuard() {
             stopping = true;
             if (monitorThreadId != 0) PostThreadMessage(monitorThreadId, 0x0012, IntPtr.Zero, IntPtr.Zero); // WM_QUIT
@@ -492,13 +428,13 @@ namespace VyziumHiddenChromeV3 {
 }
 
 $browser = Resolve-BrowserPath $BrowserPath
-Write-Diagnostic 'browser.resolved' $browser
 $profile = [IO.Path]::GetFullPath($UserDataDir)
 New-Item -ItemType Directory -Path $profile -Force | Out-Null
 $stopPath = [IO.Path]::GetFullPath($StopFile)
 $stopParent = Split-Path -Parent $stopPath
 if ($stopParent) { New-Item -ItemType Directory -Path $stopParent -Force | Out-Null }
-Remove-Item -LiteralPath $stopPath -Force -ErrorAction SilentlyContinue
+# The unique stop flag is created by Node; never erase a cancellation that
+# arrived while PowerShell was compiling the Win32 helper.
 
 # A reutilização de um perfil LocalAuth deixa DevToolsActivePort no disco em
 # algumas versões do Chromium. Nunca aceite esse arquivo de uma execução anterior:
@@ -525,28 +461,23 @@ $argsList = @(
     '--new-window',
     'about:blank'
 )
-if ($DisableStorageBuckets) {
-    # Recovery-only compatibility mode. Never used for an established session.
-    $argsList = @($argsList[0..($argsList.Count-2)]) + '--disable-features=StorageBuckets' + @($argsList[$argsList.Count-1])
-    Write-Diagnostic 'browser.storage-buckets-disabled' 'first-connection recovery'
-}
 $cmdLine = (Quote-Arg $browser) + ' ' + (($argsList | ForEach-Object { Quote-Arg ([string]$_) }) -join ' ')
 $working = Split-Path -Parent $browser
 $launch = $null
 $exitCode = 0
 
 try {
+    if (Test-Path -LiteralPath $stopPath) { throw "Inicialização cancelada pelo Vyzium." }
     $launch = [VyziumHiddenChromeV3.Native]::LaunchSuspended($browser, $cmdLine, $working)
-    Write-Diagnostic 'browser.created-suspended' ('pid=' + $launch.ProcessId)
     [VyziumHiddenChromeV3.Native]::StartGuard($launch.ProcessId)
     [VyziumHiddenChromeV3.Native]::Resume($launch)
-    Write-Diagnostic 'browser.resumed' ('pid=' + $launch.ProcessId)
 
     $deadline = [DateTime]::UtcNow.AddSeconds([Math]::Max(8, $WaitForDevToolsSeconds))
     $endpoint = $null
     $port = 0
 
     while ([DateTime]::UtcNow -lt $deadline) {
+        if (Test-Path -LiteralPath $stopPath) { throw "Inicialização cancelada pelo Vyzium." }
         if (Test-Path -LiteralPath $devToolsFile -PathType Leaf) {
             try {
                 $lines = @(Get-Content -LiteralPath $devToolsFile -ErrorAction Stop)
@@ -564,7 +495,7 @@ try {
                 }
             } catch {}
         }
-        if (-not [VyziumHiddenChromeV3.Native]::HasLiveBrowserProcess()) {
+        if (-not [VyziumHiddenChromeV3.Native]::HasLiveTargetProcess()) {
             throw "O Chrome encerrou antes de expor o DevTools. PID inicial: $($launch.ProcessId)"
         }
         if ($ParentPid -gt 0 -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) {
@@ -574,14 +505,8 @@ try {
     }
 
     if (-not $endpoint) {
-        Write-Diagnostic 'cdp.timeout' ('pid=' + $launch.ProcessId)
         throw "O Chrome não expôs o DevTools em $WaitForDevToolsSeconds segundos. PID: $($launch.ProcessId)"
     }
-
-    # Startup is complete. Keep the event hooks, but make the fallback sweep cheap
-    # for the rest of the WhatsApp session.
-    [VyziumHiddenChromeV3.Native]::SetSweepInterval(1500)
-    Write-Diagnostic 'cdp.ready' ('pid=' + $launch.ProcessId + '; port=' + $port)
 
     $payload = [ordered]@{
         ok = $true
@@ -596,19 +521,17 @@ try {
     # Keep the guard alive for the complete lifetime of this exact browser.
     while ($true) {
         if (Test-Path -LiteralPath $stopPath) { break }
-        if (-not [VyziumHiddenChromeV3.Native]::HasLiveBrowserProcess()) { break }
+        if (-not [VyziumHiddenChromeV3.Native]::HasLiveTargetProcess()) { break }
         if ($ParentPid -gt 0 -and -not (Get-Process -Id $ParentPid -ErrorAction SilentlyContinue)) { break }
-        Start-Sleep -Milliseconds 1500
+        Start-Sleep -Milliseconds 500
     }
 }
 catch {
     $exitCode = 1
     $message = $_.Exception.Message
-    Write-Diagnostic 'helper.error' $message
     try { [Console]::Error.WriteLine("VYZIUM_HIDDEN_BROWSER_ERROR: $message") } catch {}
 }
 finally {
-    Write-Diagnostic 'helper.finally' ('exitCode=' + $exitCode)
     if ($launch) {
         try {
             $targetPids = @([VyziumHiddenChromeV3.Native]::TargetProcessIds()) | Sort-Object -Descending -Unique

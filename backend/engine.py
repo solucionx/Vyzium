@@ -60,7 +60,7 @@ def whatsapp_request(route, body=None):
         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
 
 APP_NAME = "Vyzium"
-APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.3.0")
+APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.3.3")
 DB_SCHEMA_VERSION = 1
 DEFAULT_CONTROL_PRESETS = [
     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},

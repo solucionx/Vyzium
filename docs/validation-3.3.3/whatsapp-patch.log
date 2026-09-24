@@ -1,0 +1,6 @@
+npm warn Unknown env config "http-proxy". This will stop working in the next major version of npm.
+
+> vyzium-gestao-operacional@3.3.3 verify:whatsapp-patch
+> node scripts/verify-whatsapp-patch.js
+
+Vyzium: patch de bootstrap/QR do whatsapp-web.js 1.34.7 verificado com sucesso.

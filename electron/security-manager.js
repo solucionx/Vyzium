@@ -2,6 +2,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const {
   generateRootKey,
   deriveModuleKey,
@@ -423,9 +424,10 @@ class SecurityManager {
               ['validate-db', '--path', target, '--module', moduleName],
               { VYZIUM_DB_KEY_HEX: keyHex }
             );
-          } catch (_) {
-            quarantined = this._quarantineFailedMigrationTarget(moduleName, target, workspaceId);
-            targetExists = false;
+          } catch (error) {
+            // An active database contains post-migration customer changes. A
+            // timeout, wrong key or lock must never roll it back to legacy data.
+            throw new Error(`O banco ativo de ${moduleName} não pôde ser validado. Os arquivos atuais foram preservados. Detalhe: ${error?.message || error}`);
           } finally {
             keyHex = '';
           }
