@@ -4,7 +4,7 @@
 // only as an offline/development fallback so release numbers cannot drift across
 // Electron, Python engines and the renderer again.
 (() => {
-  const fallback = '3.3.0';
+  const fallback = '3.3.3';
   const valid = value => /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(String(value || '').trim());
   const paint = version => {
     const safe = valid(version) ? String(version).trim() : fallback;

@@ -220,3 +220,28 @@ test('failed partial migration target is quarantined and rebuilt from untouched 
     f.cleanup();
   }
 });
+
+test('database fingerprint detects same-size changes and WAL changes', () => {
+ const f=fixture();try{
+  const file=path.join(f.root,'fingerprint.db');fs.writeFileSync(file,'AAAA');
+  const first=f.manager._databaseFingerprint(file);fs.writeFileSync(file,'BBBB');
+  const second=f.manager._databaseFingerprint(file);assert.notEqual(first,second);
+  fs.writeFileSync(file+'-wal','committed changes');assert.notEqual(second,f.manager._databaseFingerprint(file));
+ }finally{f.cleanup();}
+});
+
+test('active database validation failure never replaces current data with legacy data', async () => {
+ const f=fixture();try{
+  await f.manager.prepare();await f.manager.finalize();
+  fs.writeFileSync(f.manager.legacyFollowupDb,'OLD legacy');
+  const target=f.manager.moduleDb('followup');fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,'CURRENT customer data');
+  let migrated=false;
+  f.manager.runSecurityTool=async args=>{
+   if(args[0]==='security-check') return {available:true};
+   if(args[0]==='validate-db') throw new Error('transient locked database');
+   if(args[0]==='migrate-db'){migrated=true;fs.writeFileSync(target,'OLD legacy');return {};}
+  };
+  await assert.rejects(f.manager.finalize());assert.equal(migrated,false);
+  assert.equal(fs.readFileSync(target,'utf8'),'CURRENT customer data');
+ }finally{f.cleanup();}
+});

@@ -31,7 +31,7 @@ test('release version changes preserve the original dependency versions and arch
 });
 
 
-test('3.3.0 keeps one authoritative release version across package, Python and renderer', () => {
+test('3.3.3 keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -108,7 +108,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.3.0');
+  assert.equal(pkg.version, '3.3.3');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',

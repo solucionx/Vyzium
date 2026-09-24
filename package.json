@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.3.0",
-  "description": "Vyzium 3.3.0 Production Candidate: baseline WhatsApp 3.2.7 preservada e Sentry estritamente observacional/fail-open.",
+  "version": "3.3.3",
+  "description": "Vyzium 3.3.3 Production Candidate: WhatsApp self-healing conservador, transacional e Sentry observacional/fail-open.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
-    "test:node": "node --test tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
+    "test:node": "node --test tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
     "test": "npm run test:backend && npm run test:node",
     "postinstall": "node scripts/patch-whatsapp-web.js"
   },

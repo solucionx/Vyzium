@@ -2,7 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { SentryReporter, sanitize, parseDsn } = require('../electron/sentry-client');
-const app = { getVersion: () => '3.3.0', isPackaged: true };
+const app = { getVersion: () => '3.3.2', isPackaged: true };
 const dsn = 'https://public@example.ingest.sentry.io/123';
 
 test('Sentry DSN parser accepts only valid HTTPS ingestion DSNs', () => {
@@ -43,7 +43,7 @@ test('Sentry event contains technical metadata but no user object', async () => 
   reporter.captureException(new Error('failure +55 85 99999-9999 x@example.com'), {source:'whatsapp.bootstrap', details:{session:'secret',stage:'qr'}});
   await new Promise(resolve => setTimeout(resolve, 10));
   const raw=JSON.stringify(sent[0]);
-  assert.equal(sent[0].release,'vyzium@3.3.0');
+  assert.equal(sent[0].release,'vyzium@3.3.2');
   assert.equal(Object.hasOwn(sent[0],'user'),false);
   assert.equal(raw.includes('99999-9999'),false);
   assert.equal(raw.includes('x@example.com'),false);

@@ -4,7 +4,7 @@ const {EventEmitter} = require('node:events');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const {WhatsAppSession: NativeWhatsAppSession, startBridge, phoneCandidates, normalizeBrowserMode, resolveBrowserMode, isFatalCacheStorageError, normalizeBrowserWSEndpoint, stopHiddenHeadedBrowser} = require('../electron/whatsapp');
+const {WhatsAppSession: NativeWhatsAppSession, startBridge, phoneCandidates, normalizeBrowserMode, resolveBrowserMode, isFatalCacheStorageError, classifyRecoverableStartupError, normalizeBrowserWSEndpoint, stopHiddenHeadedBrowser} = require('../electron/whatsapp');
 
 // Unit tests must not launch a real Windows Chrome/PowerShell helper merely
 // because the CI runner itself is Windows. Production still uses process.platform
@@ -63,11 +63,27 @@ test('browser mode parser defaults to headed and keeps explicit diagnostic overr
  assert.equal(resolveBrowserMode({browserMode:'headless'}),'headless');
 });
 
-test('fatal CacheStorage detector ignores harmless persistence denial but catches the observed crash',()=>{
+test('fatal storage detector does not overreact to persistence warning but catches observed Cache failures',()=>{
  assert.equal(isFatalCacheStorageError('[storage] storage bucket persistence denied (aquire-persistent-storage-denied)'),false);
  assert.equal(isFatalCacheStorageError("Failed to execute 'open' on 'CacheStorage': Unexpected internal error."),true);
  assert.equal(isFatalCacheStorageError('BackendEventBus: storage_initialization_error (storage-initialization-error)'),true);
  assert.equal(isFatalCacheStorageError("Failed to execute 'put' on 'Cache': Entry already exists."),true);
+});
+
+test('Sentry stays observational while self-healing belongs to WhatsApp lifecycle',()=>{
+ const source=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp.js'),'utf8');
+ assert.match(source,/fullDiagnosticEvent/);
+ assert.match(source,/_repairPendingProfileOnce/);
+ assert.match(source,/destructiveRecoveryKey/);
+ assert.doesNotMatch(source,/--disable-features=StorageBuckets/);
+});
+
+test('startup classifier separates recoverable browser, network and storage failures',()=>{
+ assert.equal(classifyRecoverableStartupError(new Error('Chrome encerrou antes de expor o DevTools.')),'cdp');
+ assert.equal(classifyRecoverableStartupError(new Error('user data directory is already in use')),'profile-lock');
+ assert.equal(classifyRecoverableStartupError(new Error('net::ERR_INTERNET_DISCONNECTED')),'network');
+ assert.equal(classifyRecoverableStartupError(new Error("Failed to execute 'put' on 'Cache': Entry already exists.")),'storage');
+ assert.equal(classifyRecoverableStartupError(new Error('unrelated business error')),null);
 });
 
 test('headed WhatsApp browser uses the proven pre-show Win32 guard on Windows',()=>{
@@ -99,33 +115,6 @@ test('headed WhatsApp browser uses the proven pre-show Win32 guard on Windows',(
  assert.match(helper,/ClientWebSocket/);
  assert.match(helper,/Get-ValidatedDevToolsEndpoint \$candidatePort/);
  assert.doesNotMatch(helper,/--no-sandbox/);
-});
-
-test('hidden browser guard keeps low idle cost without treating a root-PID handoff as browser death',()=>{
- const helper=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp-hidden-browser.ps1'),'utf8');
- const source=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp.js'),'utf8');
- assert.match(helper,/SetWinEventHook\(EVENT_OBJECT_CREATE[^\n]+\(uint\)rootPid/);
- assert.match(helper,/SetWinEventHook\(EVENT_OBJECT_SHOW[^\n]+\(uint\)rootPid/);
- assert.match(helper,/new Timer\(SweepWindows, null, 0, 150\)/);
- assert.match(helper,/SetSweepInterval\(1500\)/);
- assert.match(helper,/if \(!force && !NeedsNormalization\(hwnd\)\)/);
- assert.match(helper,/public static bool HasLiveBrowserProcess\(\)/);
- assert.match(helper,/RefreshTargetPidSet\(\);[\s\S]*targetPids\.CopyTo\(snapshot\)/);
- assert.match(helper,/HasLiveBrowserProcess\(\)/);
- assert.match(helper,/Start-Sleep -Milliseconds 1500/);
- assert.doesNotMatch(helper,/new Timer\(SweepWindows, null, 0, 200\)/);
- assert.doesNotMatch(helper,/HasLiveRootProcess\(\)/);
- assert.doesNotMatch(helper,/Start-Sleep -Milliseconds 500/);
- // The three speculative 3.2.4 flags are deliberately rolled back: they were
- // not needed for the CPU gain and are not worth changing first-run behavior.
- for (const flag of ['--disable-extensions','--disable-sync','--disable-default-apps']) {
-   assert.doesNotMatch(helper,new RegExp(flag.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')));
-   assert.equal(source.includes(flag),false);
- }
- // Reliability switches that were part of the stable headed setup stay intact.
- for (const flag of ['--disable-background-timer-throttling','--disable-backgrounding-occluded-windows','--disable-renderer-backgrounding']) {
-   assert.ok(helper.includes(flag));
- }
 });
 
 test('hidden launcher never reuses a stale DevToolsActivePort and waits for a live CDP socket',()=>{
@@ -180,36 +169,6 @@ test('pre-show launcher connects whatsapp-web.js to the same LocalAuth profile w
  assert.equal(s.client.options.authStrategy.options.dataPath,dir);
  await s.shutdown();
  assert.equal(stops.length,1);
-});
-
-test('brand-new machine path auto-starts a provisional LocalAuth profile and reaches QR',async t=>{
- const metadata=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-clean-meta-'));
- const runtime=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-clean-runtime-'));
- t.after(()=>{fs.rmSync(metadata,{recursive:true,force:true});fs.rmSync(runtime,{recursive:true,force:true});});
- const launches=[];
- class Client extends EventEmitter {
-  constructor(options){super();this.options=options;this.info={wid:{user:'5500000000000'}};}
-  async initialize(){setTimeout(()=>this.emit('qr','clean-machine-qr'),5);}
-  async destroy(){}
- }
- const s=new WhatsAppSession(metadata,{
-  profileDataDir:runtime,
-  library:{Client,LocalAuth:class{constructor(options){this.options=options;}}},
-  qrCode:{toDataURL:async()=> 'data:image/png;base64,clean'},
-  browser:'/test/browser',
-  forcePreShowGuard:true,
-  launchHiddenHeadedBrowser:async options=>{launches.push(options);return {endpoint:'ws://127.0.0.1:9222/devtools/browser/clean',pid:5151,stopFile:'/tmp/clean-stop'};},
-  stopHiddenHeadedBrowser:async()=>{}
- });
- assert.equal(s.status().firstConnectionPending,true);
- s.autoStart();
- const deadline=Date.now()+1000;
- while(s.status().status!=='qr' && Date.now()<deadline) await new Promise(r=>setTimeout(r,10));
- assert.equal(s.status().status,'qr');
- assert.equal(s.status().qr,'data:image/png;base64,clean');
- assert.equal(launches.length,1);
- assert.equal(launches[0].userDataDir,path.join(runtime,`session-${s.authClientId}`));
- await s.shutdown();
 });
 
 test('startup audit is passive and never runs a CacheStorage probe before QR/ready',()=>{
@@ -270,88 +229,6 @@ test('forced headless CacheStorage crash automatically restarts the same profile
  assert.equal(instances[1].options.puppeteer.headless,false);
  assert.equal(instances[1].options.authStrategy.options.clientId,instances[0].options.authStrategy.options.clientId);
  assert.match(s.diagnostics().text,/browser\.storage-fallback-restart/);
- await s.shutdown();
-});
-
-test('first-connection headed storage crash gets one isolated compatibility retry without touching an established profile', async t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-first-storage-recovery-'));
- t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
- const instances=[]; const launches=[];
- class FakePage extends EventEmitter { url(){return 'https://web.whatsapp.com/';} async evaluate(){return {ok:true};} }
- class Client extends EventEmitter {
-   constructor(options){super();this.options=options;this.pupPage=new FakePage();instances.push(this);}
-   async initialize(){await new Promise(resolve=>{this.releaseInitialize=resolve;});}
-   async destroy(){this.destroyed=true;this.releaseInitialize?.();}
- }
- const s=new WhatsAppSession(dir,{
-   library:{Client,LocalAuth:class {constructor(options){this.options=options;}}},
-   qrCode:{toDataURL:async()=> 'data:image/png;base64,test'}, browser:'/test/browser',
-   platform:'win32', forcePreShowGuard:true, storageFallbackDelayMs:5, startupTimeoutMs:5000,
-   launchHiddenHeadedBrowser:async options=>{launches.push(options);return {endpoint:`ws://127.0.0.1:9222/devtools/browser/${launches.length}`,pid:5000+launches.length,stopFile:`/tmp/stop-${launches.length}`};},
-   stopHiddenHeadedBrowser:async()=>{}
- });
- s.connect();
- const firstDeadline=Date.now()+1000; while(instances.length<1 && Date.now()<firstDeadline) await new Promise(r=>setTimeout(r,10));
- const firstId=instances[0].options.authStrategy.options.clientId;
- await new Promise(r=>setTimeout(r,140));
- instances[0].pupPage.emit('console',{type:()=> 'error',text:()=> "Failed to execute 'put' on 'Cache': Entry already exists."});
- const deadline=Date.now()+1500; while(instances.length<2 && Date.now()<deadline) await new Promise(r=>setTimeout(r,10));
- assert.equal(instances.length,2);
- assert.equal(instances[0].destroyed,true);
- assert.notEqual(instances[1].options.authStrategy.options.clientId,firstId);
- assert.equal(launches[0].disableStorageBuckets,false);
- assert.equal(launches[1].disableStorageBuckets,true);
- assert.equal(s.firstConnectionStorageRecoveryUsed,true);
- assert.equal(s.sessionState.activeClientId,null);
- assert.match(s.diagnostics().text,/browser\.first-connection-storage-recovery-restart/);
- await s.shutdown();
-});
-
-test('production source keeps destructive first-storage recovery single-use while preserving ordinary reconnects',()=>{
- const source=fs.readFileSync(path.join(__dirname,'..','electron','whatsapp.js'),'utf8');
- assert.match(source,/this\._hasEstablishedSession\(\) \|\| !this\.firstConnectionPending/);
- assert.match(source,/if \(this\.firstConnectionStorageRecoveryUsed\) return/);
- assert.match(source,/!this\.firstConnectionPending \|\| this\.firstConnectionStorageRecoveryUsed/);
- assert.match(source,/first-storage-retry/);
- assert.match(source,/--disable-features=StorageBuckets/);
-});
-
-test('first-storage compatibility profile keeps retrying transient stalls without rotating profile again', async t=>{
- const dir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-storage-retry-'));
- t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
- const instances=[]; const launches=[];
- class FakePage extends EventEmitter { url(){return 'https://web.whatsapp.com/';} async evaluate(){return {ok:true};} }
- class Client extends EventEmitter {
-   constructor(options){super();this.options=options;this.pupPage=new FakePage();instances.push(this);}
-   async initialize(){await new Promise(resolve=>{this.releaseInitialize=resolve;});}
-   async destroy(){this.destroyed=true;this.releaseInitialize?.();}
- }
- const s=new WhatsAppSession(dir,{
-   library:{Client,LocalAuth:class {constructor(options){this.options=options;}}},
-   qrCode:{toDataURL:async()=> 'data:image/png;base64,test'}, browser:'/test/browser',
-   platform:'win32', forcePreShowGuard:true, storageFallbackDelayMs:5, startupTimeoutMs:5000,
-   reconnectBaseMs:20, reconnectMaxMs:40,
-   launchHiddenHeadedBrowser:async options=>{launches.push(options);return {endpoint:`ws://127.0.0.1:9222/devtools/browser/${launches.length}`,pid:6000+launches.length,stopFile:`/tmp/stop-r-${launches.length}`};},
-   stopHiddenHeadedBrowser:async()=>{}
- });
- s.connect();
- let deadline=Date.now()+1000; while(instances.length<1 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
- await new Promise(r=>setTimeout(r,140));
- s.startupTimeoutMs=40;
- instances[0].pupPage.emit('console',{type:()=> 'error',text:()=> "Failed to execute 'put' on 'Cache': Entry already exists."});
- deadline=Date.now()+1500; while(instances.length<2 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
- assert.equal(instances.length>=2,true);
- const compatibilityId=instances[1].options.authStrategy.options.clientId;
- assert.equal(launches[1].disableStorageBuckets,true);
- // Let the compatibility attempt stall. The watchdog must schedule an ordinary
- // retry using the same fresh profile instead of entering a terminal state.
- deadline=Date.now()+1500; while(instances.length<3 && Date.now()<deadline) await new Promise(r=>setTimeout(r,5));
- assert.equal(instances.length>=3,true);
- assert.equal(instances[2].options.authStrategy.options.clientId,compatibilityId);
- assert.equal(launches[2].disableStorageBuckets,true);
- assert.equal(s.requiresNewQr,false);
- assert.equal(s.firstConnectionStorageRecoveryUsed,true);
- assert.match(s.diagnostics().text,/watchdog\.first-connection-retryable/);
  await s.shutdown();
 });
 
@@ -959,3 +836,34 @@ test('established roaming LocalAuth profile migrates once to the local runtime r
 });
 
 
+test('headed first-connect storage failure quarantines only pending profile and retries once', async t=>{
+ const dir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-selfheal-storage-'));
+ t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+ const clients=[];
+ class FakePage extends EventEmitter { url(){return 'https://web.whatsapp.com/';} }
+ class Client extends EventEmitter {
+   constructor(options){super();this.options=options;this.pupPage=new FakePage();clients.push(this);}
+   async initialize(){ if(clients.length===1) return new Promise(resolve=>{this.release=resolve;}); setTimeout(()=>this.emit('qr','recovered-qr'),5); }
+   async destroy(){this.destroyed=true;this.release?.();}
+ }
+ const s=new WhatsAppSession(dir,{
+   library:{Client,LocalAuth:class{constructor(options){this.options=options;}}},
+   qrCode:{toDataURL:async()=> 'data:image/png;base64,recovered'},browser:'/test/browser',
+   storageFallbackDelayMs:5,startupTimeoutMs:5000
+ });
+ s.connect();
+ await new Promise(r=>setTimeout(r,130));
+ const failedId=s.authClientId;
+ fs.mkdirSync(path.join(dir,`session-${failedId}`),{recursive:true});
+ clients[0].pupPage.emit('console',{type:()=> 'error',text:()=> "Failed to execute 'put' on 'Cache': Entry already exists. [Caught in: BackendEventBus: storage_initialization_error]"});
+ const deadline=Date.now()+1500;
+ while(clients.length<2 && Date.now()<deadline) await new Promise(r=>setTimeout(r,10));
+ assert.equal(clients.length,2);
+ assert.equal(clients[0].destroyed,true);
+ assert.notEqual(s.authClientId,failedId);
+ assert.ok(fs.readdirSync(dir).some(name=>name.startsWith('quarantine-self-heal-storage-')));
+ await new Promise(r=>setTimeout(r,20));
+ assert.equal(s.status().status,'qr');
+ assert.match(s.diagnostics().text,/self-heal\.profile-repair-restart/);
+ await s.shutdown();
+});
