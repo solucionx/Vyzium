@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.2.3",
-  "description": "Vyzium 3.2.3: evolui Cotação & Mapas com negociação assistida, meta de saving, prazo por fornecedor e escolha justificada do fornecedor, preservando a base estável.",
+  "version": "3.2.6",
+  "description": "Vyzium 3.2.6 Full Stable: diagnóstico local integral de produção sobre a base estável 3.2.5, preservando WhatsApp, LocalAuth, segurança, módulos e atualização.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
-    "test:node": "node --test tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
+    "test:node": "node --test tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs tests/diagnostics.cjs && node tests/sort.cjs",
     "test": "npm run test:backend && npm run test:node",
     "postinstall": "node scripts/patch-whatsapp-web.js"
   },
