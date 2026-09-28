@@ -293,7 +293,7 @@ function classifyRecoverableStartupError(error) {
   if (/encerrou antes do Chrome ficar disponível|Chrome encerrou antes|inicializador invisível|Tempo limite ao preparar o Chrome/i.test(text)) return 'browser-launch';
   if (/profile.*in use|user data directory is already in use|SingletonLock|SingletonCookie|lock file/i.test(text)) return 'profile-lock';
   if (/ERR_(INTERNET_DISCONNECTED|NETWORK_CHANGED|NAME_NOT_RESOLVED|CONNECTION_(RESET|TIMED_OUT|CLOSED)|PROXY_CONNECTION_FAILED)|ENETUNREACH|ETIMEDOUT|EAI_AGAIN/i.test(text)) return 'network';
-  if (/Waiting failed|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
+  if (error?.code === 'VYZIUM_BOOTSTRAP_TIMEOUT' || /Waiting failed|auth timeout|ready timeout|não estabilizou o documento|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
   return null;
 }
 
@@ -511,6 +511,7 @@ class WhatsAppSession {
     return {
       ...this.state,
       busy: this.busy,
+      preparingNewQr:this.state.status === 'starting' && this.newQrRequestGeneration === this.generation,
       monitoring: Boolean(this.monitorTimer) && !this.userPaused,
       lastHealthCheckAt: this.lastHealthCheckAt || null,
       lastHealthyAt: this.lastHealthyAt || null,
@@ -1079,7 +1080,7 @@ class WhatsAppSession {
 
   async _recoverStalledStartup(generation, options = {}) {
     if (generation !== this.generation || this.userPaused || this.busy || this.state.status !== 'starting') return;
-    this._audit('watchdog.startup-fired', {generation, options});
+    this._audit('watchdog.startup-fired', {generation, options, stage:this.client?.__vyziumStartupStage || 'browser-bootstrap'});
 
     // Invalidate every callback/promise from the stalled browser first. The old
     // initialize() promise may remain pending, but it can no longer mutate the
@@ -1282,6 +1283,10 @@ class WhatsAppSession {
         if (generation === this.generation) this.startupFailureStreak = 0;
         return result;
       } catch (error) {
+        if (generation !== this.generation || this.closed || this.userPaused) {
+          this._audit('initialize.cancelled', {generation});
+          return;
+        }
         lastError = error;
         const category = classifyRecoverableStartupError(error);
         this.startupFailureStreak += 1;
@@ -1384,7 +1389,8 @@ class WhatsAppSession {
           puppeteer:puppeteerPkg.version,
           clientSha256:crypto.createHash('sha256').update(source).digest('hex'),
           syntax:'loaded-by-node',
-          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6'),
+          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7'),
+          hasHiddenWindowPolling:(source.toString().match(/polling: 200/g) || []).length >= 4,
           hasSafeNavigationOrder:source.includes('navigation recovery is installed only after the initial inject'),
           hasSignalStore:source.includes('WAWebSignalStoreApi'),
           hasRegistrationUtils:source.includes('AuthStore.RegistrationUtils'),
@@ -1653,6 +1659,26 @@ class WhatsAppSession {
     client.on('change_state', state => this._audit('client.change-state', {generation, state}));
     client.on('remote_session_saved', () => this._audit('client.remote-session-saved', {generation}));
     client.on('vyzium_navigation_error', error => this._audit('client.navigation-error', {generation, error}));
+    let startupSnapshotPending = false;
+    client.on('vyzium_inject_stage', details => {
+      if (generation !== this.generation || this.client !== client || this.closed) return;
+      client.__vyziumStartupStage = String(details?.stage || 'unknown');
+      this._audit('client.inject-stage', {generation, stage:client.__vyziumStartupStage, state:details?.state});
+      if (startupSnapshotPending || !client.pupPage || this.state.status !== 'starting') return;
+      startupSnapshotPending = true;
+      Promise.resolve().then(() => client.pupPage.evaluate(() => ({
+        visibility:document.visibilityState,
+        readyState:document.readyState,
+        online:navigator.onLine,
+        hasDebug:Boolean(window.Debug?.VERSION),
+        hasQrElement:Boolean(document.querySelector('[data-ref] canvas')),
+        postLogout:new URL(location.href).searchParams.get('post_logout') === '1'
+      }))).then(snapshot => {
+        if (generation === this.generation && this.client === client && !this.closed) {
+          this._audit('client.startup-snapshot', {generation, ...snapshot});
+        }
+      }).catch(() => {}).finally(() => {startupSnapshotPending = false;});
+    });
     client.on('vyzium_bootstrap_waiting', details => this._audit('client.bootstrap-waiting', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_stable', details => this._audit('client.bootstrap-stable', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_timeout', details => this._audit('client.bootstrap-timeout', {generation, ...(details || {})}));
@@ -1756,6 +1782,10 @@ class WhatsAppSession {
   async newQr() {
     if (this.closed) return this.status();
     if (this.busy) throw new Error('Aguarde o envio terminar antes de gerar um novo QR Code.');
+    if (this.state.status === 'starting' && this.newQrRequestGeneration === this.generation) {
+      this._audit('action.new-qr-coalesced', {generation:this.generation});
+      return this.status();
+    }
     this._audit('action.new-qr', {profile:this.authClientId, active:this.sessionState?.activeClientId || null});
 
     this.userPaused = false;
@@ -1778,6 +1808,7 @@ class WhatsAppSession {
     const pendingStart = this.starting;
     const oldClient = this.client;
     const actionGeneration = ++this.generation;
+    this.newQrRequestGeneration = actionGeneration;
     this.client = null;
     this.starting = null;
     if (pendingStart && typeof pendingStart.catch === 'function') pendingStart.catch(() => {});
@@ -1805,6 +1836,7 @@ class WhatsAppSession {
         };
       }
     });
+    this.newQrRequestGeneration = this.generation;
     return this.status();
   }
 

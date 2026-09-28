@@ -1,0 +1,41 @@
+PASS: button opens current backend catalog through real preload, IPC handler and route allowlist
+PASS: filters, pagination, select-page, clear and cancel retain pending map edits without saving
+PASS: failed catalog request leaves the add button retryable and the map intact
+PASS: invalid price returns backend error without adding items or losing inputs/selections
+PASS: double submit, Escape, import and module navigation are blocked while adding
+PASS: addition persists prior prices, choices, legacy discounts and current edits; new row starts blank
+PASS: new item can be priced, saved, previewed and exported through existing backend buttons
+PASS: item claimed in another map after opening is rejected atomically and selection can be canceled
+PASS: remove from one existing map and add to another using both real buttons
+PASS: network failure leaves selection retryable without losing pending work
+PASS: multiple items selected across different filters are added together in one save
+PASS: stale revision is returned by HTTP and keeps the local selection editable
+PASS: closing a modal and changing views during catalog loading does not open it on the wrong view
+PASS: completed maps expose no add button and backend also rejects inclusion
+PASS: empty availability produces an informative dialog with addition disabled
+{
+  "passed": 15,
+  "scenarios": [
+    "button opens current backend catalog through real preload, IPC handler and route allowlist",
+    "filters, pagination, select-page, clear and cancel retain pending map edits without saving",
+    "failed catalog request leaves the add button retryable and the map intact",
+    "invalid price returns backend error without adding items or losing inputs/selections",
+    "double submit, Escape, import and module navigation are blocked while adding",
+    "addition persists prior prices, choices, legacy discounts and current edits; new row starts blank",
+    "new item can be priced, saved, previewed and exported through existing backend buttons",
+    "item claimed in another map after opening is rejected atomically and selection can be canceled",
+    "remove from one existing map and add to another using both real buttons",
+    "network failure leaves selection retryable without losing pending work",
+    "multiple items selected across different filters are added together in one save",
+    "stale revision is returned by HTTP and keeps the local selection editable",
+    "closing a modal and changing views during catalog loading does not open it on the wrong view",
+    "completed maps expose no add button and backend also rejects inclusion",
+    "empty availability produces an informative dialog with addition disabled"
+  ],
+  "browser": "153.0.8010.0",
+  "httpRequests": 67,
+  "ipcCalls": 55,
+  "successfulSaves": 8,
+  "rejectedSaves": 4,
+  "unhandledErrors": []
+}

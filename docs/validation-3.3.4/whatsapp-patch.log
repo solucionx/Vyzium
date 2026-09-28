@@ -1,0 +1,3 @@
+Vyzium: patch de bootstrap/QR do whatsapp-web.js 1.34.7 verificado com sucesso.
+Pristine npm 1.34.7 and V6 migration produce identical V7 Client.js; rerun is idempotent.
+SHA256 Client.js: bbc38a9374f1cda780afbcdf133c42b8e89cc9480811d08590f870f51d22dcb6

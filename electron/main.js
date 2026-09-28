@@ -323,6 +323,15 @@ async function requestEngine(moduleName, method, route, body) {
 }
 
 async function apiRequest(method, route, body) {
+  if (route === '/supplier-contacts') {
+    if (method !== 'GET' || activeModule !== 'compras' || !workspaceServicesStarted) {
+      throw new Error('Consulta de fornecedores indisponível. Abra Cotação & Mapas na sua conta.');
+    }
+    const data = await requestEngine('followup', 'GET', '/suppliers');
+    return {suppliers:(data.suppliers || []).filter(s => s.active !== 0 && s.active !== false).map(s => ({
+      name:String(s.display_name || ''), phone:String(s.phone || ''), contact:String(s.contact_name || '')
+    }))};
+  }
   if (String(route || '').startsWith('/whatsapp/')) {
     // The session is torn down by stopWorkspaceServices() during logout and
     // during the security setup, while an open WhatsApp panel may still be

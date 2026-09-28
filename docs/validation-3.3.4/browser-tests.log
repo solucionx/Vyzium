@@ -1,0 +1,13 @@
+✔ control: RAF polling stalls after socket state becomes ready (1325.315378ms)
+✔ patched inject emits and renews QR with RAF stopped and delayed modules (981.22056ms)
+✔ restored synchronized session reaches ready with RAF stopped (585.03658ms)
+✔ numeric polling survives replacement of the document execution context (467.519106ms)
+✔ closed page cancels the real bootstrap barrier immediately (42.265749ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3867.981262

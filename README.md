@@ -1,3 +1,86 @@
+# Atualização 3.3.6
+
+O mapa de compra permite pesquisar fornecedores do Acompanhamento e preencher nome e WhatsApp ao selecionar um resultado. O preenchimento manual continua disponível. Consulte `docs/CONTATOS_FORNECEDORES_3.3.6.md`.
+
+# Atualização 3.3.5
+
+Itens com **Status do Item da OC = 3 - Cancelado** voltam a ser elegíveis para cotação após reimportar a base. Consulte `docs/RECOMPRA_OC_CANCELADA_3.3.5.md`. As demais regras e correções da 3.3.4 foram preservadas.
+
+# Vyzium 3.3.4 — correção do QR com navegador oculto
+
+Projeto completo baseado na 3.3.3. Corrige esperas de inicialização que dependiam de animações do navegador oculto, evita reinícios por pedidos repetidos de QR e registra a etapa exata da inicialização.
+
+**Leia `docs/CORRECAO_QR_3.3.4.md`** para o diagnóstico do notebook, as evidências e a validação antes da distribuição. O defeito foi reproduzido e corrigido em Chromium com módulos sintéticos; a geração real do QR no notebook ainda precisa ser confirmada. Estrutura, dados e regras operacionais preservados.
+
+A auditoria anterior está em `docs/AUDITORIA_3.3.3.md`. Seus limites e alertas de dependências continuam aplicáveis; este hotfix não é uma certificação de segurança corporativa nem uma promessa de autocorreção universal.
+
+## Documentação histórica da base recebida
+
+Os textos abaixo descrevem versões anteriores e não constituem evidência de validação da 3.3.4.
+
+Versão do Vyzium baseada na 3.2.4, preservando Cotação & Mapas, SQLCipher, Firebase e importações, com hotfix de primeira conexão do WhatsApp em instalação limpa sem abandonar a otimização conservadora de CPU do navegador oculto.
+
+### Hotfix da versão 3.2.5
+
+- corrige a detecção de vida do Chrome/Edge quando o PID inicial encerra mas um processo descendente continua sendo o navegador ativo, cenário possível durante bootstrap/primeira execução;
+- usa varredura rápida apenas durante o bootstrap invisível e reduz automaticamente para 1500 ms assim que o CDP fica pronto;
+- remove os switches experimentais `--disable-extensions`, `--disable-sync` e `--disable-default-apps` introduzidos na 3.2.4, restaurando os argumentos comprovados da 3.2.3;
+- adiciona teste específico de instalação limpa: perfil LocalAuth vazio → `autoStart()` → evento de QR;
+- mantém `headless:false`, perfil em `%LOCALAPPDATA%`, patch V6, bootstrap estável, sessão transacional, QR, reconexão, envio e Chrome invisível. Detalhes em `docs/VALIDACAO_3.2.5.md`.
+
+### Histórico da versão 3.2.4 (com switches experimentais revertidos na 3.2.5)
+
+- otimização conservadora do Chrome/Edge usado pelo WhatsApp oculto no Windows, mantendo o navegador em modo **headful**;
+- guardião Win32 deixa de varrer todas as janelas/processos a cada 200 ms e passa a usar hooks focados no processo do navegador, com varredura de segurança mais espaçada;
+- janela já corretamente oculta não passa mais pelo ciclo repetitivo `hide → mover → show`, reduzindo trabalho de composição desnecessário;
+- checagens permanentes do helper foram desaceleradas, sem mudar LocalAuth, QR, bootstrap, reconexão, envio ou persistência da sessão;
+- três serviços genéricos do navegador que não participam do WhatsApp Web foram desabilitados: extensões, Sync e apps padrão. Detalhes em `docs/VALIDACAO_3.2.4.md`.
+
+### Melhorias preservadas da versão 3.2.3
+
+- botão **Adicionar itens** dentro de uma cotação existente, com busca, filtros por comprador/hotel e seleção de vários itens;
+- fornecedores, preços, negociações e decisões já registrados são preservados; as edições pendentes são salvas junto e os novos itens entram sem preços;
+- a disponibilidade é conferida novamente pelo backend ao salvar, impedindo duplicação e vínculo simultâneo com outro mapa ativo;
+- um item removido de uma cotação pode ser incluído em outra cotação existente;
+- backup antes da inclusão e testes de integração dos botões até o backend. Consulte também `docs/VALIDACAO_3.2.3.md`.
+
+### Melhorias preservadas da versão 3.2.2
+
+- botão **Remover item** em cada linha de mapas em cotação, com confirmação, salvamento conjunto das edições e backup antes da exclusão;
+- hotel e CNPJ informados uma vez por grupo na solicitação de cotação;
+- itens da aba de preços organizados automaticamente por hotel, com a mesma sequência nas mensagens e exportações;
+- demais funcionalidades e dependências preservadas. Consulte `docs/VALIDACAO_3.2.4.md` para os testes e limites desta revisão.
+
+### Funcionalidades preservadas
+
+- negociação assistida calcula preço-alvo por item a partir da melhor proposta inicial e da meta de saving configurada;
+- o Vyzium mostra quanto cada fornecedor precisa reduzir em valor unitário e percentual para atingir a meta;
+- solicitações de negociação por WhatsApp usam uma segunda mensagem curta, editável e adaptada automaticamente para um ou vários itens;
+- prazo de entrega pode ser registrado por fornecedor e item;
+- o comprador pode escolher manualmente um fornecedor que não seja o mais barato, registrando motivo, observação e impacto financeiro da decisão;
+- conclusão, exclusão e negociação assistida passam pela mesma allowlist segura do Electron, evitando bloqueios de rota local;
+- Mapas de Compra passam a separar **Em cotação** e **Concluídos**, com busca por nome, SCI, artigo e descrição do item;
+- conclusão libera os itens para novos mapas e exclusão cria backup automático antes da remoção;
+- exportação `.xls` ganha uma primeira aba organizada para impressão, além das abas detalhada e resumo por fornecedor;
+- solicitação de cotação por WhatsApp deixa de expor a SCI e passa a informar o CNPJ associado ao hotel;
+- resumo do mapa segue a sequência valor inicial → valor negociado → economia → itens sem cotação;
+- identidade da janela no Windows usa o `AppUserModelID` e o ícone do Vyzium na barra de tarefas;
+- sessão do WhatsApp transacional: um novo QR só substitui o perfil ativo depois que o novo perfil chega a `ready`;
+- nenhuma rotina de boot apaga um `LocalAuth` apenas por divergência de metadata;
+- `session-state.json` passa a ser a fonte de verdade, com migração não destrutiva dos marcadores antigos;
+- Chrome continua `headless:false`, nasce suspenso e é ocultado antes da primeira exibição;
+- CDP só é entregue ao `whatsapp-web.js` depois de validar `/json/version` e o WebSocket do browser;
+- perfil Chromium permanece em `%LOCALAPPDATA%`, sem probes ativos de CacheStorage/IndexedDB durante o bootstrap;
+- comprador do Acompanhamento usa correspondência exata normalizada, evitando misturar nomes parecidos;
+- estados como **NÃO ENTREGUE** e **ENTREGUE PARCIALMENTE** não são mais classificados como concluídos por substring;
+- números brasileiros em texto, como `1,5` e `1.234,56`, são tratados na importação;
+- Cotação & Mapas procura cabeçalhos nas primeiras 30 linhas e bloqueia cabeçalhos ambíguos;
+- tabelas JSON do módulo Compras usam allowlist explícita;
+- versão do pacote é propagada aos motores Python e ao renderer para evitar divergência em backups e interface;
+- falhas assíncronas no renderer de Compras deixam de ser silenciosas e passam a ser registradas localmente.
+
+> O patch V6 de bootstrap do `whatsapp-web.js`, a recuperação por `hasSynced`, QR, `authenticated`, `ready`, watchdog, reconexão e o perfil LocalAuth local foram preservados.
+
 <p align="center">
   <img src="docs/readme/vyzium-banner.svg" alt="Vyzium — Operação, Follow-up, Cotação e Mapas" width="100%">
 </p>
@@ -5,7 +88,7 @@
 <p align="center">
   <a href="https://github.com/solucionx/Vyzium-Releases/releases/latest"><img alt="Download para Windows" src="https://img.shields.io/badge/BAIXAR_PARA_WINDOWS-00A7B1?style=for-the-badge&logo=windows11&logoColor=white"></a>
   <a href="https://github.com/solucionx/Vyzium-Releases/releases"><img alt="Releases" src="https://img.shields.io/badge/RELEASES-0B3554?style=for-the-badge&logo=github&logoColor=white"></a>
-  <img alt="Versão 3.2.3 Full Stable" src="https://img.shields.io/badge/VERS%C3%83O-3.2.3%20FULL%20STABLE-0B3554?style=for-the-badge">
+  <img alt="Versão 3.2.7 Stable Production" src="https://img.shields.io/badge/VERS%C3%83O-3.2.7%20STABLE%20PRODUCTION-0B3554?style=for-the-badge">
   <img alt="Windows 10 e 11" src="https://img.shields.io/badge/WINDOWS-10_%7C_11-007D9C?style=for-the-badge&logo=windows11&logoColor=white">
   <img alt="Dados locais criptografados" src="https://img.shields.io/badge/DADOS-LOCAIS_CRIPTOGRAFADOS-003B73?style=for-the-badge&logo=sqlite&logoColor=white">
 </p>
@@ -470,14 +553,14 @@ Para gerar o instalador localmente:
 
 ## ✦ Release atual e segurança
 
-A versão atual é **3.2.3 Full Stable**. Ela preserva a identidade da instalação (`com.vyzium.gestaooperacional`), mantém a camada Data Safety/SQLCipher e usa a versão do `package.json` como fonte de verdade para o Electron e os motores Python.
+A versão atual é **3.2.7 Stable Production**. Ela preserva a identidade da instalação (`com.vyzium.gestaooperacional`), mantém a camada Data Safety/SQLCipher e usa a versão do `package.json` como fonte de verdade para o Electron e os motores Python.
 
-O gate técnico desta revisão está documentado em `docs/VALIDACAO_3.2.3.md`.
+O gate técnico desta revisão está documentado em `docs/VALIDACAO_3.2.5.md`.
 
 O workflow de release continua manual e gera primeiro uma **Draft**. A tag da release deve corresponder ao `package.json`:
 
 ```text
-v3.2.3
+v3.2.7
 ```
 
 > Antes de publicar para computadores em operação, execute o workflow Windows completo, incluindo os testes SQLCipher, `.xls`, verificação dos motores empacotados e o smoke test real do WhatsApp/Chrome invisível.

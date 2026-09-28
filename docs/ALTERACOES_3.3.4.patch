@@ -1,0 +1,611 @@
+--- a/README.md
++++ b/README.md
+@@ -1,12 +1,14 @@
+-# Vyzium 3.3.3 — Candidato a produção, recuperação conservadora
+-
+-Correções de concorrência, preservação de sessão e dados, limites de recuperação e diagnóstico. Base exata: pacote 3.3.2 fornecido nesta auditoria. Interface, ícones e regras operacionais preservados.
+-
+-**Leia `docs/AUDITORIA_3.3.3.md` antes de publicar.** Testes automatizados não substituem a homologação do instalador no Windows e a confirmação do QR na máquina afetada. Há alertas de dependências registrados em `docs/npm-audit-3.3.3.json`; esta entrega não é uma certificação de segurança corporativa nem uma promessa de autocorreção universal.
++# Vyzium 3.3.4 — correção do QR com navegador oculto
++
++Projeto completo baseado na 3.3.3. Corrige esperas de inicialização que dependiam de animações do navegador oculto, evita reinícios por pedidos repetidos de QR e registra a etapa exata da inicialização.
++
++**Leia `docs/CORRECAO_QR_3.3.4.md`** para o diagnóstico do notebook, as evidências e a validação antes da distribuição. O defeito foi reproduzido e corrigido em Chromium com módulos sintéticos; a geração real do QR no notebook ainda precisa ser confirmada. Estrutura, dados e regras operacionais preservados.
++
++A auditoria anterior está em `docs/AUDITORIA_3.3.3.md`. Seus limites e alertas de dependências continuam aplicáveis; este hotfix não é uma certificação de segurança corporativa nem uma promessa de autocorreção universal.
+ 
+ ## Documentação histórica da base recebida
+ 
+-Os textos abaixo descrevem versões anteriores e não constituem evidência de validação da 3.3.3.
++Os textos abaixo descrevem versões anteriores e não constituem evidência de validação da 3.3.4.
+ 
+ Versão do Vyzium baseada na 3.2.4, preservando Cotação & Mapas, SQLCipher, Firebase e importações, com hotfix de primeira conexão do WhatsApp em instalação limpa sem abandonar a otimização conservadora de CPU do navegador oculto.
+ 
+--- a/backend/compras_engine.py
++++ b/backend/compras_engine.py
+@@ -28,7 +28,7 @@
+ from secure_sqlite import connect as secure_connect, key_from_env
+ 
+ 
+-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.3')
++APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.4')
+ DB_SCHEMA_VERSION = 1
+ 
+ def norm(value):
+--- a/backend/crypto_migration.py
++++ b/backend/crypto_migration.py
+@@ -364,7 +364,7 @@
+     *,
+     key_hex: str,
+     module_name: str,
+-    app_version: str = os.environ.get('VYZIUM_APP_VERSION', '3.3.3'),
++    app_version: str = os.environ.get('VYZIUM_APP_VERSION', '3.3.4'),
+ ) -> dict[str, Any]:
+     source = Path(source_path).expanduser().resolve()
+     target = Path(target_path).expanduser().resolve()
+--- a/backend/engine.py
++++ b/backend/engine.py
+@@ -60,7 +60,7 @@
+         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
+ 
+ APP_NAME = "Vyzium"
+-APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.3.3")
++APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.3.4")
+ DB_SCHEMA_VERSION = 1
+ DEFAULT_CONTROL_PRESETS = [
+     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
+--- a/electron/diagnostics.js
++++ b/electron/diagnostics.js
+@@ -5,14 +5,20 @@
+ function redact(s){return String(s??'').replace(/(api[_-]?key|token|secret|password|authorization|cookie|db[_-]?key)([\"'\s:=]+)([^\s\"',;}]+)/ig,'$1$2[REDACTED]').replace(/\b[A-Fa-f0-9]{48,}\b/g,'[REDACTED_HEX]').replace(/\beyJ[A-Za-z0-9._-]{20,}\b/g,'[REDACTED_TOKEN]').replace(/([A-Za-z]:[\\/]+Users[\\/]+)[^\\/\r\n]+/ig,'$1[REDACTED_USER]').replace(/(\/home\/)[^/\r\n]+/g,'$1[REDACTED_USER]').slice(0,20000);}
+ function clean(v,d=0){if(d>5)return '[depth-limit]';if(v==null||typeof v==='boolean'||typeof v==='number')return v;if(typeof v==='string')return redact(v);if(v instanceof Error)return err(v);if(Array.isArray(v))return v.slice(0,100).map(x=>clean(x,d+1));if(typeof v==='object'){const o={};for(const [k,x] of Object.entries(v).slice(0,100))o[k]=/password|token|secret|cookie|authorization|dbkey|keyhex/i.test(k)?'[REDACTED]':clean(x,d+1);return o;}return redact(v);}
+ class FullDiagnostics{
+- constructor(app,deps={}){this.app=app;this.spawnSync=deps.spawnSync||spawnSync;this.platform=deps.platform||process.platform;this.finalized=false;this.remoteReporter=null;this.boot=`${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;this.started=new Date().toISOString();this.dir=path.join(app.getPath('userData'),'diagnostics',`run-${this.started.replace(/[:.]/g,'-')}-${this.boot}`);try{fs.mkdirSync(this.dir,{recursive:true,mode:0o700});}catch(_){}this.timeline=path.join(this.dir,'timeline.jsonl');this.errorsFile=path.join(this.dir,'errors.log');this.report=path.join(this.dir,'RELATORIO.txt');this.seq=0;this.stages=[];this.errors=[];}
+- event(event,details={}){const x={at:new Date().toISOString(),seq:++this.seq,boot:this.boot,event:String(event),details:clean(details)};try{if(fs.existsSync(this.timeline)&&fs.statSync(this.timeline).size>5*1024*1024)fs.renameSync(this.timeline,this.timeline+'.previous');fs.appendFileSync(this.timeline,JSON.stringify(x)+'\n',{encoding:'utf8',mode:0o600});}catch(_){}return x;}
++ constructor(app,deps={}){this.app=app;this.spawnSync=deps.spawnSync||spawnSync;this.platform=deps.platform||process.platform;this.finalized=false;this.remoteReporter=null;this.boot=`${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;this.started=new Date().toISOString();this.dir=path.join(app.getPath('userData'),'diagnostics',`run-${this.started.replace(/[:.]/g,'-')}-${this.boot}`);try{fs.mkdirSync(this.dir,{recursive:true,mode:0o700});}catch(_){}this.timeline=path.join(this.dir,'timeline.jsonl');this.errorsFile=path.join(this.dir,'errors.log');this.report=path.join(this.dir,'RELATORIO.txt');this.seq=0;this.stages=[];this.errors=[];this.whatsappEvents=[];this.whatsappOccurrenceCount=0;this.lastWhatsAppStage=null;}
++ event(event,details={}){const x={at:new Date().toISOString(),seq:++this.seq,boot:this.boot,event:String(event),details:clean(details)};try{if(fs.existsSync(this.timeline)&&fs.statSync(this.timeline).size>5*1024*1024)fs.renameSync(this.timeline,this.timeline+'.previous');fs.appendFileSync(this.timeline,JSON.stringify(x)+'\n',{encoding:'utf8',mode:0o600});}catch(_){}
++  const waStage = /^whatsapp\.client\.(inject-stage|qr-image-ready|ready)$/.test(x.event);
++  const waProblem = x.event === 'whatsapp.page.error' || (x.event === 'whatsapp.page.console' && x.details.type === 'error') || /^whatsapp\.(browser\.storage-failure-detected|client\.bootstrap-timeout|initialize\.attempt-error|watchdog\.startup-fired)$/.test(x.event);
++  if(waStage)this.lastWhatsAppStage=x;
++  if(waProblem){this.whatsappOccurrenceCount++;this.whatsappEvents.push(x);if(this.whatsappEvents.length>30)this.whatsappEvents.shift();}
++  if(waStage||waProblem)this.writeReport();
++  return x;}
+  stage(name,status='OK',details={}){this.stages.push({at:new Date().toISOString(),name:String(name),status:String(status),details:clean(details)});if(this.stages.length>200)this.stages.shift();this.event('stage.'+String(name).replace(/\s+/g,'-').toLowerCase(),{status,...details});this.writeReport();}
+  setRemoteReporter(reporter){this.remoteReporter=reporter||null;}
+  error(source,e,details={}){try{this.remoteReporter?.captureException?.(e,{source:String(source),details:clean(details)});}catch(_){}const x={at:new Date().toISOString(),source:String(source),error:err(e),details:clean(details)};this.errors.push(x);if(this.errors.length>200)this.errors.shift();this.event('error',x);try{if(fs.existsSync(this.errorsFile)&&fs.statSync(this.errorsFile).size>2*1024*1024)fs.renameSync(this.errorsFile,this.errorsFile+'.previous');fs.appendFileSync(this.errorsFile,JSON.stringify(x,null,2)+'\n','utf8');}catch(_){}this.writeReport();}
+  system(){const x={platform:process.platform,arch:process.arch,node:process.version,electron:process.versions.electron,chromium:process.versions.chrome,appVersion:this.app.getVersion(),packaged:this.app.isPackaged,execPath:process.execPath,resourcesPath:process.resourcesPath,userData:this.app.getPath('userData'),appData:this.app.getPath('appData'),temp:this.app.getPath('temp'),env:{LOCALAPPDATA:Boolean(process.env.LOCALAPPDATA),PROGRAMFILES:Boolean(process.env.PROGRAMFILES),PROGRAMFILES_X86:Boolean(process.env['PROGRAMFILES(X86)'])},os:{type:os.type(),release:os.release(),version:os.version?.(),totalmem:os.totalmem(),freemem:os.freemem(),cpuModels:[...new Set(os.cpus().map(c=>c.model))]}};try{fs.writeFileSync(path.join(this.dir,'system.json'),JSON.stringify(clean(x),null,2),'utf8');}catch(_){}this.event('system.snapshot',x);}
+  processes(){if(this.platform!=='win32')return;try{const r=this.spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',"Get-CimInstance Win32_Process | Where-Object {$_.Name -match 'Vyzium|chrome|msedge|powershell|followup|compras'} | Select-Object Name,ProcessId,ParentProcessId,ExecutablePath | ConvertTo-Json -Compress"],{encoding:'utf8',windowsHide:true,timeout:8000});fs.writeFileSync(path.join(this.dir,'processes.json'),redact(r.stdout||'[]')||'[]','utf8');this.event('process.snapshot',{exitCode:r.status,stderr:redact(r.stderr||'')});}catch(e){this.error('process.snapshot',e);}}
+- writeReport(){const a=['VYZIUM - RELATORIO DE DIAGNOSTICO INTEGRAL',`Versao: ${this.app.getVersion()}`,`Inicio: ${this.started}`,`Boot: ${this.boot}`,'','LINHA DO TEMPO RESUMIDA'];for(const x of this.stages)a.push(`[${x.status}] ${x.at} - ${x.name}${Object.keys(x.details||{}).length?' | '+redact(JSON.stringify(x.details)):''}`);a.push('',`ERROS CAPTURADOS: ${this.errors.length}`);for(const x of this.errors.slice(-30))a.push(`[ERRO] ${x.at} ${x.source}: ${x.error?.message||'sem mensagem'}`);a.push('','Detalhes: timeline.jsonl, system.json, processes.json, errors.log, hidden-browser.log e whatsapp-debug.jsonl.');try{fs.writeFileSync(this.report,a.join('\r\n'),'utf8');}catch(_){}}
++ writeReport(){const a=['VYZIUM - RELATORIO DE DIAGNOSTICO INTEGRAL',`Versao: ${this.app.getVersion()}`,`Inicio: ${this.started}`,`Boot: ${this.boot}`,'','LINHA DO TEMPO RESUMIDA'];for(const x of this.stages)a.push(`[${x.status}] ${x.at} - ${x.name}${Object.keys(x.details||{}).length?' | '+redact(JSON.stringify(x.details)):''}`);a.push('',`ERROS CAPTURADOS: ${this.errors.length}`);for(const x of this.errors.slice(-30))a.push(`[ERRO] ${x.at} ${x.source}: ${x.error?.message||'sem mensagem'}`);a.push('',`OCORRENCIAS DO WHATSAPP: ${this.whatsappOccurrenceCount} (incluem mensagens do site; nao equivalem necessariamente a falhas fatais)`);if(this.lastWhatsAppStage)a.push(`Ultima etapa WhatsApp: ${this.lastWhatsAppStage.at} ${this.lastWhatsAppStage.event} ${this.lastWhatsAppStage.details.stage||''}`);for(const x of this.whatsappEvents)a.push(`[WHATSAPP] ${x.at} ${x.event}: ${redact(x.details.text||x.details.error?.message||x.details.stage||'consulte a timeline').replace(/[\r\n]+/g,' ').slice(0,900)}`);a.push('','Detalhes: timeline.jsonl, system.json, processes.json, errors.log, hidden-browser.log e whatsapp-debug.jsonl.');try{fs.writeFileSync(this.report,a.join('\r\n'),'utf8');}catch(_){}}
+  copy(source,name){try{if(source&&fs.existsSync(source))fs.copyFileSync(source,path.join(this.dir,name));}catch(e){this.error('diagnostics.copy',e,{name});}}
+  bundle(){if(this.platform!=='win32')return null;try{const out=path.join(path.dirname(this.dir),`Vyzium-Diagnostico-${this.boot}.zip`);const esc=x=>String(x).replace(/'/g,"''");const cmd=`Compress-Archive -LiteralPath '${esc(this.dir)}' -DestinationPath '${esc(out)}' -Force`;const r=this.spawnSync('powershell.exe',['-NoProfile','-NonInteractive','-Command',cmd],{encoding:'utf8',windowsHide:true,timeout:30000});this.event('diagnostics.bundle',{output:out,exitCode:r.status,stderr:redact(r.stderr||'')});return r.status===0&&fs.existsSync(out)?out:null;}catch(e){this.error('diagnostics.bundle',e);return null;}}
+  finalize(extra={}){if(this.finalized)return null;this.finalized=true;this.event('diagnostics.finalize',extra);this.processes();this.writeReport();return this.bundle();}
+--- a/electron/whatsapp.js
++++ b/electron/whatsapp.js
+@@ -293,7 +293,7 @@
+   if (/encerrou antes do Chrome ficar disponível|Chrome encerrou antes|inicializador invisível|Tempo limite ao preparar o Chrome/i.test(text)) return 'browser-launch';
+   if (/profile.*in use|user data directory is already in use|SingletonLock|SingletonCookie|lock file/i.test(text)) return 'profile-lock';
+   if (/ERR_(INTERNET_DISCONNECTED|NETWORK_CHANGED|NAME_NOT_RESOLVED|CONNECTION_(RESET|TIMED_OUT|CLOSED)|PROXY_CONNECTION_FAILED)|ENETUNREACH|ETIMEDOUT|EAI_AGAIN/i.test(text)) return 'network';
+-  if (/Waiting failed|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
++  if (error?.code === 'VYZIUM_BOOTSTRAP_TIMEOUT' || /Waiting failed|auth timeout|ready timeout|não estabilizou o documento|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
+   return null;
+ }
+ 
+@@ -511,6 +511,7 @@
+     return {
+       ...this.state,
+       busy: this.busy,
++      preparingNewQr:this.state.status === 'starting' && this.newQrRequestGeneration === this.generation,
+       monitoring: Boolean(this.monitorTimer) && !this.userPaused,
+       lastHealthCheckAt: this.lastHealthCheckAt || null,
+       lastHealthyAt: this.lastHealthyAt || null,
+@@ -1079,7 +1080,7 @@
+ 
+   async _recoverStalledStartup(generation, options = {}) {
+     if (generation !== this.generation || this.userPaused || this.busy || this.state.status !== 'starting') return;
+-    this._audit('watchdog.startup-fired', {generation, options});
++    this._audit('watchdog.startup-fired', {generation, options, stage:this.client?.__vyziumStartupStage || 'browser-bootstrap'});
+ 
+     // Invalidate every callback/promise from the stalled browser first. The old
+     // initialize() promise may remain pending, but it can no longer mutate the
+@@ -1282,6 +1283,10 @@
+         if (generation === this.generation) this.startupFailureStreak = 0;
+         return result;
+       } catch (error) {
++        if (generation !== this.generation || this.closed || this.userPaused) {
++          this._audit('initialize.cancelled', {generation});
++          return;
++        }
+         lastError = error;
+         const category = classifyRecoverableStartupError(error);
+         this.startupFailureStreak += 1;
+@@ -1384,7 +1389,8 @@
+           puppeteer:puppeteerPkg.version,
+           clientSha256:crypto.createHash('sha256').update(source).digest('hex'),
+           syntax:'loaded-by-node',
+-          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6'),
++          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7'),
++          hasHiddenWindowPolling:(source.toString().match(/polling: 200/g) || []).length >= 4,
+           hasSafeNavigationOrder:source.includes('navigation recovery is installed only after the initial inject'),
+           hasSignalStore:source.includes('WAWebSignalStoreApi'),
+           hasRegistrationUtils:source.includes('AuthStore.RegistrationUtils'),
+@@ -1653,6 +1659,26 @@
+     client.on('change_state', state => this._audit('client.change-state', {generation, state}));
+     client.on('remote_session_saved', () => this._audit('client.remote-session-saved', {generation}));
+     client.on('vyzium_navigation_error', error => this._audit('client.navigation-error', {generation, error}));
++    let startupSnapshotPending = false;
++    client.on('vyzium_inject_stage', details => {
++      if (generation !== this.generation || this.client !== client || this.closed) return;
++      client.__vyziumStartupStage = String(details?.stage || 'unknown');
++      this._audit('client.inject-stage', {generation, stage:client.__vyziumStartupStage, state:details?.state});
++      if (startupSnapshotPending || !client.pupPage || this.state.status !== 'starting') return;
++      startupSnapshotPending = true;
++      Promise.resolve().then(() => client.pupPage.evaluate(() => ({
++        visibility:document.visibilityState,
++        readyState:document.readyState,
++        online:navigator.onLine,
++        hasDebug:Boolean(window.Debug?.VERSION),
++        hasQrElement:Boolean(document.querySelector('[data-ref] canvas')),
++        postLogout:new URL(location.href).searchParams.get('post_logout') === '1'
++      }))).then(snapshot => {
++        if (generation === this.generation && this.client === client && !this.closed) {
++          this._audit('client.startup-snapshot', {generation, ...snapshot});
++        }
++      }).catch(() => {}).finally(() => {startupSnapshotPending = false;});
++    });
+     client.on('vyzium_bootstrap_waiting', details => this._audit('client.bootstrap-waiting', {generation, ...(details || {})}));
+     client.on('vyzium_bootstrap_stable', details => this._audit('client.bootstrap-stable', {generation, ...(details || {})}));
+     client.on('vyzium_bootstrap_timeout', details => this._audit('client.bootstrap-timeout', {generation, ...(details || {})}));
+@@ -1756,6 +1782,10 @@
+   async newQr() {
+     if (this.closed) return this.status();
+     if (this.busy) throw new Error('Aguarde o envio terminar antes de gerar um novo QR Code.');
++    if (this.state.status === 'starting' && this.newQrRequestGeneration === this.generation) {
++      this._audit('action.new-qr-coalesced', {generation:this.generation});
++      return this.status();
++    }
+     this._audit('action.new-qr', {profile:this.authClientId, active:this.sessionState?.activeClientId || null});
+ 
+     this.userPaused = false;
+@@ -1778,6 +1808,7 @@
+     const pendingStart = this.starting;
+     const oldClient = this.client;
+     const actionGeneration = ++this.generation;
++    this.newQrRequestGeneration = actionGeneration;
+     this.client = null;
+     this.starting = null;
+     if (pendingStart && typeof pendingStart.catch === 'function') pendingStart.catch(() => {});
+@@ -1805,6 +1836,7 @@
+         };
+       }
+     });
++    this.newQrRequestGeneration = this.generation;
+     return this.status();
+   }
+ 
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,12 +1,12 @@
+ {
+   "name": "vyzium-gestao-operacional",
+-  "version": "3.3.3",
++  "version": "3.3.4",
+   "lockfileVersion": 3,
+   "requires": true,
+   "packages": {
+     "": {
+       "name": "vyzium-gestao-operacional",
+-      "version": "3.3.3",
++      "version": "3.3.4",
+       "hasInstallScript": true,
+       "dependencies": {
+         "electron-updater": "6.8.9",
+--- a/package.json
++++ b/package.json
+@@ -1,7 +1,7 @@
+ {
+   "name": "vyzium-gestao-operacional",
+-  "version": "3.3.3",
+-  "description": "Vyzium 3.3.3 Production Candidate: WhatsApp self-healing conservador, transacional e Sentry observacional/fail-open.",
++  "version": "3.3.4",
++  "description": "Vyzium 3.3.4: correção da inicialização do WhatsApp com navegador oculto e diagnóstico por etapa.",
+   "main": "electron/main.js",
+   "private": true,
+   "scripts": {
+@@ -12,7 +12,8 @@
+     "build": "electron-builder --win nsis --x64 --publish never",
+     "test:node": "node --test tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
+     "test": "npm run test:backend && npm run test:node",
+-    "postinstall": "node scripts/patch-whatsapp-web.js"
++    "postinstall": "node scripts/patch-whatsapp-web.js",
++    "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs"
+   },
+   "dependencies": {
+     "whatsapp-web.js": "1.34.7",
+--- a/renderer/acompanhamento.html
++++ b/renderer/acompanhamento.html
+@@ -11,7 +11,7 @@
+   <aside class="sidebar">
+     <div class="brand">
+       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.3</span></div>
++      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.4</span></div>
+     </div>
+     <nav id="navigation">
+       <button class="nav-item nav-home" type="button" data-go-home>
+--- a/renderer/compras-app.js
++++ b/renderer/compras-app.js
+@@ -350,7 +350,7 @@
+  document.querySelectorAll('[data-review]').forEach(el=>on(el,'click',async()=>{if(!confirm('Você conferiu esta mensagem na conversa do fornecedor?'))return;await api('POST','/review',{id:el.dataset.review,outcome:el.dataset.outcome});await renderHistory();}));
+ }
+ async function renderSettings() {
+- $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.3')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
++ $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.4')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
+  startWhatsAppPanel();
+  on($('#zoom'),'change',async()=>{ui.zoom=Number($('#zoom').value);await window.followup.setZoom(ui.zoom);await persist();});
+  const loadSafety=async()=>{try{const state=await api('GET','/data-safety');const protection=state.encrypted?'🔒 Criptografado com SQLCipher':'Banco legado sem criptografia';$('#compras-data-safety').innerHTML=`<strong>${state.integrity?.ok?'✓ Banco íntegro':'⚠ Verificação requer atenção'}</strong> · ${esc(protection)}<br>Schema ${esc(state.schema_version??'—')}`;}catch(e){$('#compras-data-safety').textContent='Não foi possível verificar a segurança do banco.';}};
+--- a/renderer/compras.html
++++ b/renderer/compras.html
+@@ -12,7 +12,7 @@
+   <aside class="sidebar">
+     <div class="brand">
+       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.3</span></div>
++      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.4</span></div>
+     </div>
+     <nav id="navigation">
+       <button class="nav-item nav-home" type="button" data-go-home>
+--- a/renderer/index.html
++++ b/renderer/index.html
+@@ -12,7 +12,7 @@
+   <aside class="sidebar">
+     <div class="brand">
+       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.3</span></div>
++      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.4</span></div>
+     </div>
+     <nav id="navigation">
+       <button class="nav-item active" type="button">
+@@ -39,7 +39,7 @@
+         <h1>Visão geral</h1>
+       </div>
+       <div class="top-actions home-module-actions">
+-        <span class="mode-badge" data-app-version data-app-version-prefix="Versão ">Versão 3.3.3</span>
++        <span class="mode-badge" data-app-version data-app-version-prefix="Versão ">Versão 3.3.4</span>
+       </div>
+     </header>
+ 
+--- a/renderer/version.js
++++ b/renderer/version.js
+@@ -4,7 +4,7 @@
+ // only as an offline/development fallback so release numbers cannot drift across
+ // Electron, Python engines and the renderer again.
+ (() => {
+-  const fallback = '3.3.3';
++  const fallback = '3.3.4';
+   const valid = value => /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(String(value || '').trim());
+   const paint = version => {
+     const safe = valid(version) ? String(version).trim() : fallback;
+--- a/renderer/whatsapp.js
++++ b/renderer/whatsapp.js
+@@ -31,6 +31,7 @@
+       else {qr.removeAttribute('src');qr.classList.add('hidden');}
+       document.getElementById('wa-description').textContent = data.error || (data.status === 'ready'
+         ? `Conectado${data.account ? ' ao número ' + data.account : ''}. Sessão pronta para envio.`
++        : data.status === 'starting' ? 'Preparando o WhatsApp. Aguarde a geração do QR Code; se houver falha, a recuperação será tentada automaticamente.'
+         : data.status === 'qr' ? 'Escaneie o QR Code. Ele será renovado automaticamente enquanto aguarda.'
+         : data.status === 'authenticated' ? 'Conta autorizada. Aguarde o término da sincronização.'
+         : data.status === 'paused' ? 'Conexão pausada. Clique em Retomar conexão quando quiser usar o WhatsApp novamente.'
+@@ -40,7 +41,7 @@
+       connectButton.textContent = data.status === 'paused' ? 'Retomar conexão' : (data.status === 'ready' ? 'Conectado' : (data.firstConnectionPending ? 'Conectar' : 'Conectar / reconectar'));
+       connectButton.disabled = ['starting','qr','authenticated','ready'].includes(data.status);
+       const newQrButton = document.getElementById('wa-new-qr');
+-      newQrButton.disabled = data.busy || ['qr','authenticated'].includes(data.status);
++      newQrButton.disabled = data.busy || data.preparingNewQr || ['qr','authenticated'].includes(data.status);
+       document.getElementById('wa-pause').disabled = data.busy || data.status === 'paused';
+     } catch (_) {if (target.isConnected) target.textContent = 'Não foi possível consultar a conexão.';}
+     if (target.isConnected) whatsappPoll = setTimeout(update, 1500);
+--- a/scripts/diagnose-whatsapp.js
++++ b/scripts/diagnose-whatsapp.js
+@@ -37,7 +37,7 @@
+     clientFile,
+     clientSha256:crypto.createHash('sha256').update(source).digest('hex'),
+     syntax,
+-    hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6'),
++    hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7'),
+     hasSafeNavigationOrder:source.indexOf('await this.inject();') < source.indexOf("this.pupPage.on('framenavigated'"),
+     hasInjectMutex:source.includes('let vyziumNavigationRecovery = null'),
+     deletesProfileInsideNavigationHandler:navigationBlock.includes('await this.authStrategy.logout()'),
+--- a/scripts/patch-whatsapp-web.js
++++ b/scripts/patch-whatsapp-web.js
+@@ -7,7 +7,8 @@
+ // Backports the QR/bootstrap fixes already present on whatsapp-web.js main to
+ // the currently published npm 1.34.7 package. Keep the npm version pinned for
+ // reproducible installs; patch only the startup/authentication code paths.
+-const PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6';
++const PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7';
++const PREVIOUS_PATCH_MARKER_V6 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6';
+ const PREVIOUS_PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V5';
+ const PREVIOUS_PATCH_MARKER_V4 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V4';
+ const PREVIOUS_PATCH_MARKER_V3 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V3';
+@@ -89,8 +90,50 @@
+   return source.replace(tolerant, replacement);
+ }
+ 
++// Hidden native Windows windows may never deliver another animation frame.
++// Keep Puppeteer's navigation-aware WaitTask, but poll startup state by timer.
++function patchHiddenStartup(source) {
++  source = source.replaceAll('{ timeout: authTimeout }', '{ timeout: authTimeout, polling: 200 }');
++  source = source.replace(".waitForFunction('typeof window.WWebJS !== \"undefined\"', { timeout: 30000 })",
++    ".waitForFunction('typeof window.WWebJS !== \"undefined\"', { timeout: 30000, polling: 200 })");
++  if (!source.includes("stage: 'debug-wait'")) {
++    source = mustReplace(source, '        const authTimeout = this.options.authTimeoutMs || 30000;',
++      "        this.emit('vyzium_inject_stage', { stage: 'debug-wait' });\n        const authTimeout = this.options.authTimeoutMs || 30000;", 'etapa Debug');
++    source = mustReplace(source, '        await this.setDeviceName(',
++      "        this.emit('vyzium_inject_stage', { stage: 'debug-ready' });\n        await this.setDeviceName(", 'etapa Debug pronta');
++    source = mustReplace(source, '        const needAuthHandle = await this.pupPage.waitForFunction(',
++      "        this.emit('vyzium_inject_stage', { stage: 'socket-wait' });\n        const needAuthHandle = await this.pupPage.waitForFunction(", 'etapa Socket');
++    source = mustReplace(source, '        const needAuthentication = await needAuthHandle.jsonValue();',
++      "        let needAuthentication;\n        try { needAuthentication = await needAuthHandle.jsonValue(); }\n        finally { await needAuthHandle.dispose(); }\n        this.emit('vyzium_inject_stage', { stage: 'socket-ready', state: needAuthentication.state });", 'etapa Socket pronta');
++    source = mustReplace(source, `                await this.pupPage.waitForFunction(\n                    ${QR_MODULE_PROBE_SOURCE}`,
++      `                this.emit('vyzium_inject_stage', { stage: 'qr-modules-wait' });\n                await this.pupPage.waitForFunction(\n                    ${QR_MODULE_PROBE_SOURCE}`, 'etapa módulos QR');
++    source = mustReplace(source, '                await this.pupPage.evaluate(async () => {\n                    const registrationInfo = await window',
++      "                this.emit('vyzium_inject_stage', { stage: 'qr-build' });\n                await this.pupPage.evaluate(async () => {\n                    const registrationInfo = await window", 'etapa geração QR');
++    source = mustReplace(source, "                        Conn.off('change:ref', onRefChange);\n                    });\n                });",
++      "                        Conn.off('change:ref', onRefChange);\n                    });\n                });\n                this.emit('vyzium_inject_stage', { stage: 'qr-listener-ready' });", 'etapa listener QR');
++    source = mustReplace(source, '        await this.inject();\n        let vyziumNavigationRecovery',
++      "        await this.inject();\n        this.emit('vyzium_inject_stage', { stage: 'injection-complete' });\n        let vyziumNavigationRecovery", 'etapa injeção pronta');
++  }
++  if (!source.includes('VYZIUM_STARTUP_CANCELLED')) {
++    source = mustReplace(source, '        while (Date.now() < vyziumBootstrapDeadline) {',
++      `        while (Date.now() < vyziumBootstrapDeadline) {
++            if (page.isClosed()) {
++                throw Object.assign(new Error('Inicialização do WhatsApp cancelada: página fechada.'), { code: 'VYZIUM_STARTUP_CANCELLED' });
++            }`, 'cancelamento da espera');
++  }
++  source = source.replace("throw new Error('WhatsApp Web não estabilizou o documento inicial dentro do prazo.');",
++    "throw Object.assign(new Error('WhatsApp Web não estabilizou o documento inicial dentro do prazo.'), { code: 'VYZIUM_BOOTSTRAP_TIMEOUT' });");
++  return source;
++}
++
+ function patchClientSource(input) {
+   let source = String(input).replace(/\r\n/g, '\n');
++  const finish = value => {
++    const patched = patchHiddenStartup(value);
++    assertValidJavaScript(patched);
++    return {source:patched, changed:patched !== String(input)};
++  };
++  source = source.replaceAll(PREVIOUS_PATCH_MARKER_V6, PATCH_MARKER);
+   if (source.includes(PREVIOUS_PATCH_MARKER_V2)) {
+     source = repairMalformedV2QrClosure(source).replaceAll(PREVIOUS_PATCH_MARKER_V2, PATCH_MARKER);
+   }
+@@ -110,12 +153,12 @@
+     if (hasSafeNavigationOrder && hasStableBootstrapBarrier && hasRestoredSessionReplay && source.includes("const socketModule = window.require('WAWebSocketModel')") && source.includes('catch (_)')) {
+       try {
+         assertValidJavaScript(source);
+-        return { source, changed: false };
++        return finish(source);
+       } catch (error) {
+         const repaired = repairMalformedV2QrClosure(source);
+         if (repaired === source) throw error;
+         assertValidJavaScript(repaired);
+-        return { source:repaired, changed:true };
++        return finish(repaired);
+       }
+     }
+   }
+@@ -315,7 +358,7 @@
+   // former runtime QR failure into an immediate, readable install-time error.
+   assertValidJavaScript(source);
+ 
+-  return { source, changed: true };
++  return finish(source);
+ }
+ 
+ function applyPatch(projectRoot = path.resolve(__dirname, '..')) {
+--- a/scripts/verify-whatsapp-patch.js
++++ b/scripts/verify-whatsapp-patch.js
+@@ -25,6 +25,9 @@
+   }
+ 
+   if (!source.includes(PATCH_MARKER)) fail(`marcador ${PATCH_MARKER} ausente.`);
++  if ((source.match(/polling: 200/g) || []).length < 4) fail('esperas independentes de animação ausentes.');
++  if (source.includes('{ timeout: authTimeout }')) fail('espera de autenticação ainda depende de requestAnimationFrame.');
++  if (!source.includes("stage: 'socket-wait'") || !source.includes('VYZIUM_STARTUP_CANCELLED')) fail('diagnóstico/cancelamento de inicialização ausente.');
+   if (!source.includes('const needAuthHandle = await this.pupPage.waitForFunction(')) fail('detecção moderna do estado de autenticação ausente.');
+   if (!source.includes("const socketModule = window.require('WAWebSocketModel')")) fail('probe resiliente de WAWebSocketModel ausente.');
+   if (!source.includes('catch (_)')) fail('probe do bootstrap ainda pode abortar por módulo não resolvido.');
+--- a/tests/diagnostics.cjs
++++ b/tests/diagnostics.cjs
+@@ -9,7 +9,7 @@
+ function fakeApp(root) {
+   return {
+     getPath(name) { return name === 'userData' ? root : path.join(root, name); },
+-    getVersion() { return '3.3.3'; },
++    getVersion() { return '3.3.4'; },
+     isPackaged: false
+   };
+ }
+@@ -68,3 +68,17 @@
+   assert.ok(!command.includes('\\*'));const count=calls.length;d.finalize();assert.equal(calls.length,count);
+  }finally{fs.rmSync(root,{recursive:true,force:true});}
+ });
++
++test('report surfaces WhatsApp storage errors and last stage even without app errors', () => {
++ const root=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-diag-wa-'));
++ try{
++  const d=new FullDiagnostics(fakeApp(root));
++  d.event('whatsapp.page.console',{type:'warn',text:'Permissions-Policy'});
++  d.event('whatsapp.page.console',{type:'error',text:'storage_initialization_error token: sensitive'});
++  d.event('whatsapp.client.inject-stage',{stage:'socket-wait',generation:3});
++  const report=fs.readFileSync(d.report,'utf8');
++  assert.match(report,/ERROS CAPTURADOS: 0/);assert.match(report,/OCORRENCIAS DO WHATSAPP: 1/);
++  assert.match(report,/storage_initialization_error/);assert.match(report,/socket-wait/);
++  assert.doesNotMatch(report,/sensitive/);
++ }finally{fs.rmSync(root,{recursive:true,force:true});}
++});
+--- a/tests/project-config.cjs
++++ b/tests/project-config.cjs
+@@ -31,7 +31,7 @@
+ });
+ 
+ 
+-test('3.3.3 keeps one authoritative release version across package, Python and renderer', () => {
++test('3.3.4 keeps one authoritative release version across package, Python and renderer', () => {
+   const lock = JSON.parse(read('package-lock.json'));
+   assert.equal(lock.version, pkg.version);
+   assert.equal(lock.packages?.['']?.version, pkg.version);
+@@ -108,7 +108,7 @@
+ });
+ 
+ test('3.1 data safety and authentication files are included', () => {
+-  assert.equal(pkg.version, '3.3.3');
++  assert.equal(pkg.version, '3.3.4');
+   for (const rel of [
+     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
+     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
+@@ -128,8 +128,8 @@
+   assert.equal(pkg.overrides, undefined);
+   const patch = read('scripts/patch-whatsapp-web.js');
+   const whatsapp = read('electron/whatsapp.js');
+-  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6/);
+-  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6/);
++  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
++  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
+   assert.match(patch, /Vyzium restored-session replay/);
+ });
+ 
+--- a/tests/whatsapp-browser.cjs
++++ b/tests/whatsapp-browser.cjs
+@@ -0,0 +1,87 @@
++'use strict';
++// Real Puppeteer + real installed/patched Client.inject, synthetic WhatsApp modules.
++// requestAnimationFrame is deliberately suspended to reproduce hidden-window waits.
++// No WhatsApp network, accounts, credentials or messages are used.
++const {test, before, after} = require('node:test');
++const assert = require('node:assert/strict');
++const vm = require('node:vm');
++const puppeteer = require('puppeteer');
++const {Client} = require('whatsapp-web.js');
++const {SOCKET_STATE_PROBE_SOURCE} = require('../scripts/patch-whatsapp-web');
++let browser;
++before(async () => {
++  if (!process.env.VYZIUM_TEST_CHROMIUM) throw new Error('Defina VYZIUM_TEST_CHROMIUM com o executável de Chromium de teste.');
++  browser = await puppeteer.launch({executablePath:process.env.VYZIUM_TEST_CHROMIUM,headless:true,
++    // Linux CI sandbox exception is TEST ONLY; production launcher is unchanged.
++    args:process.platform === 'linux' ? ['--no-sandbox','--disable-gpu','--disable-background-timer-throttling'] : []});
++});
++after(async () => {await browser?.close();});
++async function setup(t, restored = false) {
++  const page = await browser.newPage();
++  t.after(() => page.close());
++  await page.evaluate(restored => {
++    window.requestAnimationFrame = () => 1;
++    const eventSource = data => Object.assign(data, {handlers:{},on(name,fn){(this.handlers[name] ||= []).push(fn);},
++      off(name,fn){this.handlers[name]=(this.handlers[name]||[]).filter(x=>x!==fn);}});
++    const Socket = eventSource({state:'OPENING',hasSynced:restored});
++    const Conn = eventSource({ref:'synthetic-ref'});
++    window.__modules = {WAWebSocketModel:{Socket},WAWebConnModel:{Conn},WAWebCmd:{Cmd:eventSource({})}};
++    window.require = name => {if(!window.__modules[name])throw Error('Module not ready');return window.__modules[name];};
++    if(restored)window.WWebJS = {};
++    setTimeout(()=>{window.Debug={VERSION:'synthetic-version'};},150);
++    setTimeout(()=>{Socket.state=restored?'CONNECTED':'UNPAIRED';},400);
++    setTimeout(()=>Object.assign(window.__modules, {
++      WAWebSignalStoreApi:{waSignalStore:{getRegistrationInfo:async()=>({identityKeyPair:{pubKey:'identity'}})}},
++      WAWebUserPrefsInfoStore:{waNoiseInfo:{get:async()=>({staticKeyPair:{pubKey:'noise'}})}},
++      WABase64:{encodeB64:value=>btoa(value)},
++      WAWebUserPrefsMultiDevice:{getADVSecretKey:async()=>'synthetic-secret'},
++      WAWebCompanionRegClientUtils:{DEVICE_PLATFORM:'DESKTOP'}
++    }),650);
++  },restored);
++  return page;
++}
++test('control: RAF polling stalls after socket state becomes ready', async t => {
++  const page = await setup(t);
++  const probe = vm.runInNewContext(`(${SOCKET_STATE_PROBE_SOURCE})`);
++  await assert.rejects(page.waitForFunction(probe,{timeout:1200}), /Waiting failed/);
++  assert.equal(await page.evaluate(()=>window.__modules.WAWebSocketModel.Socket.state),'UNPAIRED');
++});
++test('patched inject emits and renews QR with RAF stopped and delayed modules', async t => {
++  const page = await setup(t);
++  const client = new Client({authTimeoutMs:3000});client.pupPage=page;
++  const qrs=[],stages=[];
++  client.on('qr',qr=>qrs.push(qr));client.on('vyzium_inject_stage',x=>stages.push(x.stage));
++  await client.inject();
++  await page.waitForFunction(()=>Boolean(window.onAppStateHasSyncedEvent),{polling:200,timeout:1000});
++  assert.equal(qrs.length,1);
++  assert.ok(qrs[0].startsWith('synthetic-ref,'));
++  assert.deepEqual(stages,['debug-wait','debug-ready','socket-wait','socket-ready','qr-modules-wait','qr-build','qr-listener-ready']);
++  await page.evaluate(()=>window.__modules.WAWebConnModel.Conn.handlers['change:ref'].forEach(fn=>fn(null,'renewed-ref')));
++  await new Promise(resolve=>setTimeout(resolve,100));
++  assert.equal(qrs.length,2);assert.ok(qrs[1].startsWith('renewed-ref,'));
++});
++test('restored synchronized session reaches ready with RAF stopped', async t => {
++  const page = await setup(t,true);
++  const client=new Client({authTimeoutMs:3000});client.pupPage=page;
++  let ready=0,qr=0;client.on('ready',()=>ready++);client.on('qr',()=>qr++);
++  await client.inject();await new Promise(resolve=>setTimeout(resolve,100));
++  assert.equal(ready,1);assert.equal(qr,0);
++});
++test('numeric polling survives replacement of the document execution context', async t => {
++  const page=await browser.newPage();t.after(()=>page.close());
++  await page.evaluateOnNewDocument(()=>{window.requestAnimationFrame=()=>1;setTimeout(()=>{window.Debug={VERSION:'after-reload'};},300);});
++  await page.evaluate(()=>{window.requestAnimationFrame=()=>1;});
++  const waiting=page.waitForFunction('window.Debug?.VERSION != undefined',{polling:200,timeout:3000});
++  await page.goto('data:text/html,<body>replacement</body>');
++  const handle=await waiting;assert.equal(await handle.jsonValue(),true);await handle.dispose();
++});
++test('closed page cancels the real bootstrap barrier immediately', async t => {
++  const fs=require('node:fs'),path=require('node:path');
++  const source=fs.readFileSync(path.join(path.dirname(require.resolve('whatsapp-web.js/package.json')),'src/Client.js'),'utf8');
++  const start=source.indexOf('        const vyziumBootstrapDeadline');
++  const end=source.indexOf('        // VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7: navigation recovery',start);
++  assert.ok(start>=0 && end>start);
++  const barrier=vm.runInNewContext(`(async function(page){${source.slice(start,end)}})`,{setTimeout});
++  const page=await browser.newPage();await page.close();
++  await assert.rejects(barrier.call({emit(){}},page),error=>error.code==='VYZIUM_STARTUP_CANCELLED');
++});
+--- a/tests/whatsapp-lifecycle.cjs
++++ b/tests/whatsapp-lifecycle.cjs
+@@ -130,3 +130,30 @@
+  const {s}=fixture(t);const waiting=assert.rejects(s.waitReady(5000),/cancelada/);
+  await tick();await s.shutdown();await waiting;
+ });
++
++test('duplicate new QR calls share the pending launch and preserve its profile',async t=>{
++ const {s,clients}=fixture(t);await s._connectInternal();
++ const release=deferred();s.client.destroy=()=>release.promise;
++ const first=s.newQr();await tick();const generation=s.generation;
++ await s.newQr();assert.equal(s.generation,generation);
++ release.resolve();await first;await tick();const profile=s.authClientId;
++ await s.newQr();assert.equal(s.authClientId,profile);assert.equal(clients.length,2);
++ s.state.status='error';await s.newQr();assert.notEqual(s.authClientId,profile);
++});
++
++test('cancelled initialization cannot increment failures of its replacement',async t=>{
++ const {s}=fixture(t);let reject;
++ s.deps.library.Client.prototype.initialize=()=>new Promise((_,r)=>{reject=r;});
++ const pending=s._connectInternal();await tick();await s.pause();
++ s.startupFailureStreak=0;reject(new Error('waitForFunction failed: frame got detached.'));
++ await pending;assert.equal(s.startupFailureStreak,0);assert.equal(s.state.status,'paused');
++});
++
++test('startup diagnostics report the waiting stage without capturing QR values',async t=>{
++ const {s,dir}=fixture(t);await s._connectInternal();
++ s.client.pupPage={evaluate:async()=>({visibility:'hidden',readyState:'complete',online:true,hasDebug:true,hasQrElement:true,postLogout:false})};
++ s.client.emit('vyzium_inject_stage',{stage:'socket-wait'});await tick();
++ assert.equal(s.client.__vyziumStartupStage,'socket-wait');
++ const events=fs.readFileSync(s.auditFile,'utf8').trim().split('\n').map(JSON.parse);
++ assert.ok(events.some(x=>x.event==='client.startup-snapshot'&&x.details.visibility==='hidden'));
++});
+--- a/tests/whatsapp.cjs
++++ b/tests/whatsapp.cjs
+@@ -737,7 +737,7 @@
+ 
+ test('renderer keeps Generate new QR available while startup is stuck',()=>{
+  const source=fs.readFileSync(path.join(__dirname,'..','renderer/whatsapp.js'),'utf8');
+- assert.match(source,/newQrButton\.disabled = data\.busy \|\| \['qr','authenticated'\]\.includes\(data\.status\)/);
++ assert.match(source,/newQrButton\.disabled = data\.busy \|\| data\.preparingNewQr \|\| \['qr','authenticated'\]\.includes\(data\.status\)/);
+  assert.doesNotMatch(source,/newQrButton\.disabled[^\n]*\['starting'/);
+ });
+ 
