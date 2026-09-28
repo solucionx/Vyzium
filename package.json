@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.3.6",
-  "description": "Vyzium 3.3.6: busca de contatos do Acompanhamento nos mapas de compra e inclusão manual de fornecedores.",
+  "version": "3.3.7",
+  "description": "Vyzium 3.3.7: edição da mensagem de cotação por fornecedor e envio para todos em sequência.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
-    "test:node": "node --test tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
+    "test:node": "node --test tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
     "test": "npm run test:backend && npm run test:node",
     "postinstall": "node scripts/patch-whatsapp-web.js",
     "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs"

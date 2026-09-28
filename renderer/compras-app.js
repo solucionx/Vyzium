@@ -374,10 +374,71 @@ function negotiationDialog() {
  on($('#send-negotiation'),'click',async()=>{if(!previewData||sending)return;const p=previewData,message=$('#negotiation-message')?.value||'';sending=true;$('#send-negotiation').disabled=true;$('#negotiation-supplier').disabled=true;$('#send-negotiation').textContent='Aguardando conexão e envio…';try{const r=await api('POST','/send-negotiation',{map_id:activeMap.id,supplier_id:p.supplier.id,fingerprint:p.fingerprint,revision:p.revision,message});toast(r.status==='sent'?'Negociação enviada ao WhatsApp.':`${r.status==='uncertain'?'Envio incerto':'Falha'}: ${r.error||'Consulte o histórico.'}`);sending=false;closeModal();}finally{sending=false;if($('#send-negotiation')){$('#send-negotiation').textContent='Enviar negociação';$('#send-negotiation').disabled=false;$('#negotiation-supplier').disabled=false;}}});
 }
 function quoteDialog() {
- modal(`<h2>Solicitar cotação</h2><details><summary>Conexão do WhatsApp / QR Code</summary>${whatsappPanel()}</details><label>Fornecedor<select id="quote-supplier"><option value="">Selecione um fornecedor</option>${activeMap.suppliers.map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.phone||'sem WhatsApp')}</option>`).join('')}</select></label><div id="quote-preview"></div><p class="muted">Somente os itens deste mapa serão enviados. Os preços dos concorrentes não aparecem na mensagem.</p><button id="send-quote" class="button primary" disabled>Enviar solicitação</button>`);
- previewData=null;startWhatsAppPanel();
- on($('#quote-supplier'),'change',async()=>{const sid=$('#quote-supplier').value;$('#send-quote').disabled=true;previewData=null;$('#quote-preview').innerHTML='';if(!sid)return;const p=await api('GET',`/preview?id=${encodeURIComponent(activeMap.id)}&supplier=${encodeURIComponent(sid)}`);if($('#quote-supplier')?.value!==sid)return;previewData=p;$('#quote-preview').innerHTML=`<p><strong>Destino: ${esc(p.supplier.name)} · ${esc(p.supplier.phone||'Cadastre o número antes de enviar')}</strong></p><pre class="message-preview">${esc(p.message)}</pre>`;$('#send-quote').disabled=!p.supplier.phone;});
- on($('#send-quote'),'click',async()=>{if(!previewData||sending)return;const p=previewData;sending=true;$('#send-quote').disabled=true;$('#quote-supplier').disabled=true;$('#send-quote').textContent='Aguardando conexão e envio…';try{const r=await api('POST','/send',{map_id:activeMap.id,supplier_id:p.supplier.id,fingerprint:p.fingerprint,revision:p.revision});toast(r.status==='sent'?'Solicitação enviada ao WhatsApp.':`${r.status==='uncertain'?'Envio incerto':'Falha'}: ${r.error||'Consulte o histórico.'}`);sending=false;closeModal();}finally{sending=false;if($('#send-quote')){$('#send-quote').textContent='Enviar solicitação';$('#send-quote').disabled=false;$('#quote-supplier').disabled=false;}}});
+ const map=activeMap,drafts=new Map(),previews=new Map(),outcomes=new Map();
+ let chosen='',selection=0;
+ modal(`<h2>Solicitar cotação</h2><details><summary>Conexão do WhatsApp / QR Code</summary>${whatsappPanel()}</details><label>Fornecedor<select id="quote-supplier"><option value="">Selecione para revisar a mensagem</option>${map.suppliers.map(s=>`<option value="${esc(s.id)}">${esc(s.name)} · ${esc(s.phone||'sem WhatsApp')}</option>`).join('')}</select></label><div id="quote-preview"></div><p class="muted">Edite a mensagem de cada fornecedor antes de enviar. Apagar itens ou observações aqui altera apenas o texto enviado, sem modificar o mapa. O envio para todos usa as mensagens editadas e o texto padrão para os demais.</p><div class="toolbar"><button id="send-quote" class="button primary" disabled>Enviar ao selecionado</button><button id="send-all-quotes" class="button primary">Enviar para todos</button></div><p id="quote-progress" role="status"></p><div id="quote-results" aria-live="polite"></div>`);
+ startWhatsAppPanel();
+ const remember=()=>{const editor=$('#quote-message');if(chosen&&editor)drafts.set(chosen,editor.value);};
+ const locked=sid=>['sent','uncertain','sending'].includes(outcomes.get(sid)?.status);
+ const showResults=()=>{$('#quote-results').innerHTML=map.suppliers.filter(s=>outcomes.has(s.id)).map(s=>`<p><strong>${esc(s.name)}:</strong> ${esc(outcomes.get(s.id).label)}</p>`).join('');};
+ const controls=busy=>{
+  $('#quote-supplier').disabled=busy;$('#send-all-quotes').disabled=busy||!map.suppliers.some(s=>s.phone&&!locked(s.id));
+  $('#send-quote').disabled=busy||!previews.get(chosen)?.supplier.phone||locked(chosen);
+  if($('#quote-message'))$('#quote-message').disabled=busy||locked(chosen);
+ };
+ const preview=async sid=>{
+  if(!previews.has(sid)){
+   const p=await api('GET',`/preview?id=${encodeURIComponent(map.id)}&supplier=${encodeURIComponent(sid)}`);
+   previews.set(sid,p);if(!drafts.has(sid))drafts.set(sid,p.message);
+  }
+  return previews.get(sid);
+ };
+ on($('#quote-supplier'),'change',async()=>{
+  if(sending)return;remember();chosen=$('#quote-supplier').value;const sid=chosen,token=++selection;
+  $('#quote-preview').innerHTML='';controls(false);if(!sid)return;
+  try {
+   const p=await preview(sid);
+   if(token!==selection||!$('#quote-supplier')||sending)return;
+   $('#quote-preview').innerHTML=`<p><strong>Destino: ${esc(p.supplier.name)} · ${esc(p.supplier.phone||'Cadastre o número antes de enviar')}</strong></p><label>Mensagem<textarea id="quote-message" rows="12" maxlength="60000">${esc(drafts.get(sid))}</textarea></label>`;
+   controls(false);
+  }catch(error){if(token===selection&&$('#quote-progress'))$('#quote-progress').textContent=error.message;}
+ });
+ const send=async all=>{
+  if(sending||activeMap!==map)return;remember();
+  const targets=all?map.suppliers:map.suppliers.filter(s=>s.id===chosen);
+  if(!targets.length)return;
+  sending=true;++selection;controls(true);
+  try {
+   // Resolve and validate all messages before the first dispatch. No silent
+   // fallback to the default text when an edited message is empty.
+   const queue=[];
+   for(const s of targets){
+    if(locked(s.id))continue;
+    if(!s.phone){outcomes.set(s.id,{status:'skipped',label:'Não enviado: sem WhatsApp cadastrado.'});continue;}
+    const p=await preview(s.id),message=drafts.get(s.id);
+    if(!message?.trim()||message.length>60000)throw new Error(`Revise a mensagem de ${s.name}: informe de 1 a 60000 caracteres.`);
+    queue.push({s,p,message});
+   }
+   for(let i=0;i<queue.length;i++){
+    const {s,p,message}=queue[i];
+    $('#quote-progress').textContent=`Enviando ${i+1} de ${queue.length}: ${s.name}…`;
+    try {
+     const result=await api('POST','/send',{map_id:map.id,supplier_id:s.id,fingerprint:p.fingerprint,revision:p.revision,message});
+     outcomes.set(s.id,{status:result.status,label:result.status==='sent'?'Enviada.':`${result.status==='uncertain'?'Envio incerto':'Falha'}: ${result.error||'Consulte o histórico.'}`});
+    }catch(error){
+     // An IPC/HTTP error may happen after submission. Stop and require history
+     // review instead of allowing another click to duplicate this request.
+     outcomes.set(s.id,{status:'uncertain',label:`Envio não confirmado: ${error.message}. Confira o histórico antes de tentar novamente.`});
+     $('#quote-progress').textContent='Lote interrompido. Confira o histórico; os fornecedores restantes não foram enviados.';
+     return;
+    }finally{showResults();}
+   }
+   $('#quote-progress').textContent='Envio finalizado. Confira o resultado de cada fornecedor abaixo.';
+  }catch(error){$('#quote-progress').textContent=error.message;}
+  finally{sending=false;showResults();controls(false);}
+ };
+ on($('#send-quote'),'click',()=>send(false));
+ on($('#send-all-quotes'),'click',()=>send(true));controls(false);
 }
 async function renderHistory() {
  const rows=await api('GET','/history');const labels={sending:'Em andamento',sent:'Enviada',failed:'Falha antes de concluir',uncertain:'Envio incerto',reviewed_not_received:'Conferida: não recebida'};
@@ -385,7 +446,7 @@ async function renderHistory() {
  document.querySelectorAll('[data-review]').forEach(el=>on(el,'click',async()=>{if(!confirm('Você conferiu esta mensagem na conversa do fornecedor?'))return;await api('POST','/review',{id:el.dataset.review,outcome:el.dataset.outcome});await renderHistory();}));
 }
 async function renderSettings() {
- $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.6')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
+ $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.7')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
  startWhatsAppPanel();
  on($('#zoom'),'change',async()=>{ui.zoom=Number($('#zoom').value);await window.followup.setZoom(ui.zoom);await persist();});
  const loadSafety=async()=>{try{const state=await api('GET','/data-safety');const protection=state.encrypted?'🔒 Criptografado com SQLCipher':'Banco legado sem criptografia';$('#compras-data-safety').innerHTML=`<strong>${state.integrity?.ok?'✓ Banco íntegro':'⚠ Verificação requer atenção'}</strong> · ${esc(protection)}<br>Schema ${esc(state.schema_version??'—')}`;}catch(e){$('#compras-data-safety').textContent='Não foi possível verificar a segurança do banco.';}};

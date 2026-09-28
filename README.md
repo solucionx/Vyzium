@@ -1,3 +1,7 @@
+# Atualização 3.3.7
+
+Solicitações de cotação com mensagem editável por fornecedor e botão Enviar para todos. Consulte `docs/ENVIO_COTACAO_3.3.7.md`.
+
 # Atualização 3.3.6
 
 O mapa de compra permite pesquisar fornecedores do Acompanhamento e preencher nome e WhatsApp ao selecionar um resultado. O preenchimento manual continua disponível. Consulte `docs/CONTATOS_FORNECEDORES_3.3.6.md`.
