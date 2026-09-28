@@ -176,6 +176,39 @@ class PurchasesTest(unittest.TestCase):
                 self.s.send(self.send_body())
             self.assertEqual(bridge.call_count, 2)
 
+    def test_quote_edited_text_is_sent_and_stored_without_changing_map(self):
+        before = self.s.get_map(self.m['id'])
+        body = {**self.send_body(), 'message': 'Olá!\nCote somente este item, sem observação.'}
+        with patch('compras_engine.whatsapp_request', side_effect=[{'ready': True}, {'status': 'sent'}]) as bridge:
+            result = self.s.send(body)
+        self.assertEqual(bridge.call_args.args[1]['message'], body['message'])
+        self.assertEqual(result['message'], body['message'])
+        self.assertEqual(self.s.all('messages')[0]['message'], body['message'])
+        self.assertEqual(self.s.get_map(self.m['id']), before)
+        with patch('compras_engine.whatsapp_request') as bridge:
+            with self.assertRaises(ValueError):
+                self.s.send({**body, 'message': 'Outro texto'})
+            bridge.assert_not_called()
+
+    def test_invalid_quote_message_never_contacts_whatsapp(self):
+        for message in ['', '  ', None, 123, 'x' * 60001]:
+            with self.subTest(message_type=type(message).__name__):
+                with patch('compras_engine.whatsapp_request') as bridge:
+                    with self.assertRaises(ValueError):
+                        self.s.send({**self.send_body(), 'message': message})
+                    bridge.assert_not_called()
+        self.assertEqual(self.s.all('messages'), [])
+        self.assertFalse(self.s.send_lock.locked())
+
+    def test_uncertain_edited_quote_cannot_be_retried_by_changing_text(self):
+        body = {**self.send_body(), 'message': 'Solicitação editada'}
+        with patch('compras_engine.whatsapp_request', side_effect=[{}, TimeoutError('timeout')]):
+            self.assertEqual(self.s.send(body)['status'], 'uncertain')
+        with patch('compras_engine.whatsapp_request') as bridge:
+            with self.assertRaises(ValueError):
+                self.s.send({**body, 'message': 'Texto diferente'})
+            bridge.assert_not_called()
+
     def test_uncertain_result_requires_review(self):
         with patch('compras_engine.whatsapp_request', side_effect=[{'ready': True}, TimeoutError('timeout')]):
             msg = self.s.send(self.send_body())

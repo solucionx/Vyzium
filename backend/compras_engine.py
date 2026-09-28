@@ -28,7 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.6')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.7')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
@@ -867,6 +867,14 @@ class Store:
                     raise ValueError('Cadastre o WhatsApp deste fornecedor.')
                 if any(m['fingerprint'] == p['fingerprint'] and m['status'] in ('sent', 'sending', 'uncertain') for m in self.all('messages')):
                     raise ValueError('Esta solicitação já foi enviada ou está incerta. Consulte o Histórico.')
+                message = body.get('message', p['message'])
+                if not isinstance(message, str) or not message.strip():
+                    raise ValueError('A mensagem de cotação não pode ficar vazia.')
+                if len(message) > 60000:
+                    raise ValueError('Mensagem muito grande para o WhatsApp.')
+                # Keep the original preview fingerprint: editing the text must
+                # not bypass protection for an already sent/uncertain request.
+                p = {**p, 'message': message}
                 record = {'id': uuid.uuid4().hex, 'at': now(), 'map_id': body['map_id'], 'kind': 'quote', **p, 'status': 'sending'}
                 self.put('messages', record['id'], record)
             whatsapp_request('/wait')
