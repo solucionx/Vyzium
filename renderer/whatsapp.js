@@ -31,6 +31,7 @@ function startWhatsAppPanel() {
       else {qr.removeAttribute('src');qr.classList.add('hidden');}
       document.getElementById('wa-description').textContent = data.error || (data.status === 'ready'
         ? `Conectado${data.account ? ' ao número ' + data.account : ''}. Sessão pronta para envio.`
+        : data.status === 'starting' ? 'Preparando o WhatsApp. Aguarde a geração do QR Code; se houver falha, a recuperação será tentada automaticamente.'
         : data.status === 'qr' ? 'Escaneie o QR Code. Ele será renovado automaticamente enquanto aguarda.'
         : data.status === 'authenticated' ? 'Conta autorizada. Aguarde o término da sincronização.'
         : data.status === 'paused' ? 'Conexão pausada. Clique em Retomar conexão quando quiser usar o WhatsApp novamente.'
@@ -40,7 +41,7 @@ function startWhatsAppPanel() {
       connectButton.textContent = data.status === 'paused' ? 'Retomar conexão' : (data.status === 'ready' ? 'Conectado' : (data.firstConnectionPending ? 'Conectar' : 'Conectar / reconectar'));
       connectButton.disabled = ['starting','qr','authenticated','ready'].includes(data.status);
       const newQrButton = document.getElementById('wa-new-qr');
-      newQrButton.disabled = data.busy || ['qr','authenticated'].includes(data.status);
+      newQrButton.disabled = data.busy || data.preparingNewQr || ['qr','authenticated'].includes(data.status);
       document.getElementById('wa-pause').disabled = data.busy || data.status === 'paused';
     } catch (_) {if (target.isConnected) target.textContent = 'Não foi possível consultar a conexão.';}
     if (target.isConnected) whatsappPoll = setTimeout(update, 1500);

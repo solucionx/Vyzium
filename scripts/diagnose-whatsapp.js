@@ -37,7 +37,7 @@ function diagnose(projectRoot = path.resolve(__dirname, '..')) {
     clientFile,
     clientSha256:crypto.createHash('sha256').update(source).digest('hex'),
     syntax,
-    hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6'),
+    hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7'),
     hasSafeNavigationOrder:source.indexOf('await this.inject();') < source.indexOf("this.pupPage.on('framenavigated'"),
     hasInjectMutex:source.includes('let vyziumNavigationRecovery = null'),
     deletesProfileInsideNavigationHandler:navigationBlock.includes('await this.authStrategy.logout()'),

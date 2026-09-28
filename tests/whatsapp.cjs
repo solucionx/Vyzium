@@ -737,7 +737,7 @@ test('explicit new QR cancels a stuck starting generation without waiting for in
 
 test('renderer keeps Generate new QR available while startup is stuck',()=>{
  const source=fs.readFileSync(path.join(__dirname,'..','renderer/whatsapp.js'),'utf8');
- assert.match(source,/newQrButton\.disabled = data\.busy \|\| \['qr','authenticated'\]\.includes\(data\.status\)/);
+ assert.match(source,/newQrButton\.disabled = data\.busy \|\| data\.preparingNewQr \|\| \['qr','authenticated'\]\.includes\(data\.status\)/);
  assert.doesNotMatch(source,/newQrButton\.disabled[^\n]*\['starting'/);
 });
 

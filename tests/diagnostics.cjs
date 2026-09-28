@@ -9,7 +9,7 @@ const {FullDiagnostics, redact} = require('../electron/diagnostics');
 function fakeApp(root) {
   return {
     getPath(name) { return name === 'userData' ? root : path.join(root, name); },
-    getVersion() { return '3.3.3'; },
+    getVersion() { return '3.3.4'; },
     isPackaged: false
   };
 }
@@ -66,5 +66,19 @@ test('diagnostic bundle uses a literal directory, verifies output and finalizes 
   const command=calls.find(a=>a.at(-1).includes('Compress-Archive')).at(-1);
   assert.ok(command.includes("-LiteralPath '"+d.dir.replace(/'/g,"''")+"'"));
   assert.ok(!command.includes('\\*'));const count=calls.length;d.finalize();assert.equal(calls.length,count);
+ }finally{fs.rmSync(root,{recursive:true,force:true});}
+});
+
+test('report surfaces WhatsApp storage errors and last stage even without app errors', () => {
+ const root=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-diag-wa-'));
+ try{
+  const d=new FullDiagnostics(fakeApp(root));
+  d.event('whatsapp.page.console',{type:'warn',text:'Permissions-Policy'});
+  d.event('whatsapp.page.console',{type:'error',text:'storage_initialization_error token: sensitive'});
+  d.event('whatsapp.client.inject-stage',{stage:'socket-wait',generation:3});
+  const report=fs.readFileSync(d.report,'utf8');
+  assert.match(report,/ERROS CAPTURADOS: 0/);assert.match(report,/OCORRENCIAS DO WHATSAPP: 1/);
+  assert.match(report,/storage_initialization_error/);assert.match(report,/socket-wait/);
+  assert.doesNotMatch(report,/sensitive/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });

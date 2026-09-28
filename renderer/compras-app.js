@@ -319,13 +319,48 @@ function renderMap(detail) {
  on($('#export-map'),'click',async()=>{if(dirty)await saveMap();if(await window.followup.exportMap(m.id))toast('Mapa exportado.');});
  if($('#complete-map'))on($('#complete-map'),'click',async()=>{if(!confirm('Concluir este mapa de compra? Ele sairá de Em cotação, ficará disponível em Concluídos e os itens poderão ser usados em novos mapas.'))return;if(dirty)await saveMap();await api('POST','/maps/complete',{id:m.id});dirty=false;activeMap=null;mapListScope='completed';toast('Mapa concluído e movido para Concluídos.');await navigate('maps');});
  on($('#delete-map'),'click',async()=>{if(!confirm('Excluir definitivamente este mapa e todas as cotações registradas nele? Mensagens já enviadas permanecem no Histórico. Esta ação não pode ser desfeita pela tela.'))return;await api('POST','/maps/delete',{id:m.id});dirty=false;activeMap=null;toast('Mapa e cotações excluídos.');await navigate('maps');});
- on($('#add-supplier'),'click',()=>{captureMap();m.suppliers.push({id:crypto.randomUUID(),name:`Fornecedor ${m.suppliers.length+1}`,phone:''});renderMap({...detail,result:r});markDirty();});
+ on($('#add-supplier'),'click',()=>addSupplierDialog(detail));
  document.querySelectorAll('[data-remove-supplier]').forEach(el=>on(el,'click',()=>{if(!confirm('Remover este fornecedor e os preços dele deste mapa?'))return;captureMap();m.suppliers=m.suppliers.filter(s=>s.id!==el.dataset.removeSupplier);for(const [itemId,award] of Object.entries(m.awards||{})){if(award.supplier_id===el.dataset.removeSupplier)delete m.awards[itemId];}renderMap({...detail,result:r});markDirty();}));
  document.querySelectorAll('[data-remove-item]').forEach(el=>on(el,'click',()=>removeMapItem(el.dataset.removeItem)));
  document.querySelectorAll('[data-award]').forEach(el=>on(el,'click',async()=>{if(dirty)await saveMap();await awardDialog(el.dataset.award);}));
  on($('#request-quote'),'click',async()=>{if(dirty)await saveMap();quoteDialog();});
  on($('#request-negotiation'),'click',async()=>{if(dirty)await saveMap();negotiationDialog();});
  if(m.archived){document.querySelectorAll('#content input,#content textarea,#content select,#save-map,#add-supplier,[data-remove-supplier],[data-award]').forEach(el=>el.disabled=true);}
+}
+function addSupplierDialog(detail) {
+ const map=activeMap;
+ if(!map||map.archived||sending||addingMapItems||removingMapItem)return;
+ captureMap();
+ modal(`<h2>Adicionar fornecedor</h2><p class="muted">Pesquise no Acompanhamento ou preencha nome e WhatsApp manualmente.</p><label>Buscar fornecedor cadastrado<input id="supplier-search" placeholder="Nome, contato ou telefone" autocomplete="off"></label><p id="supplier-search-status" class="muted" role="status">Carregando fornecedores…</p><div id="supplier-search-results" class="supplier-search-results"></div><form id="supplier-add-form"><label>Nome do fornecedor<input id="supplier-add-name" required maxlength="160" autocomplete="off"></label><label>WhatsApp com país e DDD<input id="supplier-add-phone" placeholder="5585999999999" autocomplete="off"></label><p class="muted">Você pode editar os dados antes de adicionar ao mapa.</p><div class="modal-actions"><button type="button" id="supplier-add-cancel" class="button secondary">Cancelar</button><button type="submit" class="button primary">Adicionar ao mapa</button></div></form>`);
+ const search=$('#supplier-search'),results=$('#supplier-search-results'),status=$('#supplier-search-status');
+ const name=$('#supplier-add-name'),phone=$('#supplier-add-phone');
+ let contacts=[];
+ const draw=()=>{
+  const query=normalizedSearch(search.value).trim();
+  const matches=query?contacts.filter(s=>normalizedSearch(`${s.name} ${s.contact} ${s.phone}`).includes(query)):[];
+  results.innerHTML=matches.slice(0,30).map((s,i)=>`<button type="button" class="button secondary" data-contact-index="${i}"><strong>${esc(s.name)}</strong><span>${esc(s.phone||'Sem telefone cadastrado')}${s.contact?` · ${esc(s.contact)}`:''}</span></button>`).join('');
+  status.textContent=query?(matches.length?`${matches.length} encontrados${matches.length>30?' — exibindo 30; refine a busca':''}.`:'Nenhum fornecedor encontrado. Preencha os dados abaixo.'): 'Digite para pesquisar ou preencha os dados abaixo.';
+  results.querySelectorAll('[data-contact-index]').forEach(button=>button.addEventListener('click',()=>{
+   const s=matches[Number(button.dataset.contactIndex)];name.value=s.name;phone.value=s.phone;phone.focus();
+  }));
+ };
+ search.addEventListener('input',draw);
+ $('#supplier-add-cancel').addEventListener('click',closeModal);
+ $('#supplier-add-form').addEventListener('submit',e=>{
+  e.preventDefault();
+  if(activeMap!==map||currentView!=='map'||map.archived){closeModal();return;}
+  const supplierName=name.value.trim();if(!supplierName){name.focus();return;}
+  captureMap();
+  map.suppliers.push({id:crypto.randomUUID(),name:supplierName,phone:phone.value.trim()});
+  closeModal();renderMap(detail);markDirty();
+ });
+ window.followup.api('GET','/supplier-contacts').then(data=>{
+  if(!search.isConnected)return;
+  contacts=Array.isArray(data.suppliers)?data.suppliers:[];draw();
+ }).catch(()=>{
+  if(!search.isConnected)return;
+  status.textContent='Não foi possível consultar o Acompanhamento. Você pode preencher nome e WhatsApp manualmente.';
+ });
 }
 function resultHtml(r,m) {
  const gross=Number(r.gross??(Number(r.net)+Number(r.saving))),defined=Math.max(0,m.items.length-r.unquoted-r.ties),completion=m.items.length?Math.round((defined/m.items.length)*100):0;
@@ -350,7 +385,7 @@ async function renderHistory() {
  document.querySelectorAll('[data-review]').forEach(el=>on(el,'click',async()=>{if(!confirm('Você conferiu esta mensagem na conversa do fornecedor?'))return;await api('POST','/review',{id:el.dataset.review,outcome:el.dataset.outcome});await renderHistory();}));
 }
 async function renderSettings() {
- $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.3')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
+ $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar backup agora</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.6')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
  startWhatsAppPanel();
  on($('#zoom'),'change',async()=>{ui.zoom=Number($('#zoom').value);await window.followup.setZoom(ui.zoom);await persist();});
  const loadSafety=async()=>{try{const state=await api('GET','/data-safety');const protection=state.encrypted?'🔒 Criptografado com SQLCipher':'Banco legado sem criptografia';$('#compras-data-safety').innerHTML=`<strong>${state.integrity?.ok?'✓ Banco íntegro':'⚠ Verificação requer atenção'}</strong> · ${esc(protection)}<br>Schema ${esc(state.schema_version??'—')}`;}catch(e){$('#compras-data-safety').textContent='Não foi possível verificar a segurança do banco.';}};

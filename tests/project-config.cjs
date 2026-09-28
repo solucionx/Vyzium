@@ -31,7 +31,7 @@ test('release version changes preserve the original dependency versions and arch
 });
 
 
-test('3.3.3 keeps one authoritative release version across package, Python and renderer', () => {
+test('3.3.6 keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -108,7 +108,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.3.3');
+  assert.equal(pkg.version, '3.3.6');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
@@ -128,8 +128,8 @@ test('WhatsApp dependency remains pinned while the bootstrap fix stays focused',
   assert.equal(pkg.overrides, undefined);
   const patch = read('scripts/patch-whatsapp-web.js');
   const whatsapp = read('electron/whatsapp.js');
-  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6/);
-  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6/);
+  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
+  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
   assert.match(patch, /Vyzium restored-session replay/);
 });
 

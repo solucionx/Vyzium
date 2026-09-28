@@ -28,7 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.3')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.3.6')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
@@ -119,6 +119,14 @@ def now():
     return datetime.now().isoformat(timespec='seconds')
 
 
+def has_active_order(row):
+    """Only an explicitly cancelled OC item releases an existing order."""
+    if text(row.get('IDORDEMDECOMPRA')) in ('', '0', '0.0'):
+        return False
+    status = text(row.get('NMSTATUSITEMDAORDEMDECOMPRA'))
+    return re.fullmatch(r'3(?:\.0+)?(?:\s*[-–—]\s*cancelado)?', status, re.IGNORECASE) is None
+
+
 def load_items(path):
     """Read the raw SCI export, never treating receipt rows as new demand."""
     book = open_book(path, load_workbook)
@@ -131,7 +139,7 @@ def load_items(path):
         required = {'FKEMPRESA', 'EMPRESA', 'IDSCI', 'IDITEMDASCI', 'DESCRICAOARTIGO',
                     'QUANTIDADESCI', 'UNIDADEDEMEDIDASCI', 'IDORDEMDECOMPRA',
                     'NMSTATUSDOITEMDASCI', 'NMSTATUSBPMSCI', 'COMPRADOR'}
-        recognized = required | REPORT_REQUIRED
+        recognized = required | REPORT_REQUIRED | {'STATUS DO ITEM DA OC', 'NMSTATUSITEMDAORDEMDECOMPRA'}
         for sheet in book:
             sheet.reset_dimensions()  # SCI export declares A1:A1 despite containing all rows.
             best = None
@@ -163,9 +171,11 @@ def load_items(path):
                 continue
             r = dict(zip(headers, row))
             if report_format:
+                order_item_status = r.get('STATUS DO ITEM DA OC')
                 r = adapt_report(r, norm, text)
                 if r is None:
                     continue
+                r['NMSTATUSITEMDAORDEMDECOMPRA'] = order_item_status
             rows_seen += 1
             key = '|'.join(text(r.get(k)) for k in ('FKEMPRESA', 'IDSCI', 'IDITEMDASCI'))
             if not text(r.get('IDITEMDASCI')) or not text(r.get('IDSCI')):
@@ -180,7 +190,7 @@ def load_items(path):
         if len(rows) > 1 and rows[0].get('REPORT_IDENTITY'):
             excluded['conflict'] += 1
             continue
-        if any(text(r.get('IDORDEMDECOMPRA')) not in ('', '0', '0.0') for r in rows):
+        if any(has_active_order(r) for r in rows):
             excluded['with_order'] += 1
             continue
         if any(text(r.get('NMSTATUSDOITEMDASCI')) in ('4', '6') or text(r.get('NMSTATUSBPMSCI')) in ('2', '4') for r in rows):

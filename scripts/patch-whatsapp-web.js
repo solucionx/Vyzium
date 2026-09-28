@@ -7,7 +7,8 @@ const vm = require('node:vm');
 // Backports the QR/bootstrap fixes already present on whatsapp-web.js main to
 // the currently published npm 1.34.7 package. Keep the npm version pinned for
 // reproducible installs; patch only the startup/authentication code paths.
-const PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6';
+const PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7';
+const PREVIOUS_PATCH_MARKER_V6 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6';
 const PREVIOUS_PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V5';
 const PREVIOUS_PATCH_MARKER_V4 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V4';
 const PREVIOUS_PATCH_MARKER_V3 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V3';
@@ -89,8 +90,50 @@ function replaceNavigationBlock(source, replacement) {
   return source.replace(tolerant, replacement);
 }
 
+// Hidden native Windows windows may never deliver another animation frame.
+// Keep Puppeteer's navigation-aware WaitTask, but poll startup state by timer.
+function patchHiddenStartup(source) {
+  source = source.replaceAll('{ timeout: authTimeout }', '{ timeout: authTimeout, polling: 200 }');
+  source = source.replace(".waitForFunction('typeof window.WWebJS !== \"undefined\"', { timeout: 30000 })",
+    ".waitForFunction('typeof window.WWebJS !== \"undefined\"', { timeout: 30000, polling: 200 })");
+  if (!source.includes("stage: 'debug-wait'")) {
+    source = mustReplace(source, '        const authTimeout = this.options.authTimeoutMs || 30000;',
+      "        this.emit('vyzium_inject_stage', { stage: 'debug-wait' });\n        const authTimeout = this.options.authTimeoutMs || 30000;", 'etapa Debug');
+    source = mustReplace(source, '        await this.setDeviceName(',
+      "        this.emit('vyzium_inject_stage', { stage: 'debug-ready' });\n        await this.setDeviceName(", 'etapa Debug pronta');
+    source = mustReplace(source, '        const needAuthHandle = await this.pupPage.waitForFunction(',
+      "        this.emit('vyzium_inject_stage', { stage: 'socket-wait' });\n        const needAuthHandle = await this.pupPage.waitForFunction(", 'etapa Socket');
+    source = mustReplace(source, '        const needAuthentication = await needAuthHandle.jsonValue();',
+      "        let needAuthentication;\n        try { needAuthentication = await needAuthHandle.jsonValue(); }\n        finally { await needAuthHandle.dispose(); }\n        this.emit('vyzium_inject_stage', { stage: 'socket-ready', state: needAuthentication.state });", 'etapa Socket pronta');
+    source = mustReplace(source, `                await this.pupPage.waitForFunction(\n                    ${QR_MODULE_PROBE_SOURCE}`,
+      `                this.emit('vyzium_inject_stage', { stage: 'qr-modules-wait' });\n                await this.pupPage.waitForFunction(\n                    ${QR_MODULE_PROBE_SOURCE}`, 'etapa módulos QR');
+    source = mustReplace(source, '                await this.pupPage.evaluate(async () => {\n                    const registrationInfo = await window',
+      "                this.emit('vyzium_inject_stage', { stage: 'qr-build' });\n                await this.pupPage.evaluate(async () => {\n                    const registrationInfo = await window", 'etapa geração QR');
+    source = mustReplace(source, "                        Conn.off('change:ref', onRefChange);\n                    });\n                });",
+      "                        Conn.off('change:ref', onRefChange);\n                    });\n                });\n                this.emit('vyzium_inject_stage', { stage: 'qr-listener-ready' });", 'etapa listener QR');
+    source = mustReplace(source, '        await this.inject();\n        let vyziumNavigationRecovery',
+      "        await this.inject();\n        this.emit('vyzium_inject_stage', { stage: 'injection-complete' });\n        let vyziumNavigationRecovery", 'etapa injeção pronta');
+  }
+  if (!source.includes('VYZIUM_STARTUP_CANCELLED')) {
+    source = mustReplace(source, '        while (Date.now() < vyziumBootstrapDeadline) {',
+      `        while (Date.now() < vyziumBootstrapDeadline) {
+            if (page.isClosed()) {
+                throw Object.assign(new Error('Inicialização do WhatsApp cancelada: página fechada.'), { code: 'VYZIUM_STARTUP_CANCELLED' });
+            }`, 'cancelamento da espera');
+  }
+  source = source.replace("throw new Error('WhatsApp Web não estabilizou o documento inicial dentro do prazo.');",
+    "throw Object.assign(new Error('WhatsApp Web não estabilizou o documento inicial dentro do prazo.'), { code: 'VYZIUM_BOOTSTRAP_TIMEOUT' });");
+  return source;
+}
+
 function patchClientSource(input) {
   let source = String(input).replace(/\r\n/g, '\n');
+  const finish = value => {
+    const patched = patchHiddenStartup(value);
+    assertValidJavaScript(patched);
+    return {source:patched, changed:patched !== String(input)};
+  };
+  source = source.replaceAll(PREVIOUS_PATCH_MARKER_V6, PATCH_MARKER);
   if (source.includes(PREVIOUS_PATCH_MARKER_V2)) {
     source = repairMalformedV2QrClosure(source).replaceAll(PREVIOUS_PATCH_MARKER_V2, PATCH_MARKER);
   }
@@ -110,12 +153,12 @@ function patchClientSource(input) {
     if (hasSafeNavigationOrder && hasStableBootstrapBarrier && hasRestoredSessionReplay && source.includes("const socketModule = window.require('WAWebSocketModel')") && source.includes('catch (_)')) {
       try {
         assertValidJavaScript(source);
-        return { source, changed: false };
+        return finish(source);
       } catch (error) {
         const repaired = repairMalformedV2QrClosure(source);
         if (repaired === source) throw error;
         assertValidJavaScript(repaired);
-        return { source:repaired, changed:true };
+        return finish(repaired);
       }
     }
   }
@@ -315,7 +358,7 @@ function patchClientSource(input) {
   // former runtime QR failure into an immediate, readable install-time error.
   assertValidJavaScript(source);
 
-  return { source, changed: true };
+  return finish(source);
 }
 
 function applyPatch(projectRoot = path.resolve(__dirname, '..')) {

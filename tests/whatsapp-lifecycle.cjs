@@ -130,3 +130,30 @@ test('shutdown promptly releases bridge callers waiting for readiness',async t=>
  const {s}=fixture(t);const waiting=assert.rejects(s.waitReady(5000),/cancelada/);
  await tick();await s.shutdown();await waiting;
 });
+
+test('duplicate new QR calls share the pending launch and preserve its profile',async t=>{
+ const {s,clients}=fixture(t);await s._connectInternal();
+ const release=deferred();s.client.destroy=()=>release.promise;
+ const first=s.newQr();await tick();const generation=s.generation;
+ await s.newQr();assert.equal(s.generation,generation);
+ release.resolve();await first;await tick();const profile=s.authClientId;
+ await s.newQr();assert.equal(s.authClientId,profile);assert.equal(clients.length,2);
+ s.state.status='error';await s.newQr();assert.notEqual(s.authClientId,profile);
+});
+
+test('cancelled initialization cannot increment failures of its replacement',async t=>{
+ const {s}=fixture(t);let reject;
+ s.deps.library.Client.prototype.initialize=()=>new Promise((_,r)=>{reject=r;});
+ const pending=s._connectInternal();await tick();await s.pause();
+ s.startupFailureStreak=0;reject(new Error('waitForFunction failed: frame got detached.'));
+ await pending;assert.equal(s.startupFailureStreak,0);assert.equal(s.state.status,'paused');
+});
+
+test('startup diagnostics report the waiting stage without capturing QR values',async t=>{
+ const {s,dir}=fixture(t);await s._connectInternal();
+ s.client.pupPage={evaluate:async()=>({visibility:'hidden',readyState:'complete',online:true,hasDebug:true,hasQrElement:true,postLogout:false})};
+ s.client.emit('vyzium_inject_stage',{stage:'socket-wait'});await tick();
+ assert.equal(s.client.__vyziumStartupStage,'socket-wait');
+ const events=fs.readFileSync(s.auditFile,'utf8').trim().split('\n').map(JSON.parse);
+ assert.ok(events.some(x=>x.event==='client.startup-snapshot'&&x.details.visibility==='hidden'));
+});

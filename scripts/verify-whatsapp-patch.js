@@ -25,6 +25,9 @@ function verifyPatch(projectRoot = path.resolve(__dirname, '..')) {
   }
 
   if (!source.includes(PATCH_MARKER)) fail(`marcador ${PATCH_MARKER} ausente.`);
+  if ((source.match(/polling: 200/g) || []).length < 4) fail('esperas independentes de animação ausentes.');
+  if (source.includes('{ timeout: authTimeout }')) fail('espera de autenticação ainda depende de requestAnimationFrame.');
+  if (!source.includes("stage: 'socket-wait'") || !source.includes('VYZIUM_STARTUP_CANCELLED')) fail('diagnóstico/cancelamento de inicialização ausente.');
   if (!source.includes('const needAuthHandle = await this.pupPage.waitForFunction(')) fail('detecção moderna do estado de autenticação ausente.');
   if (!source.includes("const socketModule = window.require('WAWebSocketModel')")) fail('probe resiliente de WAWebSocketModel ausente.');
   if (!source.includes('catch (_)')) fail('probe do bootstrap ainda pode abortar por módulo não resolvido.');
