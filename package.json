@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.3.8",
-  "description": "Vyzium 3.3.8: backup criptografado no Vyzium Server (manual e ao fechar) e correção de primeira conexão do WhatsApp.",
+  "version": "3.4.0-rc.1",
+  "description": "Vyzium 3.4 RC1: restauração segura, merge com conflitos, linhagem de backups e proteção contra regressão de dados.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -38,7 +38,8 @@
         "to": "backend",
         "filter": [
           "followup-engine.exe",
-          "compras-engine.exe"
+          "compras-engine.exe",
+          "backup-sync-engine.exe"
         ]
       }
     ],
