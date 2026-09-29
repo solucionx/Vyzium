@@ -148,29 +148,26 @@ def _choose_value(module: str, table: str, key: Any, field: str, local: Any, rem
     raise ValueError(f"Conflito sem resolução: {cid}")
 
 
-def _record_fields_merge(module: str, table: str, key: Any, local: dict[str, Any], remote: dict[str, Any], base: dict[str, Any] | None, fields: tuple[str, ...], report: MergeReport, resolutions: dict[str, str] | None, apply: bool) -> tuple[dict[str, Any], bool]:
-    merged = dict(local)
-    changed = False
+def _record_fields_merge(module: str, table: str, key: Any, local: dict[str, Any], remote: dict[str, Any], base: dict[str, Any] | None, fields: tuple[str, ...], report: MergeReport, resolutions: dict[str, str] | None, apply: bool) -> tuple[dict[str, Any], bool, bool]:
+    merged = dict(remote)
     for field in fields:
-        value, _choice_changed_local = _choose_value(
+        value, _ = _choose_value(
             module, table, key, field,
             local.get(field), remote.get(field),
             base is not None, base.get(field) if base else None,
             report, resolutions, apply,
         )
         merged[field] = value
-        # The output candidate is a copy of REMOTE. A selected local value must
-        # therefore be written even when the merge decision is "keep local".
-        changed = changed or not _same(value, remote.get(field))
 
     # updated_at is metadata. Never let an older timestamp erase a newer one.
     if "updated_at" in local or "updated_at" in remote:
         candidates = [str(v) for v in (local.get("updated_at"), remote.get("updated_at")) if v]
         if candidates:
             merged["updated_at"] = max(candidates)
-            changed = changed or not _same(merged["updated_at"], remote.get("updated_at"))
-    return merged, changed
 
+    write_needed = any(not _same(merged.get(field), remote.get(field)) for field in (*fields, "updated_at"))
+    changed_from_local = any(not _same(merged.get(field), local.get(field)) for field in fields)
+    return merged, write_needed, changed_from_local
 
 def _record_presence_conflict(module: str, table: str, key: Any, local: dict[str, Any] | None, remote: dict[str, Any] | None, base: dict[str, Any] | None, report: MergeReport, resolutions: dict[str, str] | None, apply: bool) -> str:
     cid = _conflict_id(module, table, key, "__row__", "possible_deletion")
@@ -218,21 +215,21 @@ def _merge_keyed_table(
             if all(_same(local.get(f), remote.get(f)) for f in fields):
                 report.equal += 1
                 continue
-            merged, changed = _record_fields_merge(module, table, key, local, remote, base, fields, report, resolutions, apply)
-            if changed:
+            merged, write_needed, changed_from_local = _record_fields_merge(module, table, key, local, remote, base, fields, report, resolutions, apply)
+            if changed_from_local:
                 report.updates += 1
-                if apply:
-                    set_fields = [f for f in fields if f in columns]
-                    if "updated_at" in columns and "updated_at" not in set_fields:
-                        set_fields.append("updated_at")
-                    assignments = ",".join(f"{f}=?" for f in set_fields)
-                    where = " AND ".join(f"{f}=?" for f in key_fields)
-                    out.execute(
-                        f"UPDATE {table} SET {assignments} WHERE {where}",
-                        tuple(merged.get(f) for f in set_fields) + tuple(key),
-                    )
             else:
                 report.preserved_local += 1
+            if apply and write_needed:
+                set_fields = [f for f in fields if f in columns]
+                if "updated_at" in columns and "updated_at" not in set_fields:
+                    set_fields.append("updated_at")
+                assignments = ",".join(f"{f}=?" for f in set_fields)
+                where = " AND ".join(f"{f}=?" for f in key_fields)
+                out.execute(
+                    f"UPDATE {table} SET {assignments} WHERE {where}",
+                    tuple(merged.get(f) for f in set_fields) + tuple(key),
+                )
             continue
 
         if local is None and remote is not None:
@@ -426,58 +423,63 @@ def _merge_followup(local: Path, remote: Path, base: Path | None, out, key_hex: 
 
 def _merge_json_value(module: str, table: str, key: str, path: str, local: Any, remote: Any, base_present: bool, base: Any, report: MergeReport, resolutions: dict[str, str] | None, apply: bool):
     if _same(local, remote):
-        return local, False
+        return remote
+
     if base_present:
-        if _same(local, base):
-            return remote, True
-        if _same(remote, base):
-            return local, False
+        if _same(local, base) and not _same(remote, base):
+            return remote
+        if _same(remote, base) and not _same(local, base):
+            return local
 
     if isinstance(local, dict) and isinstance(remote, dict) and (not base_present or isinstance(base, dict)):
-        result = dict(local)
-        changed = False
+        # Candidate starts from remote; missing remote keys are supplemented by
+        # local data, while remote-only keys remain unless a real tombstone/base
+        # proves an intentional deletion.
+        result = dict(remote)
         base_dict = base if isinstance(base, dict) else {}
         for k in sorted(set(local) | set(remote)):
-            lv = local.get(k)
-            rv = remote.get(k)
-            bp = base_present and k in base_dict
-            bv = base_dict.get(k)
             if k not in local:
-                result[k] = rv
-                changed = True
                 continue
             if k not in remote:
-                # Absence is not deletion without a tombstone.
+                result[k] = local[k]
                 continue
-            merged, did = _merge_json_value(module, table, key, f"{path}.{k}" if path else k, lv, rv, bp, bv, report, resolutions, apply)
-            result[k] = merged
-            changed = changed or did
-        return result, changed
+            result[k] = _merge_json_value(
+                module, table, key, f"{path}.{k}" if path else k,
+                local[k], remote[k],
+                base_present and k in base_dict, base_dict.get(k),
+                report, resolutions, apply,
+            )
+        return result
 
-    # Lists of dictionaries with stable "id" are merged by id. Other lists are
-    # treated as one field to avoid guessing order/deletion semantics.
+    # Stable-id lists are merged as sets of records while retaining remote order,
+    # then appending genuinely local-only entries.
     if isinstance(local, list) and isinstance(remote, list) and all(isinstance(x, dict) and "id" in x for x in local + remote):
         lmap = {str(x["id"]): x for x in local}
         rmap = {str(x["id"]): x for x in remote}
         bmap = {str(x["id"]): x for x in base} if base_present and isinstance(base, list) and all(isinstance(x, dict) and "id" in x for x in base) else {}
-        order = [str(x["id"]) for x in local]
-        result = list(local)
-        result_map = {str(x["id"]): i for i, x in enumerate(result)}
-        changed = False
-        for rid in [*order, *[x for x in rmap if x not in lmap]]:
-            if rid not in lmap:
-                result.append(rmap[rid]); changed = True; continue
-            if rid not in rmap:
-                continue
-            merged, did = _merge_json_value(module, table, key, f"{path}[{rid}]", lmap[rid], rmap[rid], rid in bmap, bmap.get(rid), report, resolutions, apply)
-            if did:
-                result[result_map[rid]] = merged; changed = True
-        return result, changed
+        result = []
+        seen: set[str] = set()
+        for item in remote:
+            rid = str(item["id"])
+            seen.add(rid)
+            if rid in lmap:
+                result.append(_merge_json_value(
+                    module, table, key, f"{path}[{rid}]",
+                    lmap[rid], item, rid in bmap, bmap.get(rid),
+                    report, resolutions, apply,
+                ))
+            else:
+                result.append(item)
+        for item in local:
+            rid = str(item["id"])
+            if rid not in seen:
+                result.append(item)
+        return result
 
     if _blank(local) and not _blank(remote):
-        return remote, True
+        return remote
     if _blank(remote) and not _blank(local):
-        return local, False
+        return local
 
     cid = _conflict_id(module, table, key, path or "data", "json_field")
     report.conflicts.append({
@@ -486,14 +488,13 @@ def _merge_json_value(module: str, table: str, key: str, path: str, local: Any, 
         "base": base if base_present else None,
     })
     if not apply:
-        return local, False
+        return local
     choice = (resolutions or {}).get(cid)
     if choice == "remote":
-        return remote, True
+        return remote
     if choice == "local":
-        return local, False
+        return local
     raise ValueError(f"Conflito sem resolução: {cid}")
-
 
 def _merge_compras(local: Path, remote: Path, base: Path | None, out, key_hex: str | None, report: MergeReport, resolutions: dict[str, str] | None, apply: bool):
     lmaps = _fetch_json_rows(local, "maps", key_hex)
@@ -544,13 +545,15 @@ def _merge_compras(local: Path, remote: Path, base: Path | None, out, key_hex: s
         if _same(l, r):
             report.equal += 1
             continue
-        merged, changed = _merge_json_value("compras", "maps", mid, "", l, r, b is not None, b, report, resolutions, apply)
-        if changed:
+        merged = _merge_json_value("compras", "maps", mid, "", l, r, b is not None, b, report, resolutions, apply)
+        changed_from_local = not _same(merged, l)
+        write_needed = not _same(merged, r)
+        if changed_from_local:
             report.updates += 1
-            if apply:
-                out.execute("UPDATE maps SET data=? WHERE id=?", (json.dumps(merged, ensure_ascii=False), mid))
         else:
             report.preserved_local += 1
+        if apply and write_needed:
+            out.execute("UPDATE maps SET data=? WHERE id=?", (json.dumps(merged, ensure_ascii=False), mid))
 
     # Candidate starts from remote. Append local-only message history. If the
     # same immutable message id differs, retain the local copy and report it.
