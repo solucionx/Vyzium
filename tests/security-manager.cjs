@@ -115,6 +115,23 @@ test('prepare reports visible setup stages instead of a generic endless spinner'
   }
 });
 
+test('existing account recovery envelope blocks creation of a different root key on a new PC', async () => {
+  const f=fixture();
+  try {
+    const prepared=await f.manager.prepare();
+    assert.ok(prepared.recoveryCode);
+    fs.unlinkSync(f.manager.vaultPath('uid-test-123'));
+    await assert.rejects(
+      f.manager.prepare(),
+      /já possui uma chave de recuperação|bloqueou a criação de uma chave nova/i
+    );
+    assert.equal(fs.existsSync(f.manager.vaultPath('uid-test-123')),false);
+    const status=await f.manager.status();
+    assert.equal(status.recoveryEnvelopeAvailable,true);
+    assert.equal(status.recoveryRequired,true);
+  } finally { f.cleanup(); }
+});
+
 test('an unusable local vault fails closed and advertises recovery instead of ready', async () => {
   const f = fixture();
   try {
