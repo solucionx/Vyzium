@@ -5,7 +5,7 @@ const path = require('path');
 
 const root = path.resolve(__dirname, '..');
 
-function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
+function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8').replace(/\r\n/g, '\n'); }
 function write(rel, value) { fs.writeFileSync(path.join(root, rel), value, 'utf8'); }
 function replaceRequired(source, search, replacement, label) {
   if (source.includes(replacement)) return source;
