@@ -346,6 +346,7 @@ class WhatsAppSession {
     // upstream whatsapp-web.js 1.34.7 + fixed LocalAuth clientId "vyzium" +
     // direct headless Chrome. The surrounding Vyzium lifecycle/audit remains.
     this.compatibilityMode = String(deps.compatibilityMode || '');
+    this.legacyPreserveEstablished = false;
     this.client = null;
     this.starting = null;
     this.startupWatchdog = null;
@@ -404,6 +405,14 @@ class WhatsAppSession {
     this.sessionState = this._loadOrMigrateSessionState();
     this.activeClientId = this.sessionState.activeClientId || null;
     this.pendingClientId = this.sessionState.pendingClientId || null;
+    // Production upgrades must never abandon a healthy established profile merely
+    // because clean/new logins use the 2.1 compatibility path. Existing sessions
+    // continue on their current LocalAuth profile until the user explicitly asks
+    // for a new QR or recovery rotates to a pending profile.
+    this.legacyPreserveEstablished = this.compatibilityMode === 'legacy-2.1'
+      && Boolean(this.activeClientId)
+      && this.sessionState?.state === 'established'
+      && this.activeClientId !== 'vyzium';
     if (this.activeClientId) {
       this.authClientId = this.activeClientId;
       this.firstConnectionPending = false;
@@ -416,7 +425,7 @@ class WhatsAppSession {
       this.firstConnectionPending = true;
       this._setPendingSession(this.authClientId, {reason:'first-connection'});
     }
-    if (this.compatibilityMode === 'legacy-2.1') {
+    if (this._legacyCompatibilityActive()) {
       const legacyEstablished = this.sessionState?.activeClientId === 'vyzium' && this.sessionState?.state === 'established';
       const previousPending = this.sessionState?.pendingClientId || null;
       this.authClientId = 'vyzium';
@@ -445,6 +454,13 @@ class WhatsAppSession {
       platform:process.platform,
       arch:process.arch
     });
+  }
+
+  _legacyCompatibilityActive() {
+    if (this.compatibilityMode !== 'legacy-2.1') return false;
+    if (!this.legacyPreserveEstablished) return true;
+    const committed = this._validClientId(this.sessionState?.activeClientId);
+    return !committed || this.authClientId !== committed || this.firstConnectionPending;
   }
 
   _loadSelfHealState() {
@@ -809,7 +825,7 @@ class WhatsAppSession {
   }
 
   _migrateEstablishedProfileToRuntime() {
-    if (this.compatibilityMode === 'legacy-2.1') return;
+    if (this._legacyCompatibilityActive()) return;
     // v3.1.8 and older placed LocalAuth under app.getPath('userData'), which is
     // normally AppData\\Roaming on Windows. Starting with v3.1.9 the Chromium
     // profile is local-only. Preserve an already established login by moving the
@@ -943,7 +959,7 @@ class WhatsAppSession {
   }
 
   _authSessionDir(clientId = this.authClientId) {
-    const root = this.compatibilityMode === 'legacy-2.1' ? this.dataDir : this.profileDataDir;
+    const root = this._legacyCompatibilityActive() ? this.dataDir : this.profileDataDir;
     return path.join(root, `session-${clientId}`);
   }
 
@@ -1255,7 +1271,7 @@ class WhatsAppSession {
         // build): never attempt to restore legacy credentials. A fresh LocalAuth
         // profile was selected in the constructor, so go straight to a new QR.
         this._clearReconnectTimer();
-        const legacy = this.compatibilityMode === 'legacy-2.1';
+        const legacy = this._legacyCompatibilityActive();
         this._connectInternal({rotateProfileOnStall:!legacy, stallRetries:legacy ? 0 : 1}).catch(() => {});
       } else {
         this._scheduleReconnect(true);
@@ -1369,7 +1385,7 @@ class WhatsAppSession {
     const browser = this.deps.browser || findBrowser();
     fs.mkdirSync(this.dataDir, {recursive:true, mode:0o700});
     fs.mkdirSync(this.profileDataDir, {recursive:true, mode:0o700});
-    const legacyCompatibility = this.compatibilityMode === 'legacy-2.1';
+    const legacyCompatibility = this._legacyCompatibilityActive();
     const launchMode = normalizeBrowserMode(options.browserMode) || (legacyCompatibility ? 'headless' : this.browserMode);
     const headless = launchMode === 'headless';
     const browserArgs = [
