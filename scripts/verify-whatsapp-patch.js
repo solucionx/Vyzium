@@ -2,65 +2,54 @@
 
 const fs = require('fs');
 const path = require('path');
-const { PATCH_MARKER, assertValidJavaScript } = require('./patch-whatsapp-web');
+const crypto = require('crypto');
 
-function resolveClientFile(projectRoot) {
+const EXPECTED_VERSION = '1.34.7';
+const KNOWN_GOOD_CLIENT_SHA256 = '36c70c1eb058087624e57ddea6b0c4d4a140faa2daf9c097dc670697ac321389';
+
+function resolveClientFile(projectRoot = path.resolve(__dirname, '..')) {
   const packageFile = require.resolve('whatsapp-web.js/package.json', { paths: [projectRoot] });
+  const pkg = JSON.parse(fs.readFileSync(packageFile, 'utf8'));
   return {
     packageFile,
     clientFile: path.join(path.dirname(packageFile), 'src', 'Client.js'),
-    version: JSON.parse(fs.readFileSync(packageFile, 'utf8')).version
+    version: pkg.version
   };
 }
 
-function verifyPatch(projectRoot = path.resolve(__dirname, '..')) {
+function verifyUpstreamBootstrap(projectRoot = path.resolve(__dirname, '..')) {
   const { clientFile, version } = resolveClientFile(projectRoot);
-  const source = fs.readFileSync(clientFile, 'utf8');
-  const fail = message => { throw new Error(`Correção do WhatsApp incompleta: ${message}`); };
+  const source = fs.readFileSync(clientFile);
+  const text = source.toString('utf8');
+  const sha256 = crypto.createHash('sha256').update(source).digest('hex');
 
-  try {
-    assertValidJavaScript(source, clientFile);
-  } catch (error) {
-    fail(`Client.js inválido: ${error?.message || error}`);
+  if (version !== EXPECTED_VERSION) {
+    throw new Error(`WhatsApp compatibility baseline expected ${EXPECTED_VERSION}, got ${version}.`);
+  }
+  if (sha256 !== KNOWN_GOOD_CLIENT_SHA256) {
+    throw new Error(`Client.js differs from the known-good installer baseline: ${sha256}.`);
+  }
+  if (!text.includes('await this.pupPage.evaluate(ExposeAuthStore);')) {
+    throw new Error('Known-good ExposeAuthStore bootstrap is missing.');
+  }
+  if (!text.includes('window.AuthStore.RegistrationUtils')) {
+    throw new Error('Known-good QR bootstrap is missing.');
+  }
+  if (text.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_')) {
+    throw new Error('A Vyzium bootstrap patch is still present in Client.js.');
   }
 
-  if (!source.includes(PATCH_MARKER)) fail(`marcador ${PATCH_MARKER} ausente.`);
-  if ((source.match(/polling: 200/g) || []).length < 4) fail('esperas independentes de animação ausentes.');
-  if (source.includes('{ timeout: authTimeout }')) fail('espera de autenticação ainda depende de requestAnimationFrame.');
-  if (!source.includes("stage: 'socket-wait'") || !source.includes('VYZIUM_STARTUP_CANCELLED')) fail('diagnóstico/cancelamento de inicialização ausente.');
-  if (!source.includes('const needAuthHandle = await this.pupPage.waitForFunction(')) fail('detecção moderna do estado de autenticação ausente.');
-  if (!source.includes("const socketModule = window.require('WAWebSocketModel')")) fail('probe resiliente de WAWebSocketModel ausente.');
-  if (!source.includes('catch (_)')) fail('probe do bootstrap ainda pode abortar por módulo não resolvido.');
-  if (!source.includes("const signal = window.require('WAWebSignalStoreApi')")) fail('espera segura pelas dependências do QR ausente.');
-  if (!source.includes("require('WAWebSignalStoreApi')")) fail('bootstrap atual do QR Code ausente.');
-  if (!source.includes("require('WAWebUserPrefsInfoStore')")) fail('leitura atual da chave de ruído ausente.');
-  if (!source.includes("require('WAWebCompanionRegClientUtils')")) fail('plataforma atual do QR ausente.');
-  if (source.includes('window.AuthStore.RegistrationUtils')) fail('caminho legado AuthStore.RegistrationUtils ainda presente.');
-  if (!source.includes("window.require('WAWebCmd').Cmd.refreshQR();")) fail('renovação do QR ausente.');
-  if (!source.includes('WAWebOfflineHandler')) fail('callback pós-autenticação ainda depende do AuthStore legado.');
-  if (!source.includes('Vyzium restored-session replay')) fail('recuperação de sessão já sincronizada ausente.');
-  if (!source.includes('vyziumNotifyHasSynced')) fail('listener idempotente de hasSynced ausente.');
-  if (!source.includes('vyziumSocket.hasSynced !== true')) fail('restauração ainda não valida o estado atual de sincronização.');
-  if (!source.includes('wait for a stable WhatsApp document before the first inject')) fail('barreira de estabilidade antes do primeiro inject ausente.');
-  if (!source.includes('vyziumBootstrapStableSince')) fail('janela mínima de estabilidade do documento ausente.');
-  if (!source.includes('navigation recovery is installed only after the initial inject')) fail('ordem segura do bootstrap ausente.');
-  if (source.indexOf('await this.inject();') > source.indexOf("this.pupPage.on('framenavigated'")) fail('listener de navegação ainda antecede o primeiro inject.');
-  if (!source.includes('let vyziumNavigationRecovery = null')) fail('trava contra inject concorrente ausente.');
-  const navigationStart = source.indexOf('navigation recovery is installed only after the initial inject');
-  const navigationBlock = source.slice(navigationStart, navigationStart + 2500);
-  if (navigationBlock.includes('await this.authStrategy.logout()')) fail('handler de navegação ainda apaga o perfil com o navegador ativo.');
-
-  return { patched: true, version, clientFile };
+  process.stdout.write(`Vyzium: upstream WhatsApp bootstrap verified (${version}, ${sha256}).\n`);
+  return { version, sha256 };
 }
 
 if (require.main === module) {
   try {
-    const result = verifyPatch();
-    process.stdout.write(`Vyzium: patch de bootstrap/QR do whatsapp-web.js ${result.version} verificado com sucesso.\n`);
+    verifyUpstreamBootstrap();
   } catch (error) {
-    process.stderr.write(`Vyzium: ${error?.message || error}\n`);
+    console.error(`Vyzium: compatibility bootstrap verification failed: ${error?.message || error}`);
     process.exitCode = 1;
   }
 }
 
-module.exports = { verifyPatch };
+module.exports = { verifyUpstreamBootstrap, EXPECTED_VERSION, KNOWN_GOOD_CLIENT_SHA256 };
