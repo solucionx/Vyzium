@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
   "version": "3.3.7",
-  "description": "Vyzium 3.3.7 - build isolada para validação do bootstrap/QR WhatsApp V8.",
+  "description": "Vyzium 3.3.7 - build isolada para validação do bootstrap legado conhecido do WhatsApp.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -12,7 +12,6 @@
     "build": "electron-builder --win nsis --x64 --publish never",
     "test:node": "node --test tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
     "test": "npm run test:backend && npm run test:node",
-    "postinstall": "node scripts/patch-whatsapp-web.js",
     "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs"
   },
   "dependencies": {
@@ -25,8 +24,8 @@
     "electron-builder": "26.0.0"
   },
   "build": {
-    "appId": "com.vyzium.whatsappv8test",
-    "productName": "Vyzium WhatsApp V8 Test",
+    "appId": "com.vyzium.whatsappv9legacytest",
+    "productName": "Vyzium WhatsApp V9 Legacy Test",
     "files": [
       "electron/**/*",
       "renderer/**/*",
@@ -59,7 +58,7 @@
       "installerSidebar": "build/installer-sidebar.bmp",
       "uninstallerSidebar": "build/installer-sidebar.bmp"
     },
-    "artifactName": "Vyzium-WhatsApp-V8-Test-Setup.${ext}",
+    "artifactName": "Vyzium-WhatsApp-V9-Legacy-Test-Setup.${ext}",
     "publish": [
       {
         "provider": "github",
