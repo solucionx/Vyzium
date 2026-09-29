@@ -73,7 +73,7 @@ class SecurityManager {
     // userData is normally under AppData\Roaming, so keep browser runtime data
     // explicitly in LOCALAPPDATA while the Vyzium metadata stays in the workspace.
     const localRoot = process.env.LOCALAPPDATA || this.app.getPath('userData');
-    return path.join(localRoot, 'Vyzium-WhatsApp-V9-Legacy-Test', 'workspaces', workspaceId, 'whatsapp-runtime');
+    return path.join(localRoot, 'Vyzium-Backup-WhatsApp-Test', 'workspaces', workspaceId, 'whatsapp-runtime');
   }
 
   vaultPath(workspaceId = this._workspaceId()) {
@@ -194,6 +194,26 @@ class SecurityManager {
       try { return moduleKey.toString('hex'); }
       finally { moduleKey.fill(0); }
     } finally {
+      rootKey.fill(0);
+    }
+  }
+
+  async withRemoteBackupKey(callback) {
+    if (typeof callback !== 'function') throw new Error('Operação de backup inválida.');
+    const rootKey = this._loadRootKey();
+    if (!rootKey) throw new Error('O cofre protegido ainda não foi configurado para esta conta.');
+    let backupKey = null;
+    try {
+      backupKey = Buffer.from(crypto.hkdfSync(
+        'sha256',
+        rootKey,
+        Buffer.alloc(0),
+        Buffer.from('vyzium:remote-backup:v1', 'utf8'),
+        32
+      ));
+      return await callback(backupKey);
+    } finally {
+      if (backupKey) backupKey.fill(0);
       rootKey.fill(0);
     }
   }
