@@ -218,6 +218,17 @@ class SecurityManager {
     }
   }
 
+  remoteBackupFingerprint() {
+    const workspaceId = this._workspaceId();
+    const parts = [];
+    for (const moduleName of ['followup', 'compras']) {
+      const target = this.moduleDb(moduleName, workspaceId);
+      if (!fs.existsSync(target)) continue;
+      parts.push(`${moduleName}:${this._databaseFingerprint(target)}`);
+    }
+    return parts.sort().join('|');
+  }
+
   async status() {
     const authState = this.auth.getState();
     if (!authState.authenticated) return { authenticated: false, ready: false };
