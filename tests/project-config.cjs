@@ -128,8 +128,8 @@ test('WhatsApp dependency remains pinned while the bootstrap fix stays focused',
   assert.equal(pkg.overrides, undefined);
   const patch = read('scripts/patch-whatsapp-web.js');
   const whatsapp = read('electron/whatsapp.js');
-  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
-  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
+  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8/);
+  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8/);
   assert.match(patch, /Vyzium restored-session replay/);
 });
 
