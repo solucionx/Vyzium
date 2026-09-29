@@ -1,0 +1,41 @@
+name: Archive Vyzium 3.3.8 Source Once
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".release/v3.3.8.archive"
+
+permissions:
+  contents: read
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout exact validated 3.3.8 source
+        uses: actions/checkout@v4
+        with:
+          ref: 20ba2a9c8053ed264a00a6d3376166a1e32361a9
+          fetch-depth: 1
+
+      - name: Verify release identity
+        run: |
+          set -euo pipefail
+          test "$(node -p "require('./package.json').version")" = "3.3.8"
+          git rev-parse HEAD | grep -Fx "20ba2a9c8053ed264a00a6d3376166a1e32361a9"
+
+      - name: Create full source archive
+        run: |
+          set -euo pipefail
+          git archive --format=zip --output=Vyzium-v3.3.8-Full-Source.zip HEAD
+          sha256sum Vyzium-v3.3.8-Full-Source.zip > Vyzium-v3.3.8-Full-Source.zip.sha256
+
+      - name: Upload source archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-v3.3.8-Full-Source
+          path: |
+            Vyzium-v3.3.8-Full-Source.zip
+            Vyzium-v3.3.8-Full-Source.zip.sha256
+          if-no-files-found: error
