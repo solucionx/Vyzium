@@ -7,13 +7,9 @@ const {spawn} = require('child_process');
 
 function findBrowser() {
   const candidates = [process.env.VYZIUM_BROWSER_PATH];
-  for (const base of [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA]) {
-    if (base) {
-      for (const suffix of ['Microsoft/Edge/Application/msedge.exe', 'Google/Chrome/Application/chrome.exe']) {
-        candidates.push(path.join(base, suffix));
-      }
-    }
-  }
+  const bases = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean);
+  for (const base of bases) candidates.push(path.join(base, 'Microsoft/Edge/Application/msedge.exe'));
+  for (const base of bases) candidates.push(path.join(base, 'Google/Chrome/Application/chrome.exe'));
   candidates.push(
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
@@ -1374,9 +1370,14 @@ class WhatsAppSession {
     fs.mkdirSync(this.dataDir, {recursive:true, mode:0o700});
     fs.mkdirSync(this.profileDataDir, {recursive:true, mode:0o700});
     const legacyCompatibility = this.compatibilityMode === 'legacy-2.1';
-    const launchMode = legacyCompatibility ? 'headless' : (normalizeBrowserMode(options.browserMode) || this.browserMode);
+    const launchMode = normalizeBrowserMode(options.browserMode) || (legacyCompatibility ? 'headless' : this.browserMode);
     const headless = launchMode === 'headless';
-    const browserArgs = ['--disable-background-timer-throttling','--disable-backgrounding-occluded-windows'];
+    const browserArgs = [
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-extensions',
+      '--disable-component-extensions-with-background-pages'
+    ];
     // Keep native Windows behavior in production, while allowing unit tests to
     // inject a deterministic platform without spawning a real PowerShell/Chrome.
     // forcePreShowGuard still wins so the dedicated pre-show test exercises the
