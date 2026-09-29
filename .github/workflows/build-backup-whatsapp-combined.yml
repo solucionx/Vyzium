@@ -88,6 +88,14 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-packaged-engines.ps1
 
+      - name: Create portable ZIP
+        shell: pwsh
+        run: |
+          $portable = "dist/Vyzium-Backup-WhatsApp-Test-Portable.zip"
+          if (Test-Path $portable) { Remove-Item $portable -Force }
+          Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath $portable -CompressionLevel Optimal
+          if (-not (Test-Path $portable)) { throw "Portable ZIP was not created." }
+
       - name: Upload combined test installer
         uses: actions/upload-artifact@v4
         with:
@@ -95,5 +103,6 @@ jobs:
           path: |
             dist/Vyzium-Backup-WhatsApp-Test-Setup.exe
             dist/Vyzium-Backup-WhatsApp-Test-Setup.exe.blockmap
+            dist/Vyzium-Backup-WhatsApp-Test-Portable.zip
             dist/latest.yml
           if-no-files-found: error
