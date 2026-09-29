@@ -73,7 +73,7 @@ class SecurityManager {
     // userData is normally under AppData\Roaming, so keep browser runtime data
     // explicitly in LOCALAPPDATA while the Vyzium metadata stays in the workspace.
     const localRoot = process.env.LOCALAPPDATA || this.app.getPath('userData');
-    return path.join(localRoot, 'Vyzium-WhatsApp-V8-Test', 'workspaces', workspaceId, 'whatsapp-runtime');
+    return path.join(localRoot, 'Vyzium-WhatsApp-V9-Legacy-Test', 'workspaces', workspaceId, 'whatsapp-runtime');
   }
 
   vaultPath(workspaceId = this._workspaceId()) {
