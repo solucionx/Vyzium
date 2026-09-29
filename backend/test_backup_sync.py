@@ -57,6 +57,24 @@ class BackupMergeTests(unittest.TestCase):
             con=sqlite3.connect(o);rows=con.execute("SELECT oc,note FROM order_controls ORDER BY oc").fetchall();con.close()
             self.assertEqual(rows,[("100","Local"),("200","Remoto")])
 
+    def test_remote_imported_base_remains_authoritative_while_local_controls_survive(self):
+        with tempfile.TemporaryDirectory() as td:
+            td=Path(td);l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            make_followup(l,("100","a","Enviado","Trabalho local",None,"2026-09-29T12:00:00"))
+            make_followup(r,("200","b","Pendente","Trabalho remoto",None,"2026-09-29T11:00:00"))
+            for path,label in ((l,"BASE ANTIGA"),(r,"BASE NOVA")):
+                con=sqlite3.connect(path)
+                con.execute("CREATE TABLE orders(item_key TEXT PRIMARY KEY,description TEXT,imported_at TEXT)")
+                con.execute("INSERT INTO orders VALUES(?,?,?)",("item-1",label,"2026-09-29T10:00:00"))
+                con.commit();con.close()
+            apply_merge("followup",l,r,o,None,None,{})
+            con=sqlite3.connect(o)
+            base=con.execute("SELECT description FROM orders WHERE item_key='item-1'").fetchone()[0]
+            controls=con.execute("SELECT oc,note FROM order_controls ORDER BY oc").fetchall()
+            con.close()
+            self.assertEqual(base,"BASE NOVA")
+            self.assertEqual(controls,[("100","Trabalho local"),("200","Trabalho remoto")])
+
     def test_same_field_divergence_requires_explicit_resolution(self):
         with tempfile.TemporaryDirectory() as td:
             td=Path(td);l=td/"l.db";r=td/"r.db";o=td/"o.db"
