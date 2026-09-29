@@ -8,10 +8,17 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('package identity remains compatible with the existing Vyzium installation', () => {
+test('isolated WhatsApp V8 package cannot replace the production Vyzium installation', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
-  assert.equal(pkg.build?.productName, 'Vyzium');
+  assert.equal(pkg.build?.appId, 'com.vyzium.whatsappv8test');
+  assert.equal(pkg.build?.productName, 'Vyzium WhatsApp V8 Test');
+  assert.equal(pkg.build?.artifactName, 'Vyzium-WhatsApp-V8-Test-Setup.${ext}');
+  const main = read('electron/main.js');
+  const security = read('electron/security-manager.js');
+  assert.match(main, /ISOLATED_TEST_BUILD = true/);
+  assert.match(main, /Vyzium-WhatsApp-V8-Test/);
+  assert.match(main, /Atualizações desativadas nesta versão isolada de teste/);
+  assert.match(security, /Vyzium-WhatsApp-V8-Test/);
 });
 
 test('release version changes preserve the original dependency versions and archive URLs', () => {
@@ -68,7 +75,7 @@ test('Windows installer assets referenced by electron-builder exist', () => {
 
 test('Windows runtime uses the Vyzium taskbar identity and explicit app icon', () => {
   const main = read('electron/main.js');
-  assert.match(main, /app\.setAppUserModelId\(['"]com\.vyzium\.gestaooperacional['"]\)/);
+  assert.match(main, /com\.vyzium\.whatsappv8test/);
   assert.match(main, /function appIconPath\(\)/);
   assert.match(main, /build['"], ['"]icon\.ico/);
   assert.match(main, /icon:\s*appIconPath\(\)/);
@@ -146,7 +153,7 @@ test('3.1 retains legacy database paths only as migration sources and adds works
   const main = read('electron/main.js');
   const security = read('electron/security-manager.js');
   assert.match(security, /followup\.db/);
-  assert.match(security, /Vyzium-Compras/);
+  assert.match(security, /legacy-compras/);
   assert.match(security, /workspaces/);
   assert.match(security, /legacyDatabasesRetained:\s*true/);
   assert.match(main, /VYZIUM_DB_KEY_HEX/);
