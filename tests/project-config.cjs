@@ -18,7 +18,7 @@ test('isolated combined backup + WhatsApp package cannot replace the production 
   assert.match(main, /ISOLATED_TEST_BUILD = true/);
   assert.match(main, /Vyzium-WhatsApp-V8-Test/);
   assert.match(main, /Atualizações desativadas nesta versão isolada de teste/);
-  assert.match(security, /Vyzium-WhatsApp-V8-Test/);
+  assert.match(security, /Vyzium-Backup-WhatsApp-Test/);
 });
 
 test('release version changes preserve the original dependency versions and archive URLs', () => {
