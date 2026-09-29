@@ -341,12 +341,13 @@ class BackupRestoreCoordinator {
     }
 
     const cleanResolutions={};
+    const expectedConflicts=Object.values(plan.reports).flatMap(r=>r.conflicts||[]);
+    const expectedIds=new Set(expectedConflicts.map(c=>String(c.id||'')));
     for (const [key,value] of Object.entries(resolutions||{})) {
-      if (!/^[A-Za-z0-9:_\-.[\]]{8,180}$/.test(key)) continue;
+      if (!expectedIds.has(String(key))) continue;
       if (!['local','remote','both'].includes(value)) continue;
       cleanResolutions[key]=value;
     }
-    const expectedConflicts=Object.values(plan.reports).flatMap(r=>r.conflicts||[]);
     const unresolved=expectedConflicts.filter(c=>!cleanResolutions[c.id]);
     if (unresolved.length) throw new Error(`Existem ${unresolved.length} conflitos que ainda precisam de uma escolha.`);
 
@@ -395,7 +396,7 @@ class BackupRestoreCoordinator {
           reason:'remote-restore',
           sourceFingerprint:this.securityManager.remoteBackupFingerprint(),
           serverHeadId:plan.headId,
-          clearCandidate:false
+          clearCandidate:true
         });
       } else {
         // The local database may contain information not present in HEAD.
@@ -411,6 +412,9 @@ class BackupRestoreCoordinator {
             parentOverride:plan.headId,
             mergeSourceId:plan.candidateId || null
           });
+          if (!promotion?.promoted) {
+            promotion={...promotion,pending_retry:true,error:promotion?.reason || 'O servidor preservou a consolidação como divergente porque o HEAD mudou. Os dados locais estão seguros e serão comparados novamente antes de qualquer promoção.'};
+          }
         } catch (error) {
           promotion={uploaded:false,pending_retry:true,error:'Os dados foram combinados com segurança neste computador, mas o novo backup consolidado não pôde ser enviado agora. O Vyzium tentará novamente no próximo backup manual ou fechamento normal.'};
           this._event('promotion-deferred',{message:String(error?.message||error).slice(0,300)});
