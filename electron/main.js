@@ -13,6 +13,13 @@ const { SecurityManager } = require('./security-manager');
 const { FullDiagnostics } = require('./diagnostics');
 const { createSentryReporter, shouldPromoteWhatsAppEvent } = require('./sentry-client');
 
+const ISOLATED_TEST_BUILD = true;
+const ISOLATED_TEST_DATA_NAME = 'Vyzium-WhatsApp-V8-Test';
+
+if (ISOLATED_TEST_BUILD) {
+  app.setPath('userData', path.join(app.getPath('appData'), ISOLATED_TEST_DATA_NAME));
+}
+
 let window;
 let whatsapp;
 let whatsappBridge;
@@ -44,7 +51,7 @@ const engineToken = crypto.randomBytes(24).toString('hex');
 // electron-builder. Without an explicit AppUserModelID, development runs can
 // be grouped under electron.exe and show Electron's generic taskbar icon.
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.vyzium.gestaooperacional');
+  app.setAppUserModelId(ISOLATED_TEST_BUILD ? 'com.vyzium.whatsappv8test' : 'com.vyzium.gestaooperacional');
 }
 
 function appIconPath() {
@@ -73,7 +80,7 @@ function comprasDataDir() {
   if (securityManager && authManager?.getState()?.authenticated) {
     try { return securityManager.moduleDir('compras'); } catch (_) {}
   }
-  return path.join(app.getPath('appData'), 'Vyzium-Compras');
+  return ISOLATED_TEST_BUILD ? path.join(app.getPath('userData'), 'legacy-compras') : path.join(app.getPath('appData'), 'Vyzium-Compras');
 }
 
 function moduleDataDir(moduleName) {
@@ -575,7 +582,7 @@ async function createWindow(initialPage = 'auth.html') {
     minWidth: 1100,
     minHeight: 700,
     backgroundColor: '#eef3f7',
-    title: 'Vyzium',
+    title: ISOLATED_TEST_BUILD ? 'Vyzium WhatsApp V8 Test' : 'Vyzium',
     icon: appIconPath(),
     webPreferences: {
       zoomFactor: 0.85,
@@ -785,7 +792,13 @@ app.whenReady().then(async () => {
       }
     });
 
-    updater = createUpdater({
+    updater = ISOLATED_TEST_BUILD ? {
+      check: async () => {
+        if (window && !window.isDestroyed()) {
+          window.webContents.send('update-status', {message:'Atualizações desativadas nesta versão isolada de teste.'});
+        }
+      }
+    } : createUpdater({
       app,
       dialog,
       getWindow: () => window,
