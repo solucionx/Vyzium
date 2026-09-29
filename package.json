@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
   "version": "3.3.7",
-  "description": "Vyzium 3.3.7: edição da mensagem de cotação por fornecedor e envio para todos em sequência.",
+  "description": "Vyzium 3.3.7 - build isolada para validação do bootstrap/QR WhatsApp V8.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -25,8 +25,8 @@
     "electron-builder": "26.0.0"
   },
   "build": {
-    "appId": "com.vyzium.gestaooperacional",
-    "productName": "Vyzium",
+    "appId": "com.vyzium.whatsappv8test",
+    "productName": "Vyzium WhatsApp V8 Test",
     "files": [
       "electron/**/*",
       "renderer/**/*",
@@ -59,7 +59,7 @@
       "installerSidebar": "build/installer-sidebar.bmp",
       "uninstallerSidebar": "build/installer-sidebar.bmp"
     },
-    "artifactName": "Vyzium-Setup.${ext}",
+    "artifactName": "Vyzium-WhatsApp-V8-Test-Setup.${ext}",
     "publish": [
       {
         "provider": "github",
