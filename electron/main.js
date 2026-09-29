@@ -354,7 +354,7 @@ function readRemoteBackupState() {
   }
 }
 
-function writeRemoteBackupState(result, snapshots, reason) {
+function writeRemoteBackupState(result, snapshots, reason, sourceFingerprint) {
   const target = remoteBackupStatePath();
   fs.mkdirSync(path.dirname(target), { recursive:true });
   const tmp = target + '.tmp';
@@ -364,14 +364,11 @@ function writeRemoteBackupState(result, snapshots, reason) {
     object_id:String(result?.id || ''),
     bytes:Number(result?.bytes || 0),
     reason:String(reason || ''),
-    signature:snapshotSignature(snapshots)
+    source_fingerprint:sourceFingerprint || null,
+    snapshot_signature:snapshotSignature(snapshots)
   };
   fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), {encoding:'utf8', mode:0o600});
   fs.renameSync(tmp, target);
-}
-
-function signaturesEqual(a, b) {
-  return JSON.stringify(Array.isArray(a) ? a : []) === JSON.stringify(Array.isArray(b) ? b : []);
 }
 
 async function createRemoteBackupSnapshots(reason = 'remote-upload') {
@@ -432,11 +429,10 @@ async function performRemoteBackup({reason='manual', skipIfUnchanged=false} = {}
     };
   }
 
-  const snapshots = await createRemoteBackupSnapshots(`remote-${reason}`);
-  const signature = snapshotSignature(snapshots);
+  const sourceFingerprint = securityManager.remoteBackupFingerprint();
   const previous = readRemoteBackupState();
-  if (skipIfUnchanged && signaturesEqual(previous?.signature, signature)) {
-    fullDiagnostics?.event('remote-backup.close-skip-unchanged', {snapshotCount:snapshots.length});
+  if (skipIfUnchanged && previous?.source_fingerprint === sourceFingerprint) {
+    fullDiagnostics?.event('remote-backup.close-skip-unchanged', {});
     return {
       uploaded:false,
       authorized:true,
@@ -446,8 +442,9 @@ async function performRemoteBackup({reason='manual', skipIfUnchanged=false} = {}
     };
   }
 
+  const snapshots = await createRemoteBackupSnapshots(`remote-${reason}`);
   const result = await remoteBackup.upload(snapshots, {appVersion:app.getVersion()});
-  if (result?.uploaded) writeRemoteBackupState(result, snapshots, reason);
+  if (result?.uploaded) writeRemoteBackupState(result, snapshots, reason, sourceFingerprint);
   return result;
 }
 
