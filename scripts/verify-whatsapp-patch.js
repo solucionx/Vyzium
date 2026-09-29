@@ -30,7 +30,7 @@ function verifyPatch(projectRoot = path.resolve(__dirname, '..')) {
   if (!source.includes("stage: 'socket-wait'") || !source.includes('VYZIUM_STARTUP_CANCELLED')) fail('diagnóstico/cancelamento de inicialização ausente.');
   if (!source.includes('VYZIUM_SOCKET_TIMEOUT') || !source.includes('vyzium_socket_timeout')) fail('timeout determinístico/diagnóstico do socket ausente.');
   if (!source.includes('Math.min(authTimeout, 45000)')) fail('prazo independente de 45s do socket ausente.');
-  if (!source.includes('const needAuthHandle = await this.pupPage.waitForFunction(')) fail('detecção moderna do estado de autenticação ausente.');
+  if (!source.includes('needAuthHandle = await this.pupPage.waitForFunction(')) fail('detecção moderna do estado de autenticação ausente.');
   if (!source.includes("const socketModule = window.require('WAWebSocketModel')")) fail('probe resiliente de WAWebSocketModel ausente.');
   if (!source.includes('catch (_)')) fail('probe do bootstrap ainda pode abortar por módulo não resolvido.');
   if (!source.includes("const signal = window.require('WAWebSignalStoreApi')")) fail('espera segura pelas dependências do QR ausente.');
