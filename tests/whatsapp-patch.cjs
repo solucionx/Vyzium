@@ -1,6 +1,6 @@
 const {test} = require('node:test');
 const assert = require('node:assert/strict');
-const {patchClientSource, PATCH_MARKER, SOCKET_STATE_PROBE_SOURCE, QR_MODULE_PROBE_SOURCE} = require('../scripts/patch-whatsapp-web');
+const {patchClientSource, PATCH_MARKER, SOCKET_STATE_PROBE_SOURCE, SOCKET_DIAGNOSTIC_PROBE_SOURCE, QR_MODULE_PROBE_SOURCE} = require('../scripts/patch-whatsapp-web');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -181,6 +181,9 @@ test('patch backports current QR/bootstrap paths to npm 1.34.7', () => {
   assert.match(result.source, /const needAuthHandle = await this\.pupPage\.waitForFunction/);
   assert.match(result.source, /const socketModule = window\.require\('WAWebSocketModel'\)/);
   assert.match(result.source, /catch \(_\) \{\s*return false;/);
+  assert.match(result.source, /VYZIUM_SOCKET_TIMEOUT/);
+  assert.match(result.source, /vyzium_socket_timeout/);
+  assert.match(result.source, /Math\.min\(authTimeout, 45000\)/);
   assert.match(result.source, /if \(needAuthentication\.need\)/);
   assert.match(result.source, /WAWebSignalStoreApi/);
   assert.match(result.source, /WAWebUserPrefsInfoStore/);
@@ -256,6 +259,21 @@ test('socket bootstrap probe tolerates unresolved WA modules instead of aborting
   const ready = readyProbe();
   assert.equal(ready.need, true);
   assert.equal(ready.state, 'UNPAIRED');
+});
+
+test('socket diagnostic probe reports pending state and module failures without exposing browser globals', () => {
+  const openingProbe = vm.runInNewContext(`(${SOCKET_DIAGNOSTIC_PROBE_SOURCE})`, {
+    window: { require(name) { assert.equal(name, 'WAWebSocketModel'); return {Socket:{state:'OPENING',hasSynced:false,stream:'DISCONNECTED'}}; } }
+  });
+  assert.deepEqual(openingProbe(), {kind:'socket',state:'OPENING',hasSynced:false,stream:'DISCONNECTED'});
+
+  const failedProbe = vm.runInNewContext(`(${SOCKET_DIAGNOSTIC_PROBE_SOURCE})`, {
+    window: { require() { throw new Error('ModuleError: unresolved dependencies'); } }
+  });
+  const failed = failedProbe();
+  assert.equal(failed.kind, 'module-error');
+  assert.equal(failed.errorName, 'Error');
+  assert.match(failed.errorMessage, /unresolved dependencies/);
 });
 
 test('QR module probe waits through partial WhatsApp bundle initialization', () => {
