@@ -323,6 +323,19 @@ class BackupRestoreCoordinator {
     }
   }
 
+  _rollbackInstalled(installed) {
+    for (const entry of [...(installed || [])].reverse()) {
+      try { fs.rmSync(entry.target,{force:true}); } catch (_) {}
+      try { fs.rmSync(entry.target+'-wal',{force:true}); } catch (_) {}
+      try { fs.rmSync(entry.target+'-shm',{force:true}); } catch (_) {}
+      for (const item of [...(entry.moved || [])].reverse()) {
+        try {
+          if (fs.existsSync(item.old)) fs.renameSync(item.old,item.source);
+        } catch (_) {}
+      }
+    }
+  }
+
   _cleanupOldRaw(installed) {
     for (const entry of installed || []) {
       for (const item of entry.moved || []) {
@@ -364,6 +377,7 @@ class BackupRestoreCoordinator {
     const candidates={};
     const recoveryPoints={};
     let installed=[];
+    let databaseCommitComplete=false;
     try {
       const resolutionPath=path.join(stageDir,'resolutions.json');
       fs.writeFileSync(resolutionPath,JSON.stringify(cleanResolutions,null,2),{encoding:'utf8',mode:0o600});
@@ -387,6 +401,7 @@ class BackupRestoreCoordinator {
 
       installed=await this._atomicInstall(candidates,id);
       await this.securityManager.activateRestoredWorkspace({sourceId:plan.headId});
+      databaseCommitComplete=true;
 
       const hadLocal=Object.values(plan.local).some(x=>x.exists);
       let promotion=null;
@@ -405,19 +420,32 @@ class BackupRestoreCoordinator {
         markRemoteBase(this.securityManager,{objectId:plan.headId,serverHeadId:plan.headId});
       }
 
-      await this.startServices();
+      let servicesStarted=true;
+      let serviceWarning=null;
+      try {
+        await this.startServices();
+      } catch (error) {
+        servicesStarted=false;
+        serviceWarning='Os bancos foram restaurados e validados, mas os serviços do Vyzium não reiniciaram nesta sessão. Feche e abra o aplicativo novamente.';
+        this._event('services-restart-deferred',{message:String(error?.message||error).slice(0,300)});
+      }
+
       if (hadLocal) {
-        try {
-          promotion=await this.promoteMergedBackup({
-            parentOverride:plan.headId,
-            mergeSourceId:plan.candidateId || null
-          });
-          if (!promotion?.promoted) {
-            promotion={...promotion,pending_retry:true,error:promotion?.reason || 'O servidor preservou a consolidação como divergente porque o HEAD mudou. Os dados locais estão seguros e serão comparados novamente antes de qualquer promoção.'};
+        if (servicesStarted) {
+          try {
+            promotion=await this.promoteMergedBackup({
+              parentOverride:plan.headId,
+              mergeSourceId:plan.candidateId || null
+            });
+            if (!promotion?.promoted) {
+              promotion={...promotion,pending_retry:true,error:promotion?.reason || 'O servidor preservou a consolidação como divergente porque o HEAD mudou. Os dados locais estão seguros e serão comparados novamente antes de qualquer promoção.'};
+            }
+          } catch (error) {
+            promotion={uploaded:false,pending_retry:true,error:'Os dados foram combinados com segurança neste computador, mas o novo backup consolidado não pôde ser enviado agora. O Vyzium tentará novamente no próximo backup manual ou fechamento normal.'};
+            this._event('promotion-deferred',{message:String(error?.message||error).slice(0,300)});
           }
-        } catch (error) {
-          promotion={uploaded:false,pending_retry:true,error:'Os dados foram combinados com segurança neste computador, mas o novo backup consolidado não pôde ser enviado agora. O Vyzium tentará novamente no próximo backup manual ou fechamento normal.'};
-          this._event('promotion-deferred',{message:String(error?.message||error).slice(0,300)});
+        } else {
+          promotion={uploaded:false,pending_retry:true,error:'A consolidação local está segura. O novo backup será enviado depois que os serviços iniciarem normalmente.'};
         }
       }
 
@@ -426,19 +454,23 @@ class BackupRestoreCoordinator {
       this.plans.delete(id);
       await this._cleanupPlan(plan);
       fs.rmSync(stageDir,{recursive:true,force:true});
-      this._event('applied',{headId:plan.headId,hadLocal,promotion:Boolean(promotion?.uploaded),recoveryPoints:Object.keys(recoveryPoints)});
+      this._event('applied',{headId:plan.headId,hadLocal,promotion:Boolean(promotion?.uploaded),recoveryPoints:Object.keys(recoveryPoints),servicesStarted});
       return {
         restored:true,
         merged:hadLocal,
         head_id:plan.headId,
         recovery_points:recoveryPoints,
-        promotion
+        promotion,
+        service_warning:serviceWarning
       };
     } catch (error) {
-      // _atomicInstall rolls byte-level replacement back if the swap itself fails.
-      // Verified pre-sync snapshots remain on disk for operator recovery.
+      if (!databaseCommitComplete && installed.length) {
+        this._rollbackInstalled(installed);
+      }
+      // Verified pre-sync snapshots remain on disk even after a successful
+      // byte-level rollback, providing an additional operator recovery point.
       await this.startServices().catch(()=>{});
-      this._event('apply-failed',{headId:plan.headId,message:String(error?.message||error).slice(0,500)});
+      this._event('apply-failed',{headId:plan.headId,rolledBack:!databaseCommitComplete,message:String(error?.message||error).slice(0,500)});
       throw error;
     }
   }
