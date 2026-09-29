@@ -8,17 +8,17 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('isolated WhatsApp V9 legacy package cannot replace the production Vyzium installation', () => {
+test('isolated combined backup + WhatsApp package cannot replace the production Vyzium installation', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.build?.appId, 'com.vyzium.whatsappv9legacytest');
-  assert.equal(pkg.build?.productName, 'Vyzium WhatsApp V9 Legacy Test');
-  assert.equal(pkg.build?.artifactName, 'Vyzium-WhatsApp-V9-Legacy-Test-Setup.${ext}');
+  assert.equal(pkg.build?.appId, 'com.vyzium.backupwhatsapptest');
+  assert.equal(pkg.build?.productName, 'Vyzium Backup + WhatsApp Test');
+  assert.equal(pkg.build?.artifactName, 'Vyzium-Backup-WhatsApp-Test-Setup.${ext}');
   const main = read('electron/main.js');
   const security = read('electron/security-manager.js');
   assert.match(main, /ISOLATED_TEST_BUILD = true/);
-  assert.match(main, /Vyzium-WhatsApp-V9-Legacy-Test/);
+  assert.match(main, /Vyzium-WhatsApp-V8-Test/);
   assert.match(main, /Atualizações desativadas nesta versão isolada de teste/);
-  assert.match(security, /Vyzium-WhatsApp-V9-Legacy-Test/);
+  assert.match(security, /Vyzium-WhatsApp-V8-Test/);
 });
 
 test('release version changes preserve the original dependency versions and archive URLs', () => {
@@ -75,7 +75,7 @@ test('Windows installer assets referenced by electron-builder exist', () => {
 
 test('Windows runtime uses the Vyzium taskbar identity and explicit app icon', () => {
   const main = read('electron/main.js');
-  assert.match(main, /com\.vyzium\.whatsappv9legacytest/);
+  assert.match(main, /com\.vyzium\.backupwhatsapptest/);
   assert.match(main, /function appIconPath\(\)/);
   assert.match(main, /build['"], ['"]icon\.ico/);
   assert.match(main, /icon:\s*appIconPath\(\)/);
@@ -130,14 +130,32 @@ test('3.1 data safety and authentication files are included', () => {
 
 
 
-test('WhatsApp V9 keeps the exact upstream bootstrap used by the working installer', () => {
+test('combined test keeps the exact upstream bootstrap used by the working installer', () => {
   assert.equal(pkg.dependencies?.['whatsapp-web.js'], '1.34.7');
   assert.equal(pkg.overrides, undefined);
-  assert.equal(pkg.scripts?.postinstall, undefined);
+  assert.equal(pkg.scripts?.postinstall, 'node scripts/patch-backup-whatsapp-test.js');
   const verifier = read('scripts/verify-whatsapp-patch.js');
   const main = read('electron/main.js');
   assert.match(verifier, /36c70c1eb058087624e57ddea6b0c4d4a140faa2daf9c097dc670697ac321389/);
   assert.match(main, /browserMode:\s*'headless'/);
+  assert.match(main, /compatibilityMode:\s*'legacy-2\.1'/);
+});
+
+test('combined test wires encrypted Poco backup without exposing restore or delete routes', () => {
+  const main = read('electron/main.js');
+  const remote = read('electron/remote-backup.js');
+  const followupUi = read('renderer/app.js');
+  const comprasUi = read('renderer/compras-app.js');
+  assert.match(main, /\/remote-backup\/status/);
+  assert.match(main, /\/remote-backup\/create/);
+  assert.match(main, /withRemoteBackupKey/);
+  assert.match(remote, /VZB1/);
+  assert.match(remote, /vyzium-backup-v1/);
+  assert.match(remote, /Content-Length/);
+  assert.match(remote, /\/v1\/backups/);
+  assert.doesNotMatch(remote, /DELETE/);
+  assert.match(followupUi, /Criar e enviar backup/);
+  assert.match(comprasUi, /Criar e enviar backup/);
 });
 
 test('3.1 keeps updates on the dedicated public releases repository', () => {
