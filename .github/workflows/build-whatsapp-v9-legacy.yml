@@ -1,0 +1,95 @@
+name: WhatsApp V9 Legacy Isolated Build
+
+on:
+  push:
+    branches:
+      - test/whatsapp-v9-legacy-bootstrap
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      VYZIUM_APP_VERSION: "3.3.7"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Verify known-good WhatsApp baseline
+        run: npm run verify:whatsapp-patch
+
+      - name: Install Python dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Run full test suite
+        run: npm test
+
+      - name: Build followup engine
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name followup-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-followup
+          backend/engine.py
+
+      - name: Build compras engine
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name compras-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --hidden-import xlrd
+          --hidden-import xlwt
+          --distpath dist-engine
+          --workpath build/pyinstaller-compras
+          backend/compras_engine.py
+
+      - name: Verify engines
+        shell: pwsh
+        run: ./scripts/verify-engines.ps1
+
+      - name: Build isolated Windows installer
+        run: npm run build
+
+      - name: Verify packaged engines
+        shell: pwsh
+        run: ./scripts/verify-packaged-engines.ps1
+
+      - name: Upload isolated test installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-WhatsApp-V9-Legacy-Test
+          path: |
+            dist/Vyzium-WhatsApp-V9-Legacy-Test-Setup.exe
+            dist/Vyzium-WhatsApp-V9-Legacy-Test-Setup.exe.blockmap
+            dist/latest.yml
+          if-no-files-found: error
