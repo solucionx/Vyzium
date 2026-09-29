@@ -286,8 +286,17 @@ def _insert_dict(out, table: str, row: dict[str, Any], *, omit: tuple[str, ...] 
     return int(getattr(out.execute("SELECT last_insert_rowid()").fetchone(), "__getitem__", lambda _: 0)(0) or 0)
 
 
+def _output_has_table(out, table: str) -> bool:
+    try:
+        return bool(out.execute(f"PRAGMA table_info({table})").fetchall())
+    except Exception:
+        return False
+
+
 def _overlay_local_settings(local: Path, out, key_hex: str | None) -> None:
-    _, rows = _table_rows(local, "settings", key_hex)
+    columns, rows = _table_rows(local, "settings", key_hex)
+    if not columns or not _output_has_table(out, "settings"):
+        return
     for row in rows:
         if "key" in row and "value" in row:
             out.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (row["key"], row["value"]))
@@ -296,13 +305,17 @@ def _overlay_local_settings(local: Path, out, key_hex: str | None) -> None:
 def _merge_followup_execution_history(local: Path, out, key_hex: str | None) -> None:
     # Follow-up/message tables are operational history, not source-of-truth
     # imports. Keep the remote HEAD and append locally-created runs that are absent.
-    _, local_followups = _table_rows(local, "followups", key_hex)
+    followup_columns, local_followups = _table_rows(local, "followups", key_hex)
+    if not followup_columns or not _output_has_table(out, "followups"):
+        return
     remote_followups = {
         (r[0], r[1], r[2], r[3]): r[4]
         for r in out.execute("SELECT batch_id,supplier_key,message,sent_at,id FROM followups").fetchall()
     }
     followup_id_map: dict[int, int] = {}
-    _, local_items = _table_rows(local, "followup_items", key_hex)
+    local_item_columns, local_items = _table_rows(local, "followup_items", key_hex)
+    if not _output_has_table(out, "followup_items"):
+        local_items = []
     items_by_followup: dict[int, list[dict[str, Any]]] = {}
     for item in local_items:
         items_by_followup.setdefault(int(item.get("followup_id") or 0), []).append(item)
@@ -321,7 +334,9 @@ def _merge_followup_execution_history(local: Path, out, key_hex: str | None) -> 
                 (new_id, item.get("item_key"), item.get("urgency")),
             )
 
-    _, local_batches = _table_rows(local, "message_batches", key_hex)
+    batch_columns, local_batches = _table_rows(local, "message_batches", key_hex)
+    if not batch_columns or not _output_has_table(out, "message_batches"):
+        local_batches = []
     for row in local_batches:
         existing = out.execute("SELECT finished_at,started_at,created_at FROM message_batches WHERE batch_id=?", (row.get("batch_id"),)).fetchone()
         if existing is None:
@@ -336,8 +351,12 @@ def _merge_followup_execution_history(local: Path, out, key_hex: str | None) -> 
                 tuple(row.get(c) for c in columns) + (row.get("batch_id"),),
             )
 
-    _, local_queue = _table_rows(local, "message_queue", key_hex)
-    _, local_queue_items = _table_rows(local, "message_queue_items", key_hex)
+    queue_columns, local_queue = _table_rows(local, "message_queue", key_hex)
+    queue_item_columns, local_queue_items = _table_rows(local, "message_queue_items", key_hex)
+    if not queue_columns or not _output_has_table(out, "message_queue"):
+        local_queue = []
+    if not queue_item_columns or not _output_has_table(out, "message_queue_items"):
+        local_queue_items = []
     items_by_queue: dict[int, list[dict[str, Any]]] = {}
     for item in local_queue_items:
         items_by_queue.setdefault(int(item.get("queue_id") or 0), []).append(item)
