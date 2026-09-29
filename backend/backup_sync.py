@@ -233,29 +233,139 @@ def _merge_keyed_table(
             continue
 
         if local is None and remote is not None:
+            # The candidate database starts as a byte-consistent copy of remote.
+            # If the record existed in the common base, its absence locally may be
+            # a deliberate deletion; never guess -- require an explicit choice.
             if base is not None:
                 choice = _record_presence_conflict(module, table, key, local, remote, base, report, resolutions, apply)
                 if choice == "local":
                     report.preserved_local += 1
+                    if apply:
+                        where = " AND ".join(f"{f}=?" for f in key_fields)
+                        out.execute(f"DELETE FROM {table} WHERE {where}", tuple(key))
                     continue
             report.additions += 1
-            if apply:
-                vals = [remote.get(c) for c in columns]
-                out.execute(
-                    f"INSERT OR REPLACE INTO {table}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
-                    vals,
-                )
             continue
 
         if local is not None and remote is None:
             if base is not None:
                 choice = _record_presence_conflict(module, table, key, local, remote, base, report, resolutions, apply)
-                if choice == "remote" and apply:
-                    where = " AND ".join(f"{f}=?" for f in key_fields)
-                    out.execute(f"DELETE FROM {table} WHERE {where}", tuple(key))
+                if choice == "remote":
                     report.updates += 1
                     continue
+            # Local-only work must be copied into the remote-based candidate.
             report.preserved_local += 1
+            if apply:
+                vals = [local.get(c) for c in columns]
+                out.execute(
+                    f"INSERT OR REPLACE INTO {table}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+                    vals,
+                )
+
+
+def _table_rows(path: Path, table: str, key_hex: str | None) -> tuple[list[str], list[dict[str, Any]]]:
+    if not path.exists():
+        return [], []
+    con = secure_connect(path, key_hex=key_hex, readonly=True, timeout=30)
+    try:
+        con.row_factory = row_factory(key_hex)
+        columns = [str(r[1]) for r in con.execute(f"PRAGMA table_info({table})").fetchall()]
+        if not columns:
+            return [], []
+        return columns, [_row_dict(row) for row in con.execute(f"SELECT * FROM {table}").fetchall()]
+    finally:
+        con.close()
+
+
+def _insert_dict(out, table: str, row: dict[str, Any], *, omit: tuple[str, ...] = ()) -> int:
+    columns = [c for c in row.keys() if c not in omit]
+    out.execute(
+        f"INSERT INTO {table}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
+        tuple(row.get(c) for c in columns),
+    )
+    return int(getattr(out.execute("SELECT last_insert_rowid()").fetchone(), "__getitem__", lambda _: 0)(0) or 0)
+
+
+def _overlay_local_settings(local: Path, out, key_hex: str | None) -> None:
+    _, rows = _table_rows(local, "settings", key_hex)
+    for row in rows:
+        if "key" in row and "value" in row:
+            out.execute("INSERT OR REPLACE INTO settings(key,value) VALUES(?,?)", (row["key"], row["value"]))
+
+
+def _merge_followup_execution_history(local: Path, out, key_hex: str | None) -> None:
+    # Follow-up/message tables are operational history, not source-of-truth
+    # imports. Keep the remote HEAD and append locally-created runs that are absent.
+    _, local_followups = _table_rows(local, "followups", key_hex)
+    remote_followups = {
+        (r[0], r[1], r[2], r[3]): r[4]
+        for r in out.execute("SELECT batch_id,supplier_key,message,sent_at,id FROM followups").fetchall()
+    }
+    followup_id_map: dict[int, int] = {}
+    _, local_items = _table_rows(local, "followup_items", key_hex)
+    items_by_followup: dict[int, list[dict[str, Any]]] = {}
+    for item in local_items:
+        items_by_followup.setdefault(int(item.get("followup_id") or 0), []).append(item)
+    for row in local_followups:
+        old_id = int(row.get("id") or 0)
+        signature = (row.get("batch_id"), row.get("supplier_key"), row.get("message"), row.get("sent_at"))
+        if signature in remote_followups:
+            followup_id_map[old_id] = int(remote_followups[signature])
+            continue
+        new_id = _insert_dict(out, "followups", row, omit=("id",))
+        followup_id_map[old_id] = new_id
+        remote_followups[signature] = new_id
+        for item in items_by_followup.get(old_id, []):
+            out.execute(
+                "INSERT OR IGNORE INTO followup_items(followup_id,item_key,urgency) VALUES(?,?,?)",
+                (new_id, item.get("item_key"), item.get("urgency")),
+            )
+
+    _, local_batches = _table_rows(local, "message_batches", key_hex)
+    for row in local_batches:
+        existing = out.execute("SELECT finished_at,started_at,created_at FROM message_batches WHERE batch_id=?", (row.get("batch_id"),)).fetchone()
+        if existing is None:
+            _insert_dict(out, "message_batches", row)
+            continue
+        local_stamp = str(row.get("finished_at") or row.get("started_at") or row.get("created_at") or "")
+        remote_stamp = str(existing[0] or existing[1] or existing[2] or "")
+        if local_stamp > remote_stamp:
+            columns = [c for c in row.keys() if c != "batch_id"]
+            out.execute(
+                f"UPDATE message_batches SET {','.join(c+'=?' for c in columns)} WHERE batch_id=?",
+                tuple(row.get(c) for c in columns) + (row.get("batch_id"),),
+            )
+
+    _, local_queue = _table_rows(local, "message_queue", key_hex)
+    _, local_queue_items = _table_rows(local, "message_queue_items", key_hex)
+    items_by_queue: dict[int, list[dict[str, Any]]] = {}
+    for item in local_queue_items:
+        items_by_queue.setdefault(int(item.get("queue_id") or 0), []).append(item)
+    for row in local_queue:
+        old_qid = int(row.get("id") or 0)
+        key = (row.get("batch_id"), row.get("supplier_key"))
+        existing = out.execute(
+            "SELECT id,finished_at,started_at,created_at FROM message_queue WHERE batch_id=? AND supplier_key=?",
+            key,
+        ).fetchone()
+        if existing is None:
+            copy = dict(row)
+            copy["followup_id"] = followup_id_map.get(int(row.get("followup_id") or 0)) if row.get("followup_id") else None
+            new_qid = _insert_dict(out, "message_queue", copy, omit=("id",))
+            for item in items_by_queue.get(old_qid, []):
+                out.execute(
+                    "INSERT OR IGNORE INTO message_queue_items(queue_id,item_key,urgency) VALUES(?,?,?)",
+                    (new_qid, item.get("item_key"), item.get("urgency")),
+                )
+            continue
+        local_stamp = str(row.get("finished_at") or row.get("started_at") or row.get("created_at") or "")
+        remote_stamp = str(existing[1] or existing[2] or existing[3] or "")
+        if local_stamp > remote_stamp:
+            columns = [c for c in row.keys() if c not in {"id", "batch_id", "supplier_key", "followup_id"}]
+            out.execute(
+                f"UPDATE message_queue SET {','.join(c+'=?' for c in columns)} WHERE id=?",
+                tuple(row.get(c) for c in columns) + (int(existing[0]),),
+            )
 
 
 def _merge_followup(local: Path, remote: Path, base: Path | None, out, key_hex: str | None, report: MergeReport, resolutions: dict[str, str] | None, apply: bool):
@@ -269,13 +379,13 @@ def _merge_followup(local: Path, remote: Path, base: Path | None, out, key_hex: 
         b = _fetch_rows(base, table, keys, key_hex) if base and base.exists() else {}
         _merge_keyed_table(out, "followup", table, keys, fields, l, r, b, report, resolutions, apply)
 
-    # History is append-only semantically. IDs are machine-local and are never
-    # used as identity during merge.
+    # Candidate starts from remote. Append local history events that the remote
+    # HEAD does not already contain; numeric IDs are intentionally ignored.
     semantic = ("oc", "supplier_key", "control_status", "note", "changed_at")
     lhist = _fetch_rows(local, "order_control_history", ("id",), key_hex)
     rhist = _fetch_rows(remote, "order_control_history", ("id",), key_hex)
-    have = {tuple(row.get(f) for f in semantic) for row in lhist.values()}
-    for row in rhist.values():
+    have = {tuple(row.get(f) for f in semantic) for row in rhist.values()}
+    for row in lhist.values():
         signature = tuple(row.get(f) for f in semantic)
         if signature in have:
             continue
@@ -286,6 +396,10 @@ def _merge_followup(local: Path, remote: Path, base: Path | None, out, key_hex: 
                 "INSERT INTO order_control_history(oc,supplier_key,control_status,note,changed_at) VALUES(?,?,?,?,?)",
                 signature,
             )
+
+    if apply:
+        _merge_followup_execution_history(local, out, key_hex)
+        _overlay_local_settings(local, out, key_hex)
 
 
 def _merge_json_value(module: str, table: str, key: str, path: str, local: Any, remote: Any, base_present: bool, base: Any, report: MergeReport, resolutions: dict[str, str] | None, apply: bool):
@@ -386,6 +500,7 @@ def _merge_compras(local: Path, remote: Path, base: Path | None, out, key_hex: s
                 if apply:
                     choice = (resolutions or {}).get(cid)
                     if choice == "local":
+                        out.execute("DELETE FROM maps WHERE id=?", (mid,))
                         report.preserved_local += 1
                         continue
                     if choice not in {"remote", "both"}:
@@ -393,17 +508,16 @@ def _merge_compras(local: Path, remote: Path, base: Path | None, out, key_hex: s
                 else:
                     continue
             report.additions += 1
-            if apply:
-                out.execute("INSERT OR REPLACE INTO maps(id,data) VALUES(?,?)", (mid, json.dumps(r, ensure_ascii=False)))
             continue
         if l is not None and r is None:
             if b is not None:
                 choice = _record_presence_conflict("compras", "maps", mid, l, r, b, report, resolutions, apply)
-                if apply and choice == "remote":
-                    out.execute("DELETE FROM maps WHERE id=?", (mid,))
+                if choice == "remote":
                     report.updates += 1
                     continue
             report.preserved_local += 1
+            if apply:
+                out.execute("INSERT OR REPLACE INTO maps(id,data) VALUES(?,?)", (mid, json.dumps(l, ensure_ascii=False)))
             continue
         if _same(l, r):
             report.equal += 1
@@ -416,18 +530,21 @@ def _merge_compras(local: Path, remote: Path, base: Path | None, out, key_hex: s
         else:
             report.preserved_local += 1
 
-    # Message history is unioned by ID. Conflicting copies are preserved locally
-    # and reported as a warning; a restore must never re-send or downgrade a local
-    # delivery state because another PC had an older message record.
+    # Candidate starts from remote. Append local-only message history. If the
+    # same immutable message id differs, retain the local copy and report it.
     lmsg = _fetch_json_rows(local, "messages", key_hex)
     rmsg = _fetch_json_rows(remote, "messages", key_hex)
-    for mid, r in rmsg.items():
-        if mid not in lmsg:
+    for mid, l in lmsg.items():
+        if mid not in rmsg:
             report.history_added += 1
             if apply:
-                out.execute("INSERT INTO messages(id,data) VALUES(?,?)", (mid, json.dumps(r, ensure_ascii=False)))
-        elif not _same(lmsg[mid], r):
+                out.execute("INSERT INTO messages(id,data) VALUES(?,?)", (mid, json.dumps(l, ensure_ascii=False)))
+        elif not _same(l, rmsg[mid]):
             report.warnings.append({"kind": "message_history_divergence", "table": "messages", "record_key": mid, "action": "kept_local"})
+            if apply:
+                out.execute("UPDATE messages SET data=? WHERE id=?", (json.dumps(l, ensure_ascii=False), mid))
+    if apply:
+        _overlay_local_settings(local, out, key_hex)
 
 
 def _quick_check(path: Path, key_hex: str | None):
@@ -465,7 +582,9 @@ def analyze(module: str, local: Path, remote: Path, base: Path | None, key_hex: 
 
 
 def apply_merge(module: str, local: Path, remote: Path, output: Path, base: Path | None, key_hex: str | None, resolutions: dict[str, str]) -> dict[str, Any]:
-    _copy_database(local, output, key_hex)
+    # Start from the remote HEAD so imported source tables (orders/items) are
+    # never regressed by a stale PC. Local user-entered work is then merged in.
+    _copy_database(remote, output, key_hex)
     out = secure_connect(output, key_hex=key_hex, readonly=False, timeout=30)
     try:
         out.execute("PRAGMA foreign_keys=ON")
