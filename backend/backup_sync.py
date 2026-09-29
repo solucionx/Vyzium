@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from secure_sqlite import connect as secure_connect, key_from_env
+from secure_sqlite import connect as secure_connect, key_from_env, row_factory
 
 
 def _json(value: Any) -> str:
@@ -44,7 +44,7 @@ def _fetch_rows(path: Path, table: str, key_fields: tuple[str, ...], key_hex: st
         return {}
     con = secure_connect(path, key_hex=key_hex, readonly=True, timeout=30)
     try:
-        con.row_factory = __import__("sqlite3").Row if key_hex is None else con.row_factory
+        con.row_factory = row_factory(key_hex)
         columns = [str(r[1]) for r in con.execute(f"PRAGMA table_info({table})").fetchall()]
         if not columns:
             return {}
