@@ -503,7 +503,7 @@ class WhatsAppSession {
     // profile remains untouched and available for rollback.
     await this._quarantineAuthProfile(oldClientId, `self-heal-${String(reason || 'startup').replace(/[^a-z0-9_-]/gi,'-').slice(0,40)}`);
     if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return false;
-    const freshClientId = this._newAuthClientId();
+    const freshClientId = this.compatibilityMode === 'legacy-2.1' ? 'vyzium' : this._newAuthClientId();
     this._setPendingSession(freshClientId, {reason:`self-heal-${reason}`, previousPending:oldClientId});
     this._setAuthClientId(freshClientId, false);
     this.selfHeal = {...this.selfHeal, recoveredFrom:oldClientId, recoveredTo:freshClientId};
@@ -1122,7 +1122,7 @@ class WhatsAppSession {
       this._saveSelfHealState();
       await this._quarantineAuthProfile(oldClientId, 'self-heal-startup-stall');
       if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return;
-      const freshClientId = this._newAuthClientId();
+      const freshClientId = this.compatibilityMode === 'legacy-2.1' ? 'vyzium' : this._newAuthClientId();
       this._setPendingSession(freshClientId, {reason:'self-heal-startup-stall', previousPending:oldClientId});
       this._setAuthClientId(freshClientId, false);
       this.state = {status:'offline', qr:null, account:null, error:null};
