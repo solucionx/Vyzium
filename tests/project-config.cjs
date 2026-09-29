@@ -75,7 +75,7 @@ test('Windows installer assets referenced by electron-builder exist', () => {
 
 test('Windows runtime uses the Vyzium taskbar identity and explicit app icon', () => {
   const main = read('electron/main.js');
-  assert.match(main, /com\.vyzium\.whatsappv8test/);
+  assert.match(main, /com\.vyzium\.whatsappv9legacytest/);
   assert.match(main, /function appIconPath\(\)/);
   assert.match(main, /build['"], ['"]icon\.ico/);
   assert.match(main, /icon:\s*appIconPath\(\)/);
