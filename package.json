@@ -11,8 +11,9 @@
     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
     "test:node": "node --test tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/remote-backup.cjs tests/backup-restore.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
-    "test": "npm run test:backend && npm run test:node",
-    "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs"
+    "test": "npm run test:syntax && npm run test:backend && npm run test:node",
+    "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs",
+    "test:syntax": "node --check electron/main.js && node --check electron/remote-backup.js && node --check electron/backup-restore.js && node --check electron/backup-state.js && node --check renderer/auth.js"
   },
   "dependencies": {
     "whatsapp-web.js": "1.34.7",
