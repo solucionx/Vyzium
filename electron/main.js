@@ -14,7 +14,7 @@ const { FullDiagnostics } = require('./diagnostics');
 const { createSentryReporter, shouldPromoteWhatsAppEvent } = require('./sentry-client');
 
 const ISOLATED_TEST_BUILD = true;
-const ISOLATED_TEST_DATA_NAME = 'Vyzium-WhatsApp-V8-Test';
+const ISOLATED_TEST_DATA_NAME = 'Vyzium-WhatsApp-V9-Legacy-Test';
 
 if (ISOLATED_TEST_BUILD) {
   app.setPath('userData', path.join(app.getPath('appData'), ISOLATED_TEST_DATA_NAME));
@@ -51,7 +51,7 @@ const engineToken = crypto.randomBytes(24).toString('hex');
 // electron-builder. Without an explicit AppUserModelID, development runs can
 // be grouped under electron.exe and show Electron's generic taskbar icon.
 if (process.platform === 'win32') {
-  app.setAppUserModelId(ISOLATED_TEST_BUILD ? 'com.vyzium.whatsappv8test' : 'com.vyzium.gestaooperacional');
+  app.setAppUserModelId(ISOLATED_TEST_BUILD ? 'com.vyzium.whatsappv9legacytest' : 'com.vyzium.gestaooperacional');
 }
 
 function appIconPath() {
@@ -522,6 +522,10 @@ async function startWorkspaceServices() {
   fullDiagnostics?.stage('Seguranca e bancos validados', 'OK');
   whatsapp = new WhatsAppSession(securityManager.whatsappDir(), {
     profileDataDir: securityManager.whatsappRuntimeDir(),
+    // V9 compatibility control: reproduce the direct headless launch path used by
+    // the older installer that can still generate a first-login QR. The existing
+    // storage-failure recovery may still fall back to hidden headed mode if needed.
+    browserMode: 'headless',
     fullDiagnosticEvent: (event, details) => {
       fullDiagnostics?.event(event, details);
       // Only high-value technical failures are promoted remotely. The reporter
@@ -582,7 +586,7 @@ async function createWindow(initialPage = 'auth.html') {
     minWidth: 1100,
     minHeight: 700,
     backgroundColor: '#eef3f7',
-    title: ISOLATED_TEST_BUILD ? 'Vyzium WhatsApp V8 Test' : 'Vyzium',
+    title: ISOLATED_TEST_BUILD ? 'Vyzium WhatsApp V9 Legacy Test' : 'Vyzium',
     icon: appIconPath(),
     webPreferences: {
       zoomFactor: 0.85,
