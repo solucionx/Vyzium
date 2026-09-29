@@ -265,7 +265,11 @@ test('socket diagnostic probe reports pending state and module failures without 
   const openingProbe = vm.runInNewContext(`(${SOCKET_DIAGNOSTIC_PROBE_SOURCE})`, {
     window: { require(name) { assert.equal(name, 'WAWebSocketModel'); return {Socket:{state:'OPENING',hasSynced:false,stream:'DISCONNECTED'}}; } }
   });
-  assert.deepEqual(openingProbe(), {kind:'socket',state:'OPENING',hasSynced:false,stream:'DISCONNECTED'});
+  const opening = openingProbe();
+  assert.equal(opening.kind, 'socket');
+  assert.equal(opening.state, 'OPENING');
+  assert.equal(opening.hasSynced, false);
+  assert.equal(opening.stream, 'DISCONNECTED');
 
   const failedProbe = vm.runInNewContext(`(${SOCKET_DIAGNOSTIC_PROBE_SOURCE})`, {
     window: { require() { throw new Error('ModuleError: unresolved dependencies'); } }
