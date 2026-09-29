@@ -163,22 +163,31 @@ class SecurityManager {
     }
   }
 
-  async _recoveryEnvelopeForWorkspace(workspaceId) {
+  async _recoveryEnvelopeForWorkspace(workspaceId, { strictRemote = false } = {}) {
+    const cached = this._loadRecoveryEnvelope(workspaceId);
+    if (cached) return cached;
     const authState = this.auth.getState();
-    if (authState?.authenticated && authState?.emailVerified && !authState?.offline) {
-      try {
-        const idToken = await this.auth.getIdToken();
-        const remote = await this.firebase.getRecoveryEnvelope(workspaceId, idToken);
-        if (remote?.ciphertext && remote?.tag) {
-          this._saveRecoveryEnvelope(remote, workspaceId);
-          return remote;
-        }
-      } catch (_) {
-        // A cached encrypted envelope remains a safe fallback. Failure to query
-        // Firebase must never cause prepare() to overwrite an existing envelope.
-      }
+    if (!authState?.authenticated || !authState?.emailVerified) return null;
+    if (authState?.offline) {
+      if (strictRemote) throw new Error('Não foi possível confirmar a chave de recuperação desta conta enquanto o Vyzium está offline. Conecte-se à internet e tente novamente; nenhuma chave nova foi criada.');
+      return null;
     }
-    return this._loadRecoveryEnvelope(workspaceId);
+    try {
+      const idToken = await this.auth.getIdToken();
+      const remote = await this.firebase.getRecoveryEnvelope(workspaceId, idToken);
+      if (remote?.ciphertext && remote?.tag) {
+        this._saveRecoveryEnvelope(remote, workspaceId);
+        return remote;
+      }
+      // A successful online null response is the only safe proof that a new
+      // account does not already have recovery material.
+      return null;
+    } catch (error) {
+      if (strictRemote) {
+        throw new Error('O Vyzium não conseguiu confirmar se esta conta já possui uma chave de recuperação. Por segurança, a criação de uma chave nova foi bloqueada; tente novamente quando o Firebase estiver acessível.');
+      }
+      return null;
+    }
   }
 
   _saveRootKey(rootKey, workspaceId) {
@@ -438,7 +447,7 @@ class SecurityManager {
     this._progress('Preparando a chave protegida pelo Windows…', { stage: 'key' });
     let rootKey = this._loadRootKey(workspaceId);
     if (!rootKey) {
-      const existingRecovery = await this._recoveryEnvelopeForWorkspace(workspaceId);
+      const existingRecovery = await this._recoveryEnvelopeForWorkspace(workspaceId, { strictRemote: true });
       if (existingRecovery) {
         throw new Error('Esta conta já possui uma chave de recuperação. Informe o código de recuperação para usar a mesma chave neste computador; o Vyzium bloqueou a criação de uma chave nova para não tornar seus backups antigos inacessíveis.');
       }
