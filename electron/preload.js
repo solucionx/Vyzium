@@ -33,6 +33,13 @@ contextBridge.exposeInMainWorld('followup', {
     resetPassword: email => ipcRenderer.invoke('auth-reset-password', email),
     logout: () => ipcRenderer.invoke('auth-logout')
   },
+  backupSync: {
+    preflight: () => ipcRenderer.invoke('backup-sync-preflight'),
+    prepare: () => ipcRenderer.invoke('backup-sync-prepare'),
+    apply: (planId, resolutions = {}) => ipcRenderer.invoke('backup-sync-apply', { planId, resolutions }),
+    cancel: planId => ipcRenderer.invoke('backup-sync-cancel', planId),
+    skip: headId => ipcRenderer.invoke('backup-sync-skip', headId)
+  },
   security: {
     status: () => ipcRenderer.invoke('security-status'),
     setup: () => ipcRenderer.invoke('security-setup'),
