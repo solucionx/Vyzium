@@ -220,7 +220,7 @@ function responseError(status, raw) {
   });
 }
 
-function requestRemote({ host = PUBLIC_HOST, method = 'GET', route, token, bodyPath = null, bodyLength = 0, timeoutMs = 45000, responseLimit = RESPONSE_LIMIT }) {
+function requestRemote({ host = PUBLIC_HOST, method = 'GET', route, token, bodyPath = null, bodyLength = 0, timeoutMs = 45000, responseLimit = RESPONSE_LIMIT, extraHeaders = null }) {
   const bearer = normalizeToken(token);
   if (!/^\/[A-Za-z0-9/_-]+$/.test(String(route || ''))) throw new RemoteBackupError('Rota remota inválida.', { code:'BACKUP_ROUTE_INVALID' });
   return new Promise((resolve, reject) => {
@@ -229,6 +229,13 @@ function requestRemote({ host = PUBLIC_HOST, method = 'GET', route, token, bodyP
       Accept: 'application/json',
       Connection: 'close'
     };
+    if (extraHeaders && typeof extraHeaders === 'object') {
+      for (const [key, raw] of Object.entries(extraHeaders)) {
+        if (!/^X-Vyzium-(Parent|Device|Merge-Source)$/i.test(key)) throw new RemoteBackupError('Cabeçalho remoto não permitido.', { code:'BACKUP_HEADER_INVALID' });
+        const value = String(raw || '').trim();
+        if (value) headers[key] = value;
+      }
+    }
     if (bodyPath) {
       headers['Content-Type'] = 'application/octet-stream';
       headers['Content-Length'] = String(bodyLength);
@@ -272,8 +279,184 @@ function requestRemote({ host = PUBLIC_HOST, method = 'GET', route, token, bodyP
   });
 }
 
+function normalizeObjectId(value, { optional = false } = {}) {
+  const id = String(value || '').trim().toLowerCase();
+  if (!id && optional) return null;
+  if (!/^[a-f0-9]{64}$/.test(id)) throw new RemoteBackupError('Identificador de backup inválido.', { code:'BACKUP_OBJECT_ID_INVALID' });
+  return id;
+}
+
+function normalizeDeviceId(value) {
+  const id = String(value || '').trim();
+  if (!/^[A-Za-z0-9._-]{8,128}$/.test(id)) throw new RemoteBackupError('Identificador do dispositivo inválido.', { code:'BACKUP_DEVICE_ID_INVALID' });
+  return id;
+}
+
+async function requestRemoteToFile({ host = PUBLIC_HOST, route, token, outputPath, expectedId, timeoutMs = 120000 }) {
+  const bearer = normalizeToken(token);
+  const id = normalizeObjectId(expectedId);
+  if (String(route || '') !== `/v1/backups/${id}`) throw new RemoteBackupError('Rota de download incompatível com o objeto.', { code:'BACKUP_ROUTE_INVALID' });
+  await fs.promises.mkdir(path.dirname(outputPath), { recursive:true, mode:0o700 });
+  await fs.promises.rm(outputPath, { force:true });
+
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const fail = async error => {
+      if (settled) return;
+      settled = true;
+      await fs.promises.rm(outputPath, { force:true }).catch(() => {});
+      reject(error instanceof RemoteBackupError ? error : new RemoteBackupError('Não foi possível baixar o backup do Poco.', { code:'BACKUP_DOWNLOAD_ERROR' }));
+    };
+    const req = https.request({
+      protocol:'https:', hostname:host, port:443, method:'GET', path:route,
+      headers:{Authorization:`Bearer ${bearer}`,Accept:'application/octet-stream',Connection:'close'},
+      agent:false, timeout:timeoutMs, rejectUnauthorized:true
+    }, response => {
+      const status = Number(response.statusCode || 0);
+      if (status !== 200) {
+        const chunks=[]; let total=0;
+        response.on('data', chunk => { total += chunk.length; if (total <= RESPONSE_LIMIT) chunks.push(chunk); });
+        response.on('error', fail);
+        response.on('end', () => fail(responseError(status, Buffer.concat(chunks))));
+        return;
+      }
+      const declared = Number(response.headers['content-length'] || 0);
+      if (!Number.isSafeInteger(declared) || declared < 32 || declared > MAX_OBJECT) {
+        response.resume();
+        fail(new RemoteBackupError('O servidor informou tamanho inválido para o backup.', { code:'BACKUP_DOWNLOAD_SIZE_INVALID' }));
+        return;
+      }
+      const hash = crypto.createHash('sha256');
+      let total = 0;
+      const output = fs.createWriteStream(outputPath, { flags:'wx', mode:0o600 });
+      output.on('error', fail);
+      response.on('error', fail);
+      response.on('data', chunk => {
+        total += chunk.length;
+        if (total > MAX_OBJECT || total > declared) {
+          response.destroy(new RemoteBackupError('O download excedeu o tamanho anunciado.', { code:'BACKUP_DOWNLOAD_SIZE_INVALID' }));
+          return;
+        }
+        hash.update(chunk);
+      });
+      response.pipe(output);
+      output.on('finish', async () => {
+        if (settled) return;
+        if (total !== declared) return fail(new RemoteBackupError('O download terminou incompleto.', { code:'BACKUP_DOWNLOAD_INCOMPLETE' }));
+        const actual = hash.digest('hex');
+        if (actual !== id) return fail(new RemoteBackupError('O backup baixado não passou na verificação SHA-256.', { code:'BACKUP_DOWNLOAD_CHECKSUM_MISMATCH' }));
+        settled = true;
+        resolve({ path:outputPath, id, bytes:total });
+      });
+    });
+    req.on('timeout', () => req.destroy(new RemoteBackupError('Tempo limite ao baixar o backup do Poco.', { code:'BACKUP_TIMEOUT' })));
+    req.on('error', fail);
+    req.end();
+  });
+}
+
+async function unsealEnvelopeFile(inputPath, outputPath, key, uid) {
+  const normalizedUid = normalizeUid(uid);
+  if (!Buffer.isBuffer(key) || key.length !== 32) throw new RemoteBackupError('Chave de backup inválida.', { code:'BACKUP_KEY_INVALID' });
+  const stat = await fs.promises.stat(inputPath);
+  if (!stat.isFile() || stat.size < 32 || stat.size > MAX_OBJECT) throw new RemoteBackupError('Envelope remoto inválido.', { code:'BACKUP_ENVELOPE_INVALID' });
+  const input = await fs.promises.open(inputPath, 'r');
+  await fs.promises.rm(outputPath, { force:true });
+  const output = await fs.promises.open(outputPath, 'wx', 0o600);
+  try {
+    const header = Buffer.alloc(16);
+    const h = await input.read(header, 0, 16, 0);
+    if (h.bytesRead !== 16 || !header.subarray(0,4).equals(ENVELOPE_MAGIC)) throw new RemoteBackupError('Envelope remoto não possui formato VZB1.', { code:'BACKUP_ENVELOPE_INVALID' });
+    const tag = Buffer.alloc(16);
+    const t = await input.read(tag, 0, 16, stat.size - 16);
+    if (t.bytesRead !== 16) throw new RemoteBackupError('Envelope remoto truncado.', { code:'BACKUP_ENVELOPE_INVALID' });
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, header.subarray(4,16));
+    decipher.setAAD(Buffer.from(`vyzium-backup-v1|${normalizedUid}`, 'utf8'));
+    decipher.setAuthTag(tag);
+    const buffer = Buffer.allocUnsafe(1024 * 1024);
+    const cipherBytes = stat.size - 32;
+    let readPosition = 16, written = 0, left = cipherBytes;
+    while (left > 0) {
+      const size = Math.min(buffer.length, left);
+      const {bytesRead} = await input.read(buffer, 0, size, readPosition);
+      if (!bytesRead) throw new RemoteBackupError('Envelope remoto truncado.', { code:'BACKUP_ENVELOPE_INVALID' });
+      readPosition += bytesRead; left -= bytesRead;
+      const plain = decipher.update(buffer.subarray(0, bytesRead));
+      if (plain.length) { await output.write(plain, 0, plain.length, written); written += plain.length; }
+    }
+    let final;
+    try { final = decipher.final(); }
+    catch (_) { throw new RemoteBackupError('A autenticação criptográfica do backup falhou.', { code:'BACKUP_AUTHENTICATION_FAILED' }); }
+    if (final.length) { await output.write(final, 0, final.length, written); written += final.length; }
+    await output.sync();
+    return { path:outputPath, bytes:written };
+  } finally {
+    await Promise.allSettled([input.close(), output.close()]);
+  }
+}
+
+async function extractBundleFile(bundlePath, outputDir, uid) {
+  const normalizedUid = normalizeUid(uid);
+  const stat = await fs.promises.stat(bundlePath);
+  const input = await fs.promises.open(bundlePath, 'r');
+  const created = [];
+  try {
+    const prefix = Buffer.alloc(8);
+    const first = await input.read(prefix, 0, 8, 0);
+    if (first.bytesRead !== 8 || !prefix.subarray(0,4).equals(BUNDLE_MAGIC)) throw new RemoteBackupError('Pacote descriptografado não possui formato VYB1.', { code:'BACKUP_MANIFEST_INVALID' });
+    const headerLength = prefix.readUInt32BE(4);
+    if (headerLength <= 0 || headerLength > 64 * 1024) throw new RemoteBackupError('Manifesto remoto possui tamanho inválido.', { code:'BACKUP_MANIFEST_INVALID' });
+    const headerBytes = Buffer.alloc(headerLength);
+    const hr = await input.read(headerBytes, 0, headerLength, 8);
+    if (hr.bytesRead !== headerLength) throw new RemoteBackupError('Manifesto remoto truncado.', { code:'BACKUP_MANIFEST_INVALID' });
+    let header;
+    try { header = JSON.parse(headerBytes.toString('utf8')); }
+    catch (_) { throw new RemoteBackupError('Manifesto remoto não é JSON válido.', { code:'BACKUP_MANIFEST_INVALID' }); }
+    if (Number(header?.version) !== 1 || header?.format !== 'VYB1' || header?.workspace_id !== normalizedUid || !Array.isArray(header?.files)) {
+      throw new RemoteBackupError('Manifesto remoto não pertence a este workspace.', { code:'BACKUP_MANIFEST_INVALID' });
+    }
+    const modules = new Set();
+    let offset = 8 + headerLength;
+    await fs.promises.mkdir(outputDir, { recursive:true, mode:0o700 });
+    for (const entry of header.files) {
+      const moduleName = String(entry?.module || '').toLowerCase();
+      if (!['followup','compras'].includes(moduleName) || modules.has(moduleName)) throw new RemoteBackupError('Manifesto remoto possui módulos inválidos ou duplicados.', { code:'BACKUP_MANIFEST_INVALID' });
+      modules.add(moduleName);
+      const size = Number(entry?.size_bytes);
+      const expectedHash = String(entry?.sha256 || '').toLowerCase();
+      if (!Number.isSafeInteger(size) || size <= 0 || size > MAX_OBJECT || !/^[a-f0-9]{64}$/.test(expectedHash) || entry?.encrypted === false || offset + size > stat.size) {
+        throw new RemoteBackupError('Manifesto remoto possui um arquivo inválido.', { code:'BACKUP_MANIFEST_INVALID' });
+      }
+      const target = path.join(outputDir, moduleName === 'compras' ? 'compras.sqlite3' : 'followup.db');
+      const out = await fs.promises.open(target, 'wx', 0o600);
+      const hash = crypto.createHash('sha256');
+      const buffer = Buffer.allocUnsafe(1024 * 1024);
+      let left = size, writePosition = 0;
+      try {
+        while (left > 0) {
+          const count = Math.min(buffer.length, left);
+          const {bytesRead} = await input.read(buffer, 0, count, offset);
+          if (!bytesRead) throw new RemoteBackupError('Arquivo remoto truncado.', { code:'BACKUP_MANIFEST_INVALID' });
+          const chunk = buffer.subarray(0, bytesRead);
+          hash.update(chunk);
+          await out.write(chunk, 0, chunk.length, writePosition);
+          offset += bytesRead; writePosition += bytesRead; left -= bytesRead;
+        }
+        await out.sync();
+      } finally { await out.close(); }
+      if (hash.digest('hex') !== expectedHash) throw new RemoteBackupError('Um banco do backup não passou na verificação SHA-256.', { code:'BACKUP_BUNDLE_CHECKSUM_MISMATCH' });
+      created.push({module:moduleName,path:target,size_bytes:size,sha256:expectedHash,filename:path.basename(target),encrypted:true});
+    }
+    if (offset !== stat.size) throw new RemoteBackupError('O pacote remoto possui bytes excedentes não declarados.', { code:'BACKUP_MANIFEST_INVALID' });
+    return { header, files:created };
+  } catch (error) {
+    await Promise.allSettled(created.map(item => fs.promises.rm(item.path,{force:true})));
+    throw error;
+  } finally { await input.close(); }
+}
+
 class RemoteBackupManager {
-  constructor({ tempRoot, getToken, getUid, withBackupKey, host = PUBLIC_HOST, audit = null, requestFn = requestRemote } = {}) {
+  constructor({ tempRoot, getToken, getUid, withBackupKey, host = PUBLIC_HOST, audit = null, requestFn = requestRemote, downloadFn = requestRemoteToFile } = {}) {
     this.tempRoot = path.resolve(String(tempRoot || '.'));
     this.getToken = getToken;
     this.getUid = getUid;
@@ -281,6 +464,7 @@ class RemoteBackupManager {
     this.host = host;
     this.audit = typeof audit === 'function' ? audit : () => {};
     this.requestFn = requestFn;
+    this.downloadFn = downloadFn;
   }
 
   _event(name, details = {}) {
@@ -305,9 +489,39 @@ class RemoteBackupManager {
     return { uid, state, authorized };
   }
 
-  async upload(files, { appVersion = '' } = {}) {
+  async list() {
     const { uid, token } = await this._tokenAndUid();
-    this._event('upload-start', { snapshotCount:Array.isArray(files) ? files.length : 0 });
+    const response = await this.requestFn({ host:this.host, method:'GET', route:'/v1/backups', token, timeoutMs:45000 });
+    if (response.status !== 200) throw responseError(response.status, response.body);
+    const payload = parseJsonBody(response.body);
+    const backups = (Array.isArray(payload?.backups) ? payload.backups : [])
+      .map(entry => {
+        const id = normalizeObjectId(entry?.id, {optional:true});
+        if (!id) return null;
+        return {
+          id,
+          bytes:Number(entry?.bytes || 0),
+          created_ms:Number(entry?.created_ms || 0),
+          role:String(entry?.role || ''),
+          parent_id:normalizeObjectId(entry?.parent_id, {optional:true})
+        };
+      })
+      .filter(entry => entry && entry.bytes >= 32 && entry.bytes <= MAX_OBJECT)
+      .sort((a,b) => b.created_ms - a.created_ms || a.id.localeCompare(b.id));
+    let headId = normalizeObjectId(payload?.head_id, {optional:true});
+    if (!headId) headId = backups[0]?.id || null; // backwards-compatible 3.3.8 server
+    for (const item of backups) {
+      if (!item.role) item.role = item.id === headId ? 'current' : 'previous';
+    }
+    return { uid, head_id:headId, retention:Number(payload?.retention || 0) || null, backups };
+  }
+
+  async upload(files, { appVersion = '', parentId = null, deviceId = null, mergeSourceId = null } = {}) {
+    const { uid, token } = await this._tokenAndUid();
+    parentId = normalizeObjectId(parentId, {optional:true});
+    mergeSourceId = normalizeObjectId(mergeSourceId, {optional:true});
+    if (deviceId) deviceId = normalizeDeviceId(deviceId);
+    this._event('upload-start', { snapshotCount:Array.isArray(files) ? files.length : 0, hasParent:Boolean(parentId), hasMergeSource:Boolean(mergeSourceId) });
 
     const statusResponse = await this.requestFn({ host:this.host, method:'GET', route:'/v1/access/status', token });
     if (statusResponse.status !== 200) throw responseError(statusResponse.status, statusResponse.body);
@@ -335,6 +549,10 @@ class RemoteBackupManager {
       const envelope = await this.withBackupKey(async key => sealBundleFile(bundlePath, envelopePath, key, uid));
       this._event('envelope-ready', { id:envelope.id, bytes:envelope.size_bytes });
 
+      const extraHeaders = {};
+      if (parentId) extraHeaders['X-Vyzium-Parent'] = parentId;
+      if (deviceId) extraHeaders['X-Vyzium-Device'] = deviceId;
+      if (mergeSourceId) extraHeaders['X-Vyzium-Merge-Source'] = mergeSourceId;
       const uploadResponse = await this.requestFn({
         host:this.host,
         method:'PUT',
@@ -342,30 +560,33 @@ class RemoteBackupManager {
         token,
         bodyPath:envelope.path,
         bodyLength:envelope.size_bytes,
-        timeoutMs:120000
+        timeoutMs:120000,
+        extraHeaders
       });
       if (uploadResponse.status !== 200) throw responseError(uploadResponse.status, uploadResponse.body);
       const uploadPayload = parseJsonBody(uploadResponse.body);
-      this._event('put-complete', { id:envelope.id, bytes:envelope.size_bytes, serverStatus:String(uploadPayload?.status || '') });
+      this._event('put-complete', { id:envelope.id, bytes:envelope.size_bytes, serverStatus:String(uploadPayload?.status || ''), classification:String(uploadPayload?.classification || '') });
 
-      const listResponse = await this.requestFn({ host:this.host, method:'GET', route:'/v1/backups', token, timeoutMs:45000 });
-      if (listResponse.status !== 200) throw responseError(listResponse.status, listResponse.body);
-      const listPayload = parseJsonBody(listResponse.body);
-      const item = Array.isArray(listPayload?.backups)
-        ? listPayload.backups.find(entry => String(entry?.id || '') === envelope.id)
-        : null;
+      const listing = await this.list();
+      const item = listing.backups.find(entry => entry.id === envelope.id);
       if (!item || Number(item.bytes) !== envelope.size_bytes) {
         throw new RemoteBackupError('O servidor respondeu ao envio, mas o objeto não apareceu na verificação final.', { code:'BACKUP_VERIFY_MISSING' });
       }
-      this._event('verified', { id:envelope.id, bytes:envelope.size_bytes });
+      const classification = String(uploadPayload?.classification || (listing.head_id === envelope.id ? 'current' : 'divergent')).toLowerCase();
+      const promoted = classification === 'current' && listing.head_id === envelope.id;
+      this._event('verified', { id:envelope.id, bytes:envelope.size_bytes, classification, promoted, headId:listing.head_id });
       return {
         uploaded:true,
         authorized:true,
         state,
         id:envelope.id,
         bytes:envelope.size_bytes,
+        classification,
+        promoted,
+        head_id:listing.head_id,
         server_status:String(uploadPayload?.status || 'stored'),
         created_ms:Number(item.created_ms || 0) || null,
+        role:item.role,
         modules:bundle.records.map(record => ({ module:record.module, bytes:record.size_bytes, sha256:record.sha256 }))
       };
     } catch (error) {
@@ -383,8 +604,40 @@ class RemoteBackupManager {
       ]);
     }
   }
-}
 
+  async downloadExtract(objectId) {
+    const {uid, token} = await this._tokenAndUid();
+    const id = normalizeObjectId(objectId);
+    await fs.promises.mkdir(this.tempRoot, {recursive:true, mode:0o700});
+    const dir = path.join(this.tempRoot, `restore-${Date.now()}-${crypto.randomBytes(6).toString('hex')}`);
+    const envelopePath = path.join(dir, `${id}.vzb`);
+    const bundlePath = path.join(dir, 'workspace.vyb');
+    const filesDir = path.join(dir, 'files');
+    await fs.promises.mkdir(dir, {recursive:false, mode:0o700});
+    try {
+      const downloaded = await this.downloadFn({host:this.host, route:`/v1/backups/${id}`, token, outputPath:envelopePath, expectedId:id, timeoutMs:120000});
+      const unsealed = await this.withBackupKey(async key => unsealEnvelopeFile(downloaded.path, bundlePath, key, uid));
+      const extracted = await extractBundleFile(unsealed.path, filesDir, uid);
+      await Promise.allSettled([
+        fs.promises.rm(envelopePath,{force:true}),
+        fs.promises.rm(bundlePath,{force:true})
+      ]);
+      this._event('download-extracted',{id,files:extracted.files.map(x=>({module:x.module,bytes:x.size_bytes}))});
+      return {id,dir,header:extracted.header,files:extracted.files,bytes:downloaded.bytes};
+    } catch (error) {
+      await fs.promises.rm(dir,{recursive:true,force:true}).catch(()=>{});
+      this._event('download-error',{id,code:String(error?.code||'REMOTE_BACKUP_ERROR'),message:String(error?.message||error).slice(0,500)});
+      throw error;
+    }
+  }
+
+  async cleanupExtracted(dir) {
+    const target = path.resolve(String(dir || ''));
+    const relative = path.relative(this.tempRoot,target);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) throw new RemoteBackupError('Diretório temporário inválido.', {code:'BACKUP_TEMP_INVALID'});
+    await fs.promises.rm(target,{recursive:true,force:true});
+  }
+}
 module.exports = {
   PUBLIC_HOST,
   MAX_OBJECT,
@@ -394,8 +647,12 @@ module.exports = {
   RemoteBackupManager,
   buildBundleFile,
   sealBundleFile,
+  unsealEnvelopeFile,
+  extractBundleFile,
   sha256File,
   sha256Buffer,
   requestRemote,
-  responseError
+  requestRemoteToFile,
+  responseError,
+  normalizeObjectId
 };
