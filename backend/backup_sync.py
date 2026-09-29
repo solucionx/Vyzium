@@ -152,20 +152,23 @@ def _record_fields_merge(module: str, table: str, key: Any, local: dict[str, Any
     merged = dict(local)
     changed = False
     for field in fields:
-        value, did_change = _choose_value(
+        value, _choice_changed_local = _choose_value(
             module, table, key, field,
             local.get(field), remote.get(field),
             base is not None, base.get(field) if base else None,
             report, resolutions, apply,
         )
         merged[field] = value
-        changed = changed or did_change
+        # The output candidate is a copy of REMOTE. A selected local value must
+        # therefore be written even when the merge decision is "keep local".
+        changed = changed or not _same(value, remote.get(field))
 
     # updated_at is metadata. Never let an older timestamp erase a newer one.
     if "updated_at" in local or "updated_at" in remote:
         candidates = [str(v) for v in (local.get("updated_at"), remote.get("updated_at")) if v]
         if candidates:
             merged["updated_at"] = max(candidates)
+            changed = changed or not _same(merged["updated_at"], remote.get("updated_at"))
     return merged, changed
 
 
