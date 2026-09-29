@@ -57,7 +57,9 @@ jobs:
           gh repo view $env:RELEASE_REPO --json nameWithOwner,visibility | Out-Null
           if ($LASTEXITCODE -ne 0) { throw "Cannot access $env:RELEASE_REPO." }
           gh release view $env:RELEASE_TAG --repo $env:RELEASE_REPO *> $null
-          if ($LASTEXITCODE -eq 0) { throw "Release $env:RELEASE_TAG already exists. Refusing to overwrite it." }
+          $releaseExists = ($LASTEXITCODE -eq 0)
+          if ($releaseExists) { throw "Release $env:RELEASE_TAG already exists. Refusing to overwrite it." }
+          $global:LASTEXITCODE = 0
 
       - name: Install Node dependencies
         run: npm ci
