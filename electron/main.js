@@ -11,11 +11,13 @@ const { FirebaseClient } = require('./firebase-client');
 const { AuthManager } = require('./auth-manager');
 const { SecurityManager } = require('./security-manager');
 const { FullDiagnostics } = require('./diagnostics');
+const { RemoteBackupManager } = require('./remote-backup');
 const { createSentryReporter, shouldPromoteWhatsAppEvent } = require('./sentry-client');
 
 let window;
 let whatsapp;
 let whatsappBridge;
+let remoteBackup;
 let updater;
 let firebaseClient;
 let authManager;
@@ -322,7 +324,187 @@ async function requestEngine(moduleName, method, route, body) {
   }
 }
 
+function pathInside(root, candidate) {
+  const base = path.resolve(root);
+  const target = path.resolve(candidate);
+  const relative = path.relative(base, target);
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
+}
+
+function remoteBackupStatePath() {
+  return path.join(securityManager.workspaceRoot(), 'backups', 'remote-state.json');
+}
+
+function snapshotSignature(snapshots) {
+  return snapshots
+    .map(item => ({
+      module:String(item.module || ''),
+      size_bytes:Number(item.size_bytes || 0),
+      sha256:String(item.sha256 || '').toLowerCase()
+    }))
+    .sort((a,b) => a.module.localeCompare(b.module));
+}
+
+function readRemoteBackupState() {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(remoteBackupStatePath(), 'utf8'));
+    return parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function writeRemoteBackupState(result, snapshots, reason, sourceFingerprint) {
+  const target = remoteBackupStatePath();
+  fs.mkdirSync(path.dirname(target), { recursive:true });
+  const tmp = target + '.tmp';
+  const payload = {
+    version:1,
+    last_success_at:new Date().toISOString(),
+    object_id:String(result?.id || ''),
+    bytes:Number(result?.bytes || 0),
+    reason:String(reason || ''),
+    source_fingerprint:sourceFingerprint || null,
+    snapshot_signature:snapshotSignature(snapshots)
+  };
+  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), {encoding:'utf8', mode:0o600});
+  fs.renameSync(tmp, target);
+}
+
+async function createRemoteBackupSnapshots(reason = 'remote-upload') {
+  if (!securityManager || !workspaceServicesStarted) throw new Error('Entre na sua conta Vyzium antes de criar o backup.');
+  const snapshots = [];
+  const comprasWasRunning = Boolean(comprasEngineUrl);
+  try {
+    for (const moduleName of ['followup', 'compras']) {
+      const databasePath = securityManager.moduleDb(moduleName);
+      if (!fs.existsSync(databasePath)) continue;
+      const result = await requestEngine(moduleName, 'POST', '/data-safety/backup', {
+        reason:String(reason || 'remote-upload'),
+        automatic:true
+      });
+      if (!result?.created || !result?.path) {
+        throw new Error(`Não foi possível criar o snapshot local de ${moduleName === 'compras' ? 'Cotação & Mapas' : 'Acompanhamento'}.`);
+      }
+      const backupRoot = path.join(securityManager.moduleDir(moduleName), 'backups', moduleName);
+      const snapshotPath = path.resolve(String(result.path));
+      if (!pathInside(backupRoot, snapshotPath)) {
+        throw new Error('O motor retornou um caminho de snapshot fora do workspace protegido.');
+      }
+      const stat = await fs.promises.stat(snapshotPath);
+      if (!stat.isFile() || stat.size <= 0 || stat.size !== Number(result.size_bytes)) {
+        throw new Error(`O snapshot local de ${moduleName} não passou na validação de tamanho.`);
+      }
+      snapshots.push({
+        module:moduleName,
+        path:snapshotPath,
+        filename:String(result.filename || path.basename(snapshotPath)),
+        size_bytes:stat.size,
+        sha256:String(result.sha256 || '').toLowerCase(),
+        encrypted:result.encrypted === true
+      });
+    }
+  } finally {
+    if (!comprasWasRunning && activeModule !== 'compras' && comprasEngineUrl) {
+      await stopComprasEngine().catch(() => {});
+    }
+  }
+  if (!snapshots.length) throw new Error('Nenhum banco protegido está disponível para o backup remoto.');
+  return snapshots;
+}
+
+async function performRemoteBackup({reason='manual', skipIfUnchanged=false} = {}) {
+  if (!workspaceServicesStarted || !remoteBackup) {
+    throw new Error('O backup remoto só fica disponível após entrar na sua conta Vyzium.');
+  }
+  const access = await remoteBackup.status();
+  if (!access.authorized) {
+    return {
+      uploaded:false,
+      authorized:false,
+      state:access.state,
+      reason:access.state === 'pending'
+        ? 'Solicitação registrada no Poco. Autorize este usuário no aplicativo do servidor e tente novamente.'
+        : `Acesso ao backup não autorizado no Poco (estado: ${access.state}).`
+    };
+  }
+
+  const sourceFingerprint = securityManager.remoteBackupFingerprint();
+  const previous = readRemoteBackupState();
+  if (skipIfUnchanged && previous?.source_fingerprint === sourceFingerprint) {
+    fullDiagnostics?.event('remote-backup.close-skip-unchanged', {});
+    return {
+      uploaded:false,
+      authorized:true,
+      skipped:true,
+      unchanged:true,
+      reason:'Nenhuma alteração desde o último backup remoto confirmado.'
+    };
+  }
+
+  const snapshots = await createRemoteBackupSnapshots(`remote-${reason}`);
+  const result = await remoteBackup.upload(snapshots, {appVersion:app.getVersion()});
+  if (result?.uploaded) writeRemoteBackupState(result, snapshots, reason, sourceFingerprint);
+  return result;
+}
+
+async function waitForActiveRequests(maxMs = 30000) {
+  const deadline = Date.now() + maxMs;
+  while (activeRequests > 0 && Date.now() < deadline) {
+    await new Promise(resolve => setTimeout(resolve, 250));
+  }
+  return activeRequests === 0;
+}
+
+async function backupOnNormalClose() {
+  const auth = authManager?.getState?.();
+  if (!workspaceServicesStarted || !remoteBackup || !auth?.authenticated || !auth?.emailVerified) return;
+  const idle = await waitForActiveRequests(30000);
+  if (!idle) {
+    fullDiagnostics?.event('remote-backup.close-skip-busy', {activeRequests});
+    return;
+  }
+  const timeout = new Promise((_, reject) => {
+    setTimeout(() => {
+      const error = new Error('Backup automático de fechamento excedeu o limite de 150 segundos.');
+      error.code = 'BACKUP_CLOSE_TIMEOUT';
+      reject(error);
+    }, 150000);
+  });
+  try {
+    const result = await Promise.race([
+      performRemoteBackup({reason:'app-close', skipIfUnchanged:true}),
+      timeout
+    ]);
+    fullDiagnostics?.event('remote-backup.close-complete', {
+      uploaded:Boolean(result?.uploaded),
+      skipped:Boolean(result?.skipped),
+      state:String(result?.state || '')
+    });
+  } catch (error) {
+    // Closing the application must never modify, roll back or delete production
+    // databases because the Poco/server is offline. The live SQLCipher files are
+    // untouched; only a consistent snapshot may have been created.
+    fullDiagnostics?.event('remote-backup.close-failed', {
+      code:String(error?.code || 'REMOTE_BACKUP_CLOSE_ERROR'),
+      status:Number(error?.status || 0),
+      requestId:error?.requestId || null,
+      message:String(error?.message || error).slice(0,500)
+    });
+  }
+}
+
 async function apiRequest(method, route, body) {
+  if (String(route || '').startsWith('/remote-backup/')) {
+    if (!workspaceServicesStarted || !remoteBackup) {
+      throw new Error('O backup remoto só fica disponível após entrar na sua conta Vyzium.');
+    }
+    if (method === 'GET' && route === '/remote-backup/status') return remoteBackup.status();
+    if (method === 'POST' && route === '/remote-backup/create') {
+      return performRemoteBackup({reason:'manual', skipIfUnchanged:false});
+    }
+    throw new Error('Operação de backup remoto não permitida.');
+  }
   if (route === '/supplier-contacts') {
     if (method !== 'GET' || activeModule !== 'compras' || !workspaceServicesStarted) {
       throw new Error('Consulta de fornecedores indisponível. Abra Cotação & Mapas na sua conta.');
@@ -515,6 +697,11 @@ async function startWorkspaceServices() {
   fullDiagnostics?.stage('Seguranca e bancos validados', 'OK');
   whatsapp = new WhatsAppSession(securityManager.whatsappDir(), {
     profileDataDir: securityManager.whatsappRuntimeDir(),
+    // Production baseline validated on a genuinely clean account/profile.
+    // Starts on the working 2.1-compatible path and may recover to hidden headed
+    // mode when Chromium denies persistent storage.
+    browserMode: 'headless',
+    compatibilityMode: 'legacy-2.1',
     fullDiagnosticEvent: (event, details) => {
       fullDiagnostics?.event(event, details);
       // Only high-value technical failures are promoted remotely. The reporter
@@ -528,6 +715,14 @@ async function startWorkspaceServices() {
   fullDiagnostics?.stage('Sessao WhatsApp criada', 'OK', {diagnosticDirectory:whatsapp.diagnosticDirectory()});
   whatsappBridge = await startBridge(whatsapp, engineToken);
   fullDiagnostics?.stage('Bridge local do WhatsApp iniciado', 'OK');
+  remoteBackup = new RemoteBackupManager({
+    tempRoot: path.join(securityManager.workspaceRoot(), 'backups', 'remote-transfer'),
+    getToken: () => authManager.getIdToken(),
+    getUid: () => authManager.getState().uid,
+    withBackupKey: callback => securityManager.withRemoteBackupKey(callback),
+    audit: (event, details) => { try { fullDiagnostics?.event(event, details); } catch (_) {} }
+  });
+  fullDiagnostics?.stage('Backup remoto Poco preparado', 'OK');
   workspaceServicesStarted = true;
   startEngine('followup').catch(error => {
     console.error('[followup-engine]', error);
@@ -548,6 +743,7 @@ async function stopWorkspaceServices() {
   }
   whatsapp = null;
   whatsappBridge = null;
+  remoteBackup = null;
   workspaceServicesStarted = false;
 }
 
@@ -862,15 +1058,25 @@ app.on('before-quit', event => {
   event.preventDefault();
   if (shutdownPromise) return;
   app.isQuitting = true;
-  shutdownPromise = Promise.resolve(stopWorkspaceServices()).catch(error => {
-    try { fullDiagnostics?.error('app.shutdown', error); } catch (_) {}
-  }).finally(() => {
-    // Stop the browser before running diagnostic compression. Finalize is
-    // idempotent, including the second before-quit raised by app.quit().
-    try { fullDiagnostics?.finalize({reason:'before-quit'}); } catch (_) {}
-    quitting = true;
-    app.quit();
-  });
+  shutdownPromise = Promise.resolve()
+    // Cloud upload is deliberately limited to two cases: explicit user action
+    // in Settings or this normal application shutdown. No periodic/background
+    // upload runs during the working day.
+    .then(() => backupOnNormalClose())
+    .catch(error => {
+      try { fullDiagnostics?.error('remote-backup.before-quit', error); } catch (_) {}
+    })
+    .then(() => stopWorkspaceServices())
+    .catch(error => {
+      try { fullDiagnostics?.error('app.shutdown', error); } catch (_) {}
+    })
+    .finally(() => {
+      // Stop the browser before running diagnostic compression. Finalize is
+      // idempotent, including the second before-quit raised by app.quit().
+      try { fullDiagnostics?.finalize({reason:'before-quit'}); } catch (_) {}
+      quitting = true;
+      app.quit();
+    });
 });
 
 app.on('window-all-closed', () => {

@@ -7,13 +7,9 @@ const {spawn} = require('child_process');
 
 function findBrowser() {
   const candidates = [process.env.VYZIUM_BROWSER_PATH];
-  for (const base of [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA]) {
-    if (base) {
-      for (const suffix of ['Microsoft/Edge/Application/msedge.exe', 'Google/Chrome/Application/chrome.exe']) {
-        candidates.push(path.join(base, suffix));
-      }
-    }
-  }
+  const bases = [process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)'], process.env.LOCALAPPDATA].filter(Boolean);
+  for (const base of bases) candidates.push(path.join(base, 'Microsoft/Edge/Application/msedge.exe'));
+  for (const base of bases) candidates.push(path.join(base, 'Google/Chrome/Application/chrome.exe'));
   candidates.push(
     '/usr/bin/chromium',
     '/usr/bin/chromium-browser',
@@ -293,7 +289,7 @@ function classifyRecoverableStartupError(error) {
   if (/encerrou antes do Chrome ficar disponível|Chrome encerrou antes|inicializador invisível|Tempo limite ao preparar o Chrome/i.test(text)) return 'browser-launch';
   if (/profile.*in use|user data directory is already in use|SingletonLock|SingletonCookie|lock file/i.test(text)) return 'profile-lock';
   if (/ERR_(INTERNET_DISCONNECTED|NETWORK_CHANGED|NAME_NOT_RESOLVED|CONNECTION_(RESET|TIMED_OUT|CLOSED)|PROXY_CONNECTION_FAILED)|ENETUNREACH|ETIMEDOUT|EAI_AGAIN/i.test(text)) return 'network';
-  if (error?.code === 'VYZIUM_BOOTSTRAP_TIMEOUT' || /Waiting failed|auth timeout|ready timeout|não estabilizou o documento|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
+  if (error?.code === 'VYZIUM_SOCKET_TIMEOUT' || error?.code === 'VYZIUM_BOOTSTRAP_TIMEOUT' || /Waiting failed|auth timeout|ready timeout|não estabilizou o documento|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
   return null;
 }
 
@@ -346,6 +342,11 @@ class WhatsAppSession {
     // Chrome itself stores profile + cache under %LOCALAPPDATA% on Windows.
     this.profileDataDir = deps.profileDataDir || dataDir;
     this.deps = deps;
+    // Compatibility control based on the user-provided Vyzium 2.1 installer:
+    // upstream whatsapp-web.js 1.34.7 + fixed LocalAuth clientId "vyzium" +
+    // direct headless Chrome. The surrounding Vyzium lifecycle/audit remains.
+    this.compatibilityMode = String(deps.compatibilityMode || '');
+    this.legacyPreserveEstablished = false;
     this.client = null;
     this.starting = null;
     this.startupWatchdog = null;
@@ -404,6 +405,14 @@ class WhatsAppSession {
     this.sessionState = this._loadOrMigrateSessionState();
     this.activeClientId = this.sessionState.activeClientId || null;
     this.pendingClientId = this.sessionState.pendingClientId || null;
+    // Production upgrades must never abandon a healthy established profile merely
+    // because clean/new logins use the 2.1 compatibility path. Existing sessions
+    // continue on their current LocalAuth profile until the user explicitly asks
+    // for a new QR or recovery rotates to a pending profile.
+    this.legacyPreserveEstablished = this.compatibilityMode === 'legacy-2.1'
+      && Boolean(this.activeClientId)
+      && this.sessionState?.state === 'established'
+      && this.activeClientId !== 'vyzium';
     if (this.activeClientId) {
       this.authClientId = this.activeClientId;
       this.firstConnectionPending = false;
@@ -415,6 +424,19 @@ class WhatsAppSession {
       this.authClientId = this._newAuthClientId();
       this.firstConnectionPending = true;
       this._setPendingSession(this.authClientId, {reason:'first-connection'});
+    }
+    if (this._legacyCompatibilityActive()) {
+      const legacyEstablished = this.sessionState?.activeClientId === 'vyzium' && this.sessionState?.state === 'established';
+      const previousPending = this.sessionState?.pendingClientId || null;
+      this.authClientId = 'vyzium';
+      if (!legacyEstablished) {
+        this._setPendingSession('vyzium', {reason:'legacy-2.1-compatibility', previousPending});
+        this.pendingClientId = 'vyzium';
+      } else {
+        this.activeClientId = 'vyzium';
+        this.pendingClientId = null;
+      }
+      this.firstConnectionPending = !legacyEstablished;
     }
     this.requiresNewQr = false;
     this.userPaused = this._loadPausedPreference();
@@ -432,6 +454,13 @@ class WhatsAppSession {
       platform:process.platform,
       arch:process.arch
     });
+  }
+
+  _legacyCompatibilityActive() {
+    if (this.compatibilityMode !== 'legacy-2.1') return false;
+    if (!this.legacyPreserveEstablished) return true;
+    const committed = this._validClientId(this.sessionState?.activeClientId);
+    return !committed || this.authClientId !== committed || this.firstConnectionPending;
   }
 
   _loadSelfHealState() {
@@ -490,7 +519,7 @@ class WhatsAppSession {
     // profile remains untouched and available for rollback.
     await this._quarantineAuthProfile(oldClientId, `self-heal-${String(reason || 'startup').replace(/[^a-z0-9_-]/gi,'-').slice(0,40)}`);
     if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return false;
-    const freshClientId = this._newAuthClientId();
+    const freshClientId = this.compatibilityMode === 'legacy-2.1' ? 'vyzium' : this._newAuthClientId();
     this._setPendingSession(freshClientId, {reason:`self-heal-${reason}`, previousPending:oldClientId});
     this._setAuthClientId(freshClientId, false);
     this.selfHeal = {...this.selfHeal, recoveredFrom:oldClientId, recoveredTo:freshClientId};
@@ -796,6 +825,7 @@ class WhatsAppSession {
   }
 
   _migrateEstablishedProfileToRuntime() {
+    if (this._legacyCompatibilityActive()) return;
     // v3.1.8 and older placed LocalAuth under app.getPath('userData'), which is
     // normally AppData\\Roaming on Windows. Starting with v3.1.9 the Chromium
     // profile is local-only. Preserve an already established login by moving the
@@ -929,7 +959,8 @@ class WhatsAppSession {
   }
 
   _authSessionDir(clientId = this.authClientId) {
-    return path.join(this.profileDataDir, `session-${clientId}`);
+    const root = this._legacyCompatibilityActive() ? this.dataDir : this.profileDataDir;
+    return path.join(root, `session-${clientId}`);
   }
 
   async _cleanupAuthProfile(clientId) {
@@ -1107,7 +1138,7 @@ class WhatsAppSession {
       this._saveSelfHealState();
       await this._quarantineAuthProfile(oldClientId, 'self-heal-startup-stall');
       if (recoveryGeneration !== this.generation || this.closed || this.userPaused) return;
-      const freshClientId = this._newAuthClientId();
+      const freshClientId = this.compatibilityMode === 'legacy-2.1' ? 'vyzium' : this._newAuthClientId();
       this._setPendingSession(freshClientId, {reason:'self-heal-startup-stall', previousPending:oldClientId});
       this._setAuthClientId(freshClientId, false);
       this.state = {status:'offline', qr:null, account:null, error:null};
@@ -1240,7 +1271,8 @@ class WhatsAppSession {
         // build): never attempt to restore legacy credentials. A fresh LocalAuth
         // profile was selected in the constructor, so go straight to a new QR.
         this._clearReconnectTimer();
-        this._connectInternal({rotateProfileOnStall:true, stallRetries:1}).catch(() => {});
+        const legacy = this._legacyCompatibilityActive();
+        this._connectInternal({rotateProfileOnStall:!legacy, stallRetries:legacy ? 0 : 1}).catch(() => {});
       } else {
         this._scheduleReconnect(true);
       }
@@ -1353,15 +1385,21 @@ class WhatsAppSession {
     const browser = this.deps.browser || findBrowser();
     fs.mkdirSync(this.dataDir, {recursive:true, mode:0o700});
     fs.mkdirSync(this.profileDataDir, {recursive:true, mode:0o700});
-    const launchMode = normalizeBrowserMode(options.browserMode) || this.browserMode;
+    const legacyCompatibility = this._legacyCompatibilityActive();
+    const launchMode = normalizeBrowserMode(options.browserMode) || (legacyCompatibility ? 'headless' : this.browserMode);
     const headless = launchMode === 'headless';
-    const browserArgs = ['--disable-background-timer-throttling','--disable-backgrounding-occluded-windows'];
+    const browserArgs = [
+      '--disable-background-timer-throttling',
+      '--disable-backgrounding-occluded-windows',
+      '--disable-extensions',
+      '--disable-component-extensions-with-background-pages'
+    ];
     // Keep native Windows behavior in production, while allowing unit tests to
     // inject a deterministic platform without spawning a real PowerShell/Chrome.
     // forcePreShowGuard still wins so the dedicated pre-show test exercises the
     // hidden-browser integration contract on every CI platform.
     const runtimePlatform = this.deps.platform || process.platform;
-    const preShowGuard = !headless && (this.deps.forcePreShowGuard === true || runtimePlatform === 'win32');
+    const preShowGuard = !legacyCompatibility && !headless && (this.deps.forcePreShowGuard === true || runtimePlatform === 'win32');
     this._audit('browser.selected', {browser:path.basename(browser), executablePath:browser});
     this._audit('browser.launch-config', {generation, mode:launchMode, headless, args:browserArgs, preShowGuard});
     this._audit('browser.profile-storage', {
@@ -1389,7 +1427,7 @@ class WhatsAppSession {
           puppeteer:puppeteerPkg.version,
           clientSha256:crypto.createHash('sha256').update(source).digest('hex'),
           syntax:'loaded-by-node',
-          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7'),
+          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8'),
           hasHiddenWindowPolling:(source.toString().match(/polling: 200/g) || []).length >= 4,
           hasSafeNavigationOrder:source.includes('navigation recovery is installed only after the initial inject'),
           hasSignalStore:source.includes('WAWebSignalStoreApi'),
@@ -1426,8 +1464,10 @@ class WhatsAppSession {
 
     let client;
     try {
+      const localAuthClientId = legacyCompatibility ? 'vyzium' : this.authClientId;
+      const localAuthDataPath = legacyCompatibility ? this.dataDir : this.profileDataDir;
       client = new Client({
-        authStrategy: new LocalAuth({clientId:this.authClientId, dataPath:this.profileDataDir, rmMaxRetries:12}),
+        authStrategy: new LocalAuth({clientId:localAuthClientId, dataPath:localAuthDataPath, rmMaxRetries:12}),
         puppeteer:puppeteerOptions,
         // Do not pin a WhatsApp Web build. Let whatsapp-web.js use the current build
         // and its normal cache fallback. Pinned/stale builds are especially fragile.
@@ -1679,6 +1719,8 @@ class WhatsAppSession {
         }
       }).catch(() => {}).finally(() => {startupSnapshotPending = false;});
     });
+    client.on('vyzium_socket_waiting', details => this._audit('client.socket-waiting', {generation, ...(details || {})}));
+    client.on('vyzium_socket_timeout', details => this._audit('client.socket-timeout', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_waiting', details => this._audit('client.bootstrap-waiting', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_stable', details => this._audit('client.bootstrap-stable', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_timeout', details => this._audit('client.bootstrap-timeout', {generation, ...(details || {})}));
@@ -1816,7 +1858,11 @@ class WhatsAppSession {
     await this._disposeClient(oldClient, 8000);
     if (actionGeneration !== this.generation || this.closed || this.userPaused) return this.status();
 
-    const freshClientId = this._newAuthClientId();
+    const legacyCompatibility = this.compatibilityMode === 'legacy-2.1';
+    const freshClientId = legacyCompatibility ? 'vyzium' : this._newAuthClientId();
+    if (legacyCompatibility) {
+      await this._quarantineAuthProfile('vyzium', 'explicit-new-qr');
+    }
     const disposablePending = this._setPendingSession(freshClientId, {reason:'explicit-new-qr'});
     this._setAuthClientId(freshClientId, false);
     if (disposablePending) await this._cleanupAuthProfile(disposablePending);
@@ -1826,7 +1872,7 @@ class WhatsAppSession {
     this.state = {status:'offline', qr:null, account:null, error:null};
     this.startMonitoring();
     const nextGeneration = this.generation + 1;
-    this._connectInternal({rotateProfileOnStall:true, stallRetries:1}).catch(error => {
+    this._connectInternal({rotateProfileOnStall:!legacyCompatibility, stallRetries:legacyCompatibility ? 0 : 1}).catch(error => {
       if (nextGeneration === this.generation && !this.closed && !this.userPaused && !['qr','authenticated','ready'].includes(this.state.status)) {
         this.state = {
           status:'error',

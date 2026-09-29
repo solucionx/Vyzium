@@ -31,7 +31,7 @@ test('release version changes preserve the original dependency versions and arch
 });
 
 
-test('3.3.7 keeps one authoritative release version across package, Python and renderer', () => {
+test('3.3.8 keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -108,7 +108,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.3.7');
+  assert.equal(pkg.version, '3.3.8');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
@@ -123,14 +123,40 @@ test('3.1 data safety and authentication files are included', () => {
 
 
 
-test('WhatsApp dependency remains pinned while the bootstrap fix stays focused', () => {
+test('3.3.8 keeps the exact upstream WhatsApp bootstrap validated on a clean account', () => {
   assert.equal(pkg.dependencies?.['whatsapp-web.js'], '1.34.7');
   assert.equal(pkg.overrides, undefined);
-  const patch = read('scripts/patch-whatsapp-web.js');
+  assert.equal(pkg.scripts?.postinstall, undefined);
+  const verifier = read('scripts/verify-whatsapp-patch.js');
   const whatsapp = read('electron/whatsapp.js');
-  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
-  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7/);
-  assert.match(patch, /Vyzium restored-session replay/);
+  const main = read('electron/main.js');
+  assert.match(verifier, /36c70c1eb058087624e57ddea6b0c4d4a140faa2daf9c097dc670697ac321389/);
+  assert.match(whatsapp, /compatibilityMode/);
+  assert.match(main, /browserMode:\s*'headless'/);
+  assert.match(main, /compatibilityMode:\s*'legacy-2\.1'/);
+  assert.match(main, /com\.vyzium\.gestaooperacional/);
+});
+
+test('3.3.8 wires encrypted Poco backup only for manual action and normal app shutdown', () => {
+  const main = read('electron/main.js');
+  const remote = read('electron/remote-backup.js');
+  const security = read('electron/security-manager.js');
+  const followupUi = read('renderer/app.js');
+  const comprasUi = read('renderer/compras-app.js');
+  assert.match(main, /\/remote-backup\/status/);
+  assert.match(main, /\/remote-backup\/create/);
+  assert.match(main, /performRemoteBackup\(\{reason:'manual', skipIfUnchanged:false\}\)/);
+  assert.match(main, /backupOnNormalClose/);
+  assert.match(main, /performRemoteBackup\(\{reason:'app-close', skipIfUnchanged:true\}\)/);
+  assert.doesNotMatch(main, /setInterval\([^\n]*remote-backup/);
+  assert.match(security, /withRemoteBackupKey/);
+  assert.match(remote, /VZB1/);
+  assert.match(remote, /vyzium-backup-v1/);
+  assert.match(remote, /Content-Length/);
+  assert.match(remote, /\/v1\/backups/);
+  assert.doesNotMatch(remote, /DELETE/);
+  assert.match(followupUi, /Criar e enviar backup/);
+  assert.match(comprasUi, /Criar e enviar backup/);
 });
 
 test('3.1 keeps updates on the dedicated public releases repository', () => {

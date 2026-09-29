@@ -185,6 +185,47 @@ test('audit records the stable-bootstrap lifecycle exposed by the patched client
  assert.match(source,/client\.bootstrap-timeout/);
 });
 
+test('3.3.8 preserves an established production profile while clean accounts use legacy QR compatibility', t=>{
+ const dataDir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-upgrade-session-'));
+ const profileDir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-upgrade-profile-'));
+ const cleanDir=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-clean-session-'));
+ const cleanProfile=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-wa-clean-profile-'));
+ t.after(()=>{
+   for(const dir of [dataDir,profileDir,cleanDir,cleanProfile]) fs.rmSync(dir,{recursive:true,force:true});
+ });
+ const established='vyzium-established-abc123';
+ fs.mkdirSync(path.join(profileDir,`session-${established}`),{recursive:true});
+ fs.writeFileSync(path.join(dataDir,'session-state.json'),JSON.stringify({
+   schemaVersion:1,
+   activeClientId:established,
+   pendingClientId:null,
+   previousClientId:null,
+   state:'established',
+   committedAt:new Date().toISOString()
+ }));
+ const existing=new WhatsAppSession(dataDir,{
+   profileDataDir:profileDir,
+   compatibilityMode:'legacy-2.1',
+   browserMode:'headless'
+ });
+ assert.equal(existing.authClientId,established);
+ assert.equal(existing.activeClientId,established);
+ assert.equal(existing.legacyPreserveEstablished,true);
+ assert.equal(existing._legacyCompatibilityActive(),false);
+ assert.equal(existing._authSessionDir(),path.join(profileDir,`session-${established}`));
+
+ const clean=new WhatsAppSession(cleanDir,{
+   profileDataDir:cleanProfile,
+   compatibilityMode:'legacy-2.1',
+   browserMode:'headless'
+ });
+ assert.equal(clean.authClientId,'vyzium');
+ assert.equal(clean.pendingClientId,'vyzium');
+ assert.equal(clean.firstConnectionPending,true);
+ assert.equal(clean._legacyCompatibilityActive(),true);
+ assert.equal(clean._authSessionDir(),path.join(cleanDir,'session-vyzium'));
+});
+
 test('default first-start watchdog allows the WhatsApp document time to stabilize', t=>{
  const s=setup(t);
  assert.equal(s.startupTimeoutMs,120000);

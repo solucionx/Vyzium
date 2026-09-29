@@ -198,6 +198,37 @@ class SecurityManager {
     }
   }
 
+  async withRemoteBackupKey(callback) {
+    if (typeof callback !== 'function') throw new Error('Operação de backup inválida.');
+    const rootKey = this._loadRootKey();
+    if (!rootKey) throw new Error('O cofre protegido ainda não foi configurado para esta conta.');
+    let backupKey = null;
+    try {
+      backupKey = Buffer.from(crypto.hkdfSync(
+        'sha256',
+        rootKey,
+        Buffer.alloc(0),
+        Buffer.from('vyzium:remote-backup:v1', 'utf8'),
+        32
+      ));
+      return await callback(backupKey);
+    } finally {
+      if (backupKey) backupKey.fill(0);
+      rootKey.fill(0);
+    }
+  }
+
+  remoteBackupFingerprint() {
+    const workspaceId = this._workspaceId();
+    const parts = [];
+    for (const moduleName of ['followup', 'compras']) {
+      const target = this.moduleDb(moduleName, workspaceId);
+      if (!fs.existsSync(target)) continue;
+      parts.push(`${moduleName}:${this._databaseFingerprint(target)}`);
+    }
+    return parts.sort().join('|');
+  }
+
   async status() {
     const authState = this.auth.getState();
     if (!authState.authenticated) return { authenticated: false, ready: false };
