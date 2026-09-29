@@ -8,17 +8,17 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('isolated WhatsApp V8 package cannot replace the production Vyzium installation', () => {
+test('isolated WhatsApp V9 legacy package cannot replace the production Vyzium installation', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.build?.appId, 'com.vyzium.whatsappv8test');
-  assert.equal(pkg.build?.productName, 'Vyzium WhatsApp V8 Test');
-  assert.equal(pkg.build?.artifactName, 'Vyzium-WhatsApp-V8-Test-Setup.${ext}');
+  assert.equal(pkg.build?.appId, 'com.vyzium.whatsappv9legacytest');
+  assert.equal(pkg.build?.productName, 'Vyzium WhatsApp V9 Legacy Test');
+  assert.equal(pkg.build?.artifactName, 'Vyzium-WhatsApp-V9-Legacy-Test-Setup.${ext}');
   const main = read('electron/main.js');
   const security = read('electron/security-manager.js');
   assert.match(main, /ISOLATED_TEST_BUILD = true/);
-  assert.match(main, /Vyzium-WhatsApp-V8-Test/);
+  assert.match(main, /Vyzium-WhatsApp-V9-Legacy-Test/);
   assert.match(main, /Atualizações desativadas nesta versão isolada de teste/);
-  assert.match(security, /Vyzium-WhatsApp-V8-Test/);
+  assert.match(security, /Vyzium-WhatsApp-V9-Legacy-Test/);
 });
 
 test('release version changes preserve the original dependency versions and archive URLs', () => {
@@ -130,14 +130,14 @@ test('3.1 data safety and authentication files are included', () => {
 
 
 
-test('WhatsApp dependency remains pinned while the bootstrap fix stays focused', () => {
+test('WhatsApp V9 keeps the exact upstream bootstrap used by the working installer', () => {
   assert.equal(pkg.dependencies?.['whatsapp-web.js'], '1.34.7');
   assert.equal(pkg.overrides, undefined);
-  const patch = read('scripts/patch-whatsapp-web.js');
-  const whatsapp = read('electron/whatsapp.js');
-  assert.match(patch, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8/);
-  assert.match(whatsapp, /VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8/);
-  assert.match(patch, /Vyzium restored-session replay/);
+  assert.equal(pkg.scripts?.postinstall, undefined);
+  const verifier = read('scripts/verify-whatsapp-patch.js');
+  const main = read('electron/main.js');
+  assert.match(verifier, /36c70c1eb058087624e57ddea6b0c4d4a140faa2daf9c097dc670697ac321389/);
+  assert.match(main, /browserMode:\s*'headless'/);
 });
 
 test('3.1 keeps updates on the dedicated public releases repository', () => {
