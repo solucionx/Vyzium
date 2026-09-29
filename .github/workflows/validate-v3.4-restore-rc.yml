@@ -1,0 +1,112 @@
+name: Validate Vyzium 3.4 Restore RC
+
+on:
+  push:
+    branches:
+      - feature/v3.4-safe-restore-merge
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 55
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      VYZIUM_APP_VERSION: "3.4.0-rc.1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Repository safety
+        shell: pwsh
+        run: ./scripts/verify-repository-safety.ps1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Verify validated WhatsApp baseline
+        run: npm run verify:whatsapp-patch
+
+      - name: Install Python dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Run complete test suite
+        run: npm test
+
+      - name: Build followup engine
+        run: >
+          python -m PyInstaller
+          --noconfirm --clean --onefile
+          --name followup-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-followup
+          backend/engine.py
+
+      - name: Build compras engine
+        run: >
+          python -m PyInstaller
+          --noconfirm --clean --onefile
+          --name compras-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --hidden-import xlrd
+          --hidden-import xlwt
+          --distpath dist-engine
+          --workpath build/pyinstaller-compras
+          backend/compras_engine.py
+
+      - name: Build backup restore merge engine
+        run: >
+          python -m PyInstaller
+          --noconfirm --clean --onefile
+          --name backup-sync-engine
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-backup-sync
+          backend/backup_sync.py
+
+      - name: Verify all engines
+        shell: pwsh
+        run: ./scripts/verify-engines.ps1
+
+      - name: Build Windows RC installer
+        run: npm run build
+
+      - name: Verify packaged engines
+        shell: pwsh
+        run: ./scripts/verify-packaged-engines.ps1
+
+      - name: Create portable RC archive
+        shell: pwsh
+        run: Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Vyzium-3.4.0-RC1-Portable.zip" -CompressionLevel Optimal
+
+      - name: Upload RC artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-3.4.0-RC1-Safe-Restore
+          path: |
+            dist/Vyzium-Setup.exe
+            dist/Vyzium-Setup.exe.blockmap
+            dist/latest.yml
+            dist/Vyzium-3.4.0-RC1-Portable.zip
+          if-no-files-found: error
+          retention-days: 30
