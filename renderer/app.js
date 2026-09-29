@@ -660,8 +660,9 @@ function dataSafetyPanelHtml() {
   return `<section class="panel narrow" id="data-safety-panel">
     <div class="panel-head"><div><h2>Segurança dos dados</h2><p>Banco local criptografado e verificação de integridade.</p></div></div>
     <div id="data-safety-status" class="callout">Verificando banco de dados…</div>
+    <div id="remote-backup-status" class="callout" style="margin-top:10px">Backup online: verificando servidor Poco…</div>
     <div class="toolbar" style="margin-top:12px">
-      <button id="create-db-backup" class="button primary" type="button">Criar backup agora</button>
+      <button id="create-db-backup" class="button primary" type="button">Criar e enviar backup</button>
     </div>
   </section>`;
 }
@@ -679,6 +680,14 @@ async function refreshDataSafetyPanel() {
   } catch (error) {
     target.textContent = `Não foi possível verificar a segurança do banco: ${String(error.message || error)}`;
   }
+  const remote = document.getElementById('remote-backup-status');
+  if (remote) {
+    api('GET', '/remote-backup/status').then(state => {
+      remote.textContent = state.authorized
+        ? 'Backup online: Poco conectado e usuário autorizado. Envio manual ou ao fechar o Vyzium.'
+        : `Backup online: acesso ${state.state || 'pendente'} no Poco.`;
+    }).catch(error => { remote.textContent = `Backup online indisponível: ${String(error.message || error)}`; });
+  }
 }
 
 function wireDataSafetyPanel() {
@@ -686,10 +695,10 @@ function wireDataSafetyPanel() {
     const button = event.currentTarget;
     button.disabled = true;
     const previous = button.textContent;
-    button.textContent = 'Criando backup…';
+    button.textContent = 'Criando e enviando…';
     try {
-      const result = await api('POST', '/data-safety/backup', { reason: 'manual', automatic: false });
-      showToast(result.created ? `Backup criado: ${result.filename}` : (result.reason || 'Backup não necessário.'));
+      const result = await api('POST', '/remote-backup/create', {});
+      showToast(result.uploaded ? `Backup online confirmado: ${String(result.id || '').slice(0, 12)}…` : (result.reason || 'Backup não enviado.'), !result.uploaded && result.state !== 'pending');
       await refreshDataSafetyPanel();
     } catch (error) {
       showToast(`Falha ao criar backup: ${String(error.message || error)}`, true);
