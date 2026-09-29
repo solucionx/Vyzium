@@ -293,7 +293,7 @@ function classifyRecoverableStartupError(error) {
   if (/encerrou antes do Chrome ficar disponível|Chrome encerrou antes|inicializador invisível|Tempo limite ao preparar o Chrome/i.test(text)) return 'browser-launch';
   if (/profile.*in use|user data directory is already in use|SingletonLock|SingletonCookie|lock file/i.test(text)) return 'profile-lock';
   if (/ERR_(INTERNET_DISCONNECTED|NETWORK_CHANGED|NAME_NOT_RESOLVED|CONNECTION_(RESET|TIMED_OUT|CLOSED)|PROXY_CONNECTION_FAILED)|ENETUNREACH|ETIMEDOUT|EAI_AGAIN/i.test(text)) return 'network';
-  if (error?.code === 'VYZIUM_BOOTSTRAP_TIMEOUT' || /Waiting failed|auth timeout|ready timeout|não estabilizou o documento|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
+  if (error?.code === 'VYZIUM_SOCKET_TIMEOUT' || error?.code === 'VYZIUM_BOOTSTRAP_TIMEOUT' || /Waiting failed|auth timeout|ready timeout|não estabilizou o documento|bootstrap.*timeout|navigation.*timeout|TimeoutError/i.test(text)) return 'bootstrap';
   return null;
 }
 
@@ -1389,7 +1389,7 @@ class WhatsAppSession {
           puppeteer:puppeteerPkg.version,
           clientSha256:crypto.createHash('sha256').update(source).digest('hex'),
           syntax:'loaded-by-node',
-          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7'),
+          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8'),
           hasHiddenWindowPolling:(source.toString().match(/polling: 200/g) || []).length >= 4,
           hasSafeNavigationOrder:source.includes('navigation recovery is installed only after the initial inject'),
           hasSignalStore:source.includes('WAWebSignalStoreApi'),
@@ -1679,6 +1679,8 @@ class WhatsAppSession {
         }
       }).catch(() => {}).finally(() => {startupSnapshotPending = false;});
     });
+    client.on('vyzium_socket_waiting', details => this._audit('client.socket-waiting', {generation, ...(details || {})}));
+    client.on('vyzium_socket_timeout', details => this._audit('client.socket-timeout', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_waiting', details => this._audit('client.bootstrap-waiting', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_stable', details => this._audit('client.bootstrap-stable', {generation, ...(details || {})}));
     client.on('vyzium_bootstrap_timeout', details => this._audit('client.bootstrap-timeout', {generation, ...(details || {})}));
