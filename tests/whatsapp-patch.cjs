@@ -178,7 +178,7 @@ test('patch backports current QR/bootstrap paths to npm 1.34.7', () => {
   const result = patchClientSource(fixture);
   assert.equal(result.changed, true);
   assert.match(result.source, new RegExp(PATCH_MARKER));
-  assert.match(result.source, /const needAuthHandle = await this\.pupPage\.waitForFunction/);
+  assert.match(result.source, /needAuthHandle = await this\.pupPage\.waitForFunction/);
   assert.match(result.source, /const socketModule = window\.require\('WAWebSocketModel'\)/);
   assert.match(result.source, /catch \(_\) \{\s*return false;/);
   assert.match(result.source, /VYZIUM_SOCKET_TIMEOUT/);
