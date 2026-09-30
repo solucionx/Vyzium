@@ -8,10 +8,18 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('package identity remains compatible with the existing Vyzium installation', () => {
+test('3.4 RC package is isolated from the production Vyzium installation', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
-  assert.equal(pkg.build?.productName, 'Vyzium');
+  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional.rc340');
+  assert.equal(pkg.build?.productName, 'Vyzium 3.4 RC Sandbox');
+  assert.equal(pkg.build?.artifactName, "Vyzium-3.4.0-RC1-Sandbox-Setup.${ext}");
+  const main=read('electron/main.js');
+  const security=read('electron/security-manager.js');
+  const updates=read('electron/updates.js');
+  assert.match(main,/Vyzium-3\.4-RC-Sandbox/);
+  assert.match(main,/app\.setPath\('userData'/);
+  assert.match(security,/VYZIUM_STORAGE_NAMESPACE/);
+  assert.match(updates,/RC é isolado/);
 });
 
 test('release version changes preserve the original dependency versions and archive URLs', () => {
