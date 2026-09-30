@@ -156,37 +156,18 @@ def _choose_value(module: str, table: str, key: Any, field: str, local: Any, rem
 
 def _record_fields_merge(module: str, table: str, key: Any, local: dict[str, Any], remote: dict[str, Any], base: dict[str, Any] | None, fields: tuple[str, ...], report: MergeReport, resolutions: dict[str, str] | None, apply: bool) -> tuple[dict[str, Any], bool, bool]:
     merged = dict(remote)
-    local_stamp = str(local.get("updated_at") or "")
-    remote_stamp = str(remote.get("updated_at") or "")
-    dominant: str | None = None
-    # Without a retained common base, record-level timestamps are the safest
-    # available ordering signal for user-entered fields. They do not apply when
-    # three-way merge data exists, because base comparison is more precise.
-    if base is None and local_stamp and remote_stamp and local_stamp != remote_stamp:
-        dominant = "local" if local_stamp > remote_stamp else "remote"
-
     for field in fields:
-        lv, rv = local.get(field), remote.get(field)
-        if dominant:
-            # Empty is not an implicit deletion. Even the newer record cannot
-            # erase a non-empty value without a future explicit tombstone.
-            if _blank(lv) and not _blank(rv):
-                value = rv
-            elif _blank(rv) and not _blank(lv):
-                value = lv
-            else:
-                value = lv if dominant == "local" else rv
-        else:
-            value, _ = _choose_value(
-                module, table, key, field,
-                lv, rv,
-                base is not None, base.get(field) if base else None,
-                report, resolutions, apply,
-            )
+        value, _ = _choose_value(
+            module, table, key, field,
+            local.get(field), remote.get(field),
+            base is not None, base.get(field) if base else None,
+            report, resolutions, apply,
+        )
         merged[field] = value
 
-    # updated_at is metadata. Never let an older timestamp erase a newer one.
-    candidates = [stamp for stamp in (local_stamp, remote_stamp) if stamp]
+    # updated_at is retained only as metadata. It is NOT used to auto-resolve a
+    # conflict between two computers because their local clocks may differ.
+    candidates = [str(v) for v in (local.get("updated_at"), remote.get("updated_at")) if v]
     if candidates:
         merged["updated_at"] = max(candidates)
 
