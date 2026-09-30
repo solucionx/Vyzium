@@ -41,7 +41,11 @@ class SecurityManager {
   }
 
   get userData() { return this.app.getPath('userData'); }
-  get legacyComprasDir() { return path.join(this.app.getPath('appData'), 'Vyzium-Compras'); }
+  get legacyComprasDir() {
+    return process.env.VYZIUM_STORAGE_NAMESPACE
+      ? path.join(this.userData, 'legacy-compras')
+      : path.join(this.app.getPath('appData'), 'Vyzium-Compras');
+  }
   get legacyFollowupDb() { return path.join(this.userData, 'followup.db'); }
   get legacyComprasDb() { return path.join(this.legacyComprasDir, 'compras.sqlite3'); }
   get legacyWhatsApp() { return path.join(this.userData, 'whatsapp-session'); }
@@ -73,7 +77,8 @@ class SecurityManager {
     // userData is normally under AppData\Roaming, so keep browser runtime data
     // explicitly in LOCALAPPDATA while the Vyzium metadata stays in the workspace.
     const localRoot = process.env.LOCALAPPDATA || this.app.getPath('userData');
-    return path.join(localRoot, 'Vyzium', 'workspaces', workspaceId, 'whatsapp-runtime');
+    const namespace = process.env.VYZIUM_STORAGE_NAMESPACE || 'Vyzium';
+    return path.join(localRoot, namespace, 'workspaces', workspaceId, 'whatsapp-runtime');
   }
 
   vaultPath(workspaceId = this._workspaceId()) {
