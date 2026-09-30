@@ -80,6 +80,12 @@ async function showBackupPreflight(preflight, security) {
     ? 'O Vyzium não sobrescreverá este computador. Primeiro ele compara os dois lados e preserva alterações locais.'
     : 'Este computador ainda não possui sua base local. Confirme para baixar, validar e restaurar o backup da sua conta.';
   $('backupMeta').innerHTML = '';
+  if (preflight.server_upgrade_required) {
+    $('backupNotice').hidden = false;
+    $('backupNotice').textContent = preflight.local_has_data
+      ? 'Atualize primeiro o Vyzium Server no celular. Esta versão antiga consegue fornecer um backup para restauração completa, mas não consegue proteger um merge entre computadores contra regressão de histórico.'
+      : 'O backup pode ser restaurado neste computador vazio, mas atualize o Vyzium Server no celular antes de enviar novos backups pela versão 3.4.';
+  }
   for (const [label,value] of [
     ['Backup principal', when],
     ['Tamanho', head.bytes ? (head.bytes/1024/1024).toFixed(1)+' MB' : '—'],
