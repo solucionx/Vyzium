@@ -79,7 +79,7 @@ class BackupMergeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             td=Path(td);l=td/"l.db";r=td/"r.db";o=td/"o.db"
             make_followup(l,("100","a","Enviado","Preenchimento local",None,"2026-09-29T13:00:00"))
-            make_followup(r,("100","a","Pendente","",None,"2026-09-29T09:00:00"))
+            make_followup(r,("100","a","Enviado","",None,"2026-09-29T09:00:00"))
             for path,label,stamp in (
                 (l,"BASE LOCAL MAIS NOVA","2026-09-29T13:30:00"),
                 (r,"BASE REMOTA ANTIGA","2026-09-29T08:30:00"),
