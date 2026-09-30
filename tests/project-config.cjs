@@ -8,18 +8,18 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('3.4 RC package is isolated from the production Vyzium installation', () => {
+test('3.4.0 production keeps the stable Vyzium identity and Draft release channel', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional.rc340');
-  assert.equal(pkg.build?.productName, 'Vyzium 3.4 RC Sandbox');
-  assert.equal(pkg.build?.artifactName, "Vyzium-3.4.0-RC2-Sandbox-Setup.${ext}");
+  assert.equal(pkg.version, '3.4.0');
+  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
+  assert.equal(pkg.build?.productName, 'Vyzium');
+  assert.equal(pkg.build?.artifactName, "Vyzium-Setup.${ext}");
+  assert.equal(pkg.build?.publish?.[0]?.releaseType, 'draft');
   const main=read('electron/main.js');
-  const security=read('electron/security-manager.js');
   const updates=read('electron/updates.js');
-  assert.match(main,/Vyzium-3\.4-RC-Sandbox/);
-  assert.match(main,/app\.setPath\('userData'/);
-  assert.match(security,/VYZIUM_STORAGE_NAMESPACE/);
-  assert.match(updates,/RC é isolado/);
+  assert.match(main,/const RC_SANDBOX = String\(app\.getVersion\(\)\)\.includes\('-rc\.'\)/);
+  assert.match(updates,/String\(app\.getVersion\(\)\)\.includes\('-rc\.'\)/);
+  assert.doesNotMatch(main,/\bPoco\b/i);
 });
 
 test('release version changes preserve the original dependency versions and archive URLs', () => {
@@ -120,7 +120,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.4.0-rc.2');
+  assert.equal(pkg.version, '3.4.0');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
