@@ -660,7 +660,7 @@ function dataSafetyPanelHtml() {
   return `<section class="panel narrow" id="data-safety-panel">
     <div class="panel-head"><div><h2>Segurança dos dados</h2><p>Banco local criptografado e verificação de integridade.</p></div></div>
     <div id="data-safety-status" class="callout">Verificando banco de dados…</div>
-    <div id="remote-backup-status" class="callout" style="margin-top:10px">Backup online: verificando servidor Poco…</div>
+    <div id="remote-backup-status" class="callout" style="margin-top:10px">Backup online: verificando servidor…</div>
     <div class="toolbar" style="margin-top:12px">
       <button id="create-db-backup" class="button primary" type="button">Criar e enviar backup</button>
     </div>
@@ -684,8 +684,8 @@ async function refreshDataSafetyPanel() {
   if (remote) {
     api('GET', '/remote-backup/status').then(state => {
       remote.textContent = state.authorized
-        ? 'Backup online: Poco conectado e usuário autorizado. Envio manual ou ao fechar o Vyzium.'
-        : `Backup online: acesso ${state.state || 'pendente'} no Poco.`;
+        ? 'Backup online: Servidor conectado e usuário autorizado. Envio manual ou ao fechar o Vyzium.'
+        : `Backup online: acesso ${state.state || 'pendente'} no servidor.`;
     }).catch(error => { remote.textContent = `Backup online indisponível: ${String(error.message || error)}`; });
   }
 }
