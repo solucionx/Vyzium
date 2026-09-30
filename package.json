@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.0-rc.2",
-  "description": "Vyzium 3.4 RC2 Sandbox: restauração segura, merge com conflitos, linhagem e proteção contra regressão, isolado da produção.",
+  "version": "3.4.0",
+  "description": "Vyzium 3.4.0: restauração segura, merge com conflitos, backup criptografado no servidor e primeira conexão do WhatsApp preservando a estabilidade da linha 3.3.8.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -25,8 +25,8 @@
     "electron-builder": "26.0.0"
   },
   "build": {
-    "appId": "com.vyzium.gestaooperacional.rc340",
-    "productName": "Vyzium 3.4 RC Sandbox",
+    "appId": "com.vyzium.gestaooperacional",
+    "productName": "Vyzium",
     "files": [
       "electron/**/*",
       "renderer/**/*",
@@ -60,7 +60,7 @@
       "installerSidebar": "build/installer-sidebar.bmp",
       "uninstallerSidebar": "build/installer-sidebar.bmp"
     },
-    "artifactName": "Vyzium-3.4.0-RC2-Sandbox-Setup.${ext}",
+    "artifactName": "Vyzium-Setup.${ext}",
     "publish": [
       {
         "provider": "github",
