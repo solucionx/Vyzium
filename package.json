@@ -64,7 +64,7 @@
         "provider": "github",
         "owner": "solucionx",
         "repo": "Vyzium-Releases",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "asarUnpack": [
