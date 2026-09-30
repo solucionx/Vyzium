@@ -244,7 +244,7 @@ test('tampered VZB1 fails authenticated decryption before any database can be re
   key.fill(0);
 });
 
-test('pending Poco approval returns safely without creating an upload request', async () => {
+test('pending server approval returns safely without creating an upload request', async () => {
   const calls = [];
   const manager = new RemoteBackupManager({
     tempRoot:os.tmpdir(),
