@@ -508,12 +508,21 @@ class RemoteBackupManager {
       })
       .filter(entry => entry && entry.bytes >= 32 && entry.bytes <= MAX_OBJECT)
       .sort((a,b) => b.created_ms - a.created_ms || a.id.localeCompare(b.id));
+    const lineageCapable = Object.prototype.hasOwnProperty.call(payload || {}, 'head_id')
+      && Number(payload?.retention || 0) === 3
+      && backups.every(item => ['current','previous','divergent'].includes(item.role));
     let headId = normalizeObjectId(payload?.head_id, {optional:true});
-    if (!headId) headId = backups[0]?.id || null; // backwards-compatible 3.3.8 server
+    if (!headId) headId = backups[0]?.id || null; // read-only compatibility with the 3.3.8/RC5 server
     for (const item of backups) {
       if (!item.role) item.role = item.id === headId ? 'current' : 'previous';
     }
-    return { uid, head_id:headId, retention:Number(payload?.retention || 0) || null, backups };
+    return {
+      uid,
+      head_id:headId,
+      retention:Number(payload?.retention || 0) || null,
+      lineage_capable:lineageCapable,
+      backups
+    };
   }
 
   async upload(files, { appVersion = '', parentId = null, deviceId = null, mergeSourceId = null } = {}) {
@@ -537,6 +546,20 @@ class RemoteBackupManager {
           ? 'Solicitação registrada no Poco. Autorize este usuário no aplicativo do servidor e tente novamente.'
           : `Acesso ao backup não autorizado no Poco (estado: ${state}).`
       };
+    }
+
+    const lineage = await this.list();
+    if (!lineage.lineage_capable) {
+      throw new RemoteBackupError(
+        'O Vyzium Server do celular precisa ser atualizado para a versão com histórico seguro antes de aceitar backups do Vyzium 3.4.',
+        { code:'BACKUP_SERVER_UPGRADE_REQUIRED' }
+      );
+    }
+    if (parentId && lineage.head_id && parentId !== lineage.head_id) {
+      this._event('stale-parent-detected', { parentId, headId:lineage.head_id });
+      // The upload is still allowed: the v0.4 server will preserve it as a
+      // divergent candidate instead of promoting it. This local check is only
+      // diagnostic and must never override server-side lineage enforcement.
     }
 
     const stamp = `${Date.now()}-${crypto.randomBytes(5).toString('hex')}`;
