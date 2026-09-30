@@ -64,7 +64,7 @@ async function showBackupPreflight(preflight, security) {
   }
   if (!preflight.authorized) {
     $('backupTitle').textContent = 'Aguardando autorização do servidor';
-    $('backupLead').textContent = 'Este usuário precisa estar autorizado no aplicativo Vyzium Server do celular antes de restaurar backups.';
+    $('backupLead').textContent = 'Este usuário precisa estar autorizado no aplicativo Vyzium Server antes de restaurar backups.';
     $('backupPrepareBtn').hidden = true;
     $('backupRetryBtn').hidden = false;
     $('backupSkipBtn').hidden = !security.ready;
@@ -83,14 +83,14 @@ async function showBackupPreflight(preflight, security) {
   if (preflight.server_upgrade_required) {
     $('backupNotice').hidden = false;
     $('backupNotice').textContent = preflight.local_has_data
-      ? 'Atualize primeiro o Vyzium Server no celular. Esta versão antiga consegue fornecer um backup para restauração completa, mas não consegue proteger um merge entre computadores contra regressão de histórico.'
-      : 'O backup pode ser restaurado neste computador vazio, mas atualize o Vyzium Server no celular antes de enviar novos backups pela versão 3.4.';
+      ? 'Atualize primeiro o Vyzium Server. Esta versão antiga consegue fornecer um backup para restauração completa, mas não consegue proteger um merge entre computadores contra regressão de histórico.'
+      : 'O backup pode ser restaurado neste computador vazio, mas atualize o Vyzium Server antes de enviar novos backups pela versão 3.4.';
   }
   for (const [label,value] of [
     ['Backup principal', when],
     ['Tamanho', head.bytes ? (head.bytes/1024/1024).toFixed(1)+' MB' : '—'],
     ['Neste computador', preflight.local_has_data ? 'Dados locais encontrados' : 'Sem base local'],
-    ['Histórico no celular', preflight.retention ? 'Até '+preflight.retention+' versões válidas' : 'Disponível']
+    ['Histórico no servidor', preflight.retention ? 'Até '+preflight.retention+' versões válidas' : 'Disponível']
   ]) {
     const row=document.createElement('div'),a=document.createElement('span'),b=document.createElement('strong');
     a.textContent=label;b.textContent=value;row.append(a,b);$('backupMeta').append(row);
