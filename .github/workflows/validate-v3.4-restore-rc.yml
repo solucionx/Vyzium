@@ -8,6 +8,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: vyzium-3.4.0-production
+  cancel-in-progress: true
+
 jobs:
   validate:
     runs-on: windows-latest
@@ -141,6 +145,13 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           if (-not $env:GH_TOKEN) { throw "VYZIUM_RELEASE_TOKEN ausente; nenhum Draft foi criado." }
+
+          $remoteLine = git ls-remote origin refs/heads/release/v3.4.0-production
+          if ($LASTEXITCODE -ne 0 -or -not $remoteLine) { throw "Não foi possível confirmar o HEAD atual da branch de produção." }
+          $currentHead = ($remoteLine -split '\s+')[0].Trim()
+          if ($currentHead -ne $env:GITHUB_SHA) {
+            throw "Build obsoleto: $($env:GITHUB_SHA) não é mais o HEAD da branch de produção ($currentHead). Nenhum asset da Draft será sobrescrito."
+          }
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
           if ($pkg.version -ne '3.4.0') { throw "Versão de produção inesperada: $($pkg.version)" }
           if ($pkg.build.appId -ne 'com.vyzium.gestaooperacional') { throw "appId não corresponde à instalação estável." }
