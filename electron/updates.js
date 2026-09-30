@@ -51,6 +51,10 @@ function createUpdater({app, dialog, getWindow, prepareInstall, promptInstall, p
     autoUpdater.quitAndInstall(false, true);
   }
   return {async check() {
+    if (String(app.getVersion()).includes('-rc.')) {
+      notify('Este RC é isolado e não instala atualizações da versão de produção.');
+      return;
+    }
     if (busy) return;
     if (!app.isPackaged || platform !== 'win32' || process.env.PORTABLE_EXECUTABLE_FILE) {
       notify('Para atualizar, use o Vyzium instalado pelo instalador do Windows.'); return;
