@@ -272,39 +272,120 @@ def _merge_keyed_table(
                 )
 
 
-def _source_import_stamp(module: str, path: Path, key_hex: str | None) -> str:
+def _source_snapshot_info(module: str, path: Path, key_hex: str | None) -> dict[str, Any]:
     if not path.exists():
-        return ""
+        return {"signature": "", "import_at": "", "count": 0}
     con = secure_connect(path, key_hex=key_hex, readonly=True, timeout=30)
     try:
+        digest = hashlib.sha256()
+        count = 0
+        stamp = ""
         if module == "followup":
             row = con.execute("SELECT imported_at FROM import_batches ORDER BY id DESC LIMIT 1").fetchone()
-            if row and row[0]:
-                return str(row[0])
-            row = con.execute("SELECT MAX(imported_at) FROM orders").fetchone()
-            return str((row or [""])[0] or "")
+            stamp = str(row[0]) if row and row[0] else ""
+            columns = [str(r[1]) for r in con.execute("PRAGMA table_info(orders)").fetchall()]
+            stable = [c for c in columns if c not in {"imported_at", "source_file"}]
+            if stable:
+                for row in con.execute(f"SELECT {','.join(stable)} FROM orders ORDER BY item_key").fetchall():
+                    digest.update(_json(list(row)).encode("utf-8"))
+                    digest.update(b"\n")
+                    count += 1
+            receipt_cols = [str(r[1]) for r in con.execute("PRAGMA table_info(receipts)").fetchall()]
+            if receipt_cols:
+                for row in con.execute(f"SELECT {','.join(receipt_cols)} FROM receipts ORDER BY receipt_key").fetchall():
+                    digest.update(_json(list(row)).encode("utf-8"))
+                    digest.update(b"\n")
+            return {"signature": digest.hexdigest() if count or receipt_cols else "", "import_at": stamp, "count": count}
+
         if module == "compras":
             row = con.execute("SELECT data FROM settings WHERE id='import'").fetchone()
-            if not row:
-                return ""
-            try:
-                return str(json.loads(row[0]).get("at") or "")
-            except Exception:
-                return ""
-        return ""
+            if row:
+                try:
+                    stamp = str(json.loads(row[0]).get("at") or "")
+                except Exception:
+                    stamp = ""
+            for rid, raw in con.execute("SELECT id,data FROM items ORDER BY id").fetchall():
+                try:
+                    data = json.loads(raw)
+                except Exception:
+                    data = {"__raw__": str(raw)}
+                digest.update(_json([str(rid), data]).encode("utf-8"))
+                digest.update(b"\n")
+                count += 1
+            return {"signature": digest.hexdigest() if count else "", "import_at": stamp, "count": count}
+        return {"signature": "", "import_at": "", "count": 0}
     except Exception:
-        return ""
+        return {"signature": "", "import_at": "", "count": 0}
     finally:
         con.close()
 
 
-def _set_source_choice(report: MergeReport, module: str, local: Path, remote: Path, key_hex: str | None) -> str:
-    local_at = _source_import_stamp(module, local, key_hex)
-    remote_at = _source_import_stamp(module, remote, key_hex)
-    report.local_import_at = local_at or None
-    report.remote_import_at = remote_at or None
-    report.source_choice = "local" if local_at and local_at > remote_at else "remote"
-    return report.source_choice
+def _set_source_choice(
+    report: MergeReport,
+    module: str,
+    local: Path,
+    remote: Path,
+    base: Path | None,
+    key_hex: str | None,
+    resolutions: dict[str, str] | None = None,
+    apply: bool = False,
+) -> str:
+    local_info = _source_snapshot_info(module, local, key_hex)
+    remote_info = _source_snapshot_info(module, remote, key_hex)
+    base_info = _source_snapshot_info(module, base, key_hex) if base and base.exists() else {"signature": "", "import_at": "", "count": 0}
+    report.local_import_at = local_info["import_at"] or None
+    report.remote_import_at = remote_info["import_at"] or None
+
+    ls, rs, bs = local_info["signature"], remote_info["signature"], base_info["signature"]
+    if ls == rs:
+        report.source_choice = "remote"
+        return "remote"
+    if bs:
+        if ls == bs and rs != bs:
+            report.source_choice = "remote"
+            return "remote"
+        if rs == bs and ls != bs:
+            report.source_choice = "local"
+            return "local"
+    if not ls and rs:
+        report.source_choice = "remote"
+        return "remote"
+    if ls and not rs:
+        report.source_choice = "local"
+        return "local"
+
+    cid = _conflict_id(module, "source_snapshot", "import", "__source__", "source_snapshot")
+    conflict = {
+        "id": cid,
+        "kind": "source_snapshot",
+        "table": "source_snapshot",
+        "record_key": "import",
+        "field": "Base operacional importada",
+        "local": {
+            "import_at": local_info["import_at"] or None,
+            "records": local_info["count"],
+            "signature": ls[:16] if ls else None,
+        },
+        "remote": {
+            "import_at": remote_info["import_at"] or None,
+            "records": remote_info["count"],
+            "signature": rs[:16] if rs else None,
+        },
+        "base": {
+            "import_at": base_info["import_at"] or None,
+            "records": base_info["count"],
+            "signature": bs[:16] if bs else None,
+        } if bs else None,
+    }
+    report.conflicts.append(conflict)
+    report.source_choice = "conflict"
+    if not apply:
+        return "remote"
+    choice = (resolutions or {}).get(cid)
+    if choice not in {"local", "remote"}:
+        raise ValueError(f"Conflito sem resolução: {cid}")
+    report.source_choice = choice
+    return choice
 
 
 def _copy_table_snapshot(source: Path, out, table: str, key_hex: str | None) -> None:
@@ -676,7 +757,7 @@ def _copy_database(source: Path, output: Path, key_hex: str | None):
 
 def analyze(module: str, local: Path, remote: Path, base: Path | None, key_hex: str | None) -> dict[str, Any]:
     report = MergeReport(module)
-    _set_source_choice(report, module, local, remote, key_hex)
+    _set_source_choice(report, module, local, remote, base, key_hex, None, False)
     if module == "followup":
         _merge_followup(local, remote, base, None, key_hex, report, None, False)
     elif module == "compras":
@@ -696,7 +777,7 @@ def apply_merge(module: str, local: Path, remote: Path, output: Path, base: Path
         out.execute("PRAGMA foreign_keys=ON")
         out.execute("BEGIN IMMEDIATE")
         report = MergeReport(module)
-        source_choice = _set_source_choice(report, module, local, remote, key_hex)
+        source_choice = _set_source_choice(report, module, local, remote, base, key_hex, resolutions, True)
         if source_choice == "local":
             _apply_newer_local_source_snapshot(module, local, out, key_hex)
         if module == "followup":
