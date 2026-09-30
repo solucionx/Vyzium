@@ -207,10 +207,10 @@ function responseError(status, raw) {
   const serverCode = String(payload?.code || '').trim();
   const requestId = String(payload?.request_id || '').trim() || null;
   const fallback = status === 401 ? 'Sessão Firebase recusada pelo servidor.'
-    : status === 403 ? 'Este usuário ainda não foi autorizado no Poco.'
+    : status === 403 ? 'Este usuário ainda não foi autorizado no servidor.'
     : status === 409 ? 'O servidor rejeitou o objeto de backup.'
     : status === 429 ? 'O servidor limitou temporariamente as solicitações.'
-    : status === 503 ? 'O servidor do Poco está temporariamente indisponível.'
+    : status === 503 ? 'O servidor está temporariamente indisponível.'
     : `Falha no servidor de backup (HTTP ${status}).`;
   const detail = String(payload?.error || '').trim();
   return new RemoteBackupError(detail ? `${fallback} ${detail}` : fallback, {
@@ -264,10 +264,10 @@ function requestRemote({ host = PUBLIC_HOST, method = 'GET', route, token, bodyP
       response.on('error', reject);
       response.on('end', () => resolve({ status:Number(response.statusCode || 0), body:Buffer.concat(chunks), headers:response.headers }));
     });
-    req.on('timeout', () => req.destroy(new RemoteBackupError('Tempo limite ao acessar o servidor do Poco.', { code:'BACKUP_TIMEOUT' })));
+    req.on('timeout', () => req.destroy(new RemoteBackupError('Tempo limite ao acessar o servidor.', { code:'BACKUP_TIMEOUT' })));
     req.on('error', error => {
       if (error instanceof RemoteBackupError) return reject(error);
-      reject(new RemoteBackupError('Não foi possível acessar o servidor de backup do Poco.', { code:'BACKUP_NETWORK_ERROR' }));
+      reject(new RemoteBackupError('Não foi possível acessar o servidor de backup.', { code:'BACKUP_NETWORK_ERROR' }));
     });
     if (!bodyPath) {
       req.end();
@@ -305,7 +305,7 @@ async function requestRemoteToFile({ host = PUBLIC_HOST, route, token, outputPat
       if (settled) return;
       settled = true;
       await fs.promises.rm(outputPath, { force:true }).catch(() => {});
-      reject(error instanceof RemoteBackupError ? error : new RemoteBackupError('Não foi possível baixar o backup do Poco.', { code:'BACKUP_DOWNLOAD_ERROR' }));
+      reject(error instanceof RemoteBackupError ? error : new RemoteBackupError('Não foi possível baixar o backup do servidor.', { code:'BACKUP_DOWNLOAD_ERROR' }));
     };
     const req = https.request({
       protocol:'https:', hostname:host, port:443, method:'GET', path:route,
@@ -349,7 +349,7 @@ async function requestRemoteToFile({ host = PUBLIC_HOST, route, token, outputPat
         resolve({ path:outputPath, id, bytes:total });
       });
     });
-    req.on('timeout', () => req.destroy(new RemoteBackupError('Tempo limite ao baixar o backup do Poco.', { code:'BACKUP_TIMEOUT' })));
+    req.on('timeout', () => req.destroy(new RemoteBackupError('Tempo limite ao baixar o backup do servidor.', { code:'BACKUP_TIMEOUT' })));
     req.on('error', fail);
     req.end();
   });
@@ -543,15 +543,15 @@ class RemoteBackupManager {
         authorized:false,
         state,
         reason: state === 'pending'
-          ? 'Solicitação registrada no Poco. Autorize este usuário no aplicativo do servidor e tente novamente.'
-          : `Acesso ao backup não autorizado no Poco (estado: ${state}).`
+          ? 'Solicitação registrada no servidor. Autorize este usuário no aplicativo do servidor e tente novamente.'
+          : `Acesso ao backup não autorizado no servidor (estado: ${state}).`
       };
     }
 
     const lineage = await this.list();
     if (!lineage.lineage_capable) {
       throw new RemoteBackupError(
-        'O Vyzium Server do celular precisa ser atualizado para a versão com histórico seguro antes de aceitar backups do Vyzium 3.4.',
+        'O Vyzium Server precisa ser atualizado para a versão com histórico seguro antes de aceitar backups do Vyzium 3.4.',
         { code:'BACKUP_SERVER_UPGRADE_REQUIRED' }
       );
     }
