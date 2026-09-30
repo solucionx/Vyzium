@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
   "version": "3.4.0-rc.1",
-  "description": "Vyzium 3.4 RC1: restauração segura, merge com conflitos, linhagem de backups e proteção contra regressão de dados.",
+  "description": "Vyzium 3.4 RC1 Sandbox: restauração segura, merge com conflitos, linhagem e proteção contra regressão, isolado da produção.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -25,8 +25,8 @@
     "electron-builder": "26.0.0"
   },
   "build": {
-    "appId": "com.vyzium.gestaooperacional",
-    "productName": "Vyzium",
+    "appId": "com.vyzium.gestaooperacional.rc340",
+    "productName": "Vyzium 3.4 RC Sandbox",
     "files": [
       "electron/**/*",
       "renderer/**/*",
@@ -60,7 +60,7 @@
       "installerSidebar": "build/installer-sidebar.bmp",
       "uninstallerSidebar": "build/installer-sidebar.bmp"
     },
-    "artifactName": "Vyzium-Setup.${ext}",
+    "artifactName": "Vyzium-3.4.0-RC1-Sandbox-Setup.${ext}",
     "publish": [
       {
         "provider": "github",
