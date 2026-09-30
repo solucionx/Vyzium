@@ -88,6 +88,9 @@ class MergeReport:
     history_added: int = 0
     conflicts: list[dict[str, Any]] | None = None
     warnings: list[dict[str, Any]] | None = None
+    source_choice: str = "remote"
+    local_import_at: str | None = None
+    remote_import_at: str | None = None
 
     def __post_init__(self):
         if self.conflicts is None:
@@ -106,6 +109,9 @@ class MergeReport:
             "conflict_count": len(self.conflicts or []),
             "conflicts": self.conflicts or [],
             "warnings": self.warnings or [],
+            "source_choice": self.source_choice,
+            "local_import_at": self.local_import_at,
+            "remote_import_at": self.remote_import_at,
         }
 
 
@@ -261,6 +267,76 @@ def _merge_keyed_table(
                     f"INSERT OR REPLACE INTO {table}({','.join(columns)}) VALUES({','.join('?' for _ in columns)})",
                     vals,
                 )
+
+
+def _source_import_stamp(module: str, path: Path, key_hex: str | None) -> str:
+    if not path.exists():
+        return ""
+    con = secure_connect(path, key_hex=key_hex, readonly=True, timeout=30)
+    try:
+        if module == "followup":
+            row = con.execute("SELECT imported_at FROM import_batches ORDER BY id DESC LIMIT 1").fetchone()
+            if row and row[0]:
+                return str(row[0])
+            row = con.execute("SELECT MAX(imported_at) FROM orders").fetchone()
+            return str((row or [""])[0] or "")
+        if module == "compras":
+            row = con.execute("SELECT data FROM settings WHERE id='import'").fetchone()
+            if not row:
+                return ""
+            try:
+                return str(json.loads(row[0]).get("at") or "")
+            except Exception:
+                return ""
+        return ""
+    except Exception:
+        return ""
+    finally:
+        con.close()
+
+
+def _set_source_choice(report: MergeReport, module: str, local: Path, remote: Path, key_hex: str | None) -> str:
+    local_at = _source_import_stamp(module, local, key_hex)
+    remote_at = _source_import_stamp(module, remote, key_hex)
+    report.local_import_at = local_at or None
+    report.remote_import_at = remote_at or None
+    report.source_choice = "local" if local_at and local_at > remote_at else "remote"
+    return report.source_choice
+
+
+def _copy_table_snapshot(source: Path, out, table: str, key_hex: str | None) -> None:
+    source_con = secure_connect(source, key_hex=key_hex, readonly=True, timeout=30)
+    try:
+        source_con.row_factory = row_factory(key_hex)
+        src_cols = [str(r[1]) for r in source_con.execute(f"PRAGMA table_info({table})").fetchall()]
+        out_cols = [str(r[1]) for r in out.execute(f"PRAGMA table_info({table})").fetchall()]
+        if not src_cols or src_cols != out_cols:
+            raise ValueError(f"A estrutura da tabela {table} diverge entre os dois bancos; a restauração foi bloqueada antes de alterar a base ativa.")
+        rows = [_row_dict(row) for row in source_con.execute(f"SELECT * FROM {table}").fetchall()]
+        out.execute(f"DELETE FROM {table}")
+        if rows:
+            out.executemany(
+                f"INSERT INTO {table}({','.join(src_cols)}) VALUES({','.join('?' for _ in src_cols)})",
+                [tuple(row.get(c) for c in src_cols) for row in rows],
+            )
+    finally:
+        source_con.close()
+
+
+def _apply_newer_local_source_snapshot(module: str, local: Path, out, key_hex: str | None) -> None:
+    if module == "followup":
+        for table in ("orders", "receipts", "import_batches"):
+            _copy_table_snapshot(local, out, table, key_hex)
+        return
+    if module == "compras":
+        _copy_table_snapshot(local, out, "items", key_hex)
+        source_con = secure_connect(local, key_hex=key_hex, readonly=True, timeout=30)
+        try:
+            row = source_con.execute("SELECT data FROM settings WHERE id='import'").fetchone()
+            if row:
+                out.execute("INSERT OR REPLACE INTO settings(id,data) VALUES('import',?)", (row[0],))
+        finally:
+            source_con.close()
 
 
 def _table_rows(path: Path, table: str, key_hex: str | None) -> tuple[list[str], list[dict[str, Any]]]:
@@ -597,6 +673,7 @@ def _copy_database(source: Path, output: Path, key_hex: str | None):
 
 def analyze(module: str, local: Path, remote: Path, base: Path | None, key_hex: str | None) -> dict[str, Any]:
     report = MergeReport(module)
+    _set_source_choice(report, module, local, remote, key_hex)
     if module == "followup":
         _merge_followup(local, remote, base, None, key_hex, report, None, False)
     elif module == "compras":
@@ -607,14 +684,18 @@ def analyze(module: str, local: Path, remote: Path, base: Path | None, key_hex: 
 
 
 def apply_merge(module: str, local: Path, remote: Path, output: Path, base: Path | None, key_hex: str | None, resolutions: dict[str, str]) -> dict[str, Any]:
-    # Start from the remote HEAD so imported source tables (orders/items) are
-    # never regressed by a stale PC. Local user-entered work is then merged in.
+    # Start from the remote HEAD, then replace only the imported source snapshot
+    # if this PC proves it imported a newer daily base. User-entered operational
+    # data is merged separately below.
     _copy_database(remote, output, key_hex)
     out = secure_connect(output, key_hex=key_hex, readonly=False, timeout=30)
     try:
         out.execute("PRAGMA foreign_keys=ON")
         out.execute("BEGIN IMMEDIATE")
         report = MergeReport(module)
+        source_choice = _set_source_choice(report, module, local, remote, key_hex)
+        if source_choice == "local":
+            _apply_newer_local_source_snapshot(module, local, out, key_hex)
         if module == "followup":
             _merge_followup(local, remote, base, out, key_hex, report, resolutions, True)
         elif module == "compras":
