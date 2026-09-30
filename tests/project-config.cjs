@@ -22,6 +22,20 @@ test('3.4.0 production keeps the stable Vyzium identity and Draft release channe
   assert.doesNotMatch(main,/\bPoco\b/i);
 });
 
+test('production UI never exposes a device model as the backup server name', () => {
+  for (const rel of [
+    'electron/main.js',
+    'electron/remote-backup.js',
+    'electron/backup-restore.js',
+    'renderer/app.js',
+    'renderer/compras-app.js',
+    'renderer/auth.js'
+  ]) {
+    assert.doesNotMatch(read(rel), /\bPoco\b/i, `Referência específica de aparelho em ${rel}`);
+  }
+});
+
+
 test('release version changes preserve the original dependency versions and archive URLs', () => {
   const lock = JSON.parse(read('package-lock.json'));
   const expected = {
