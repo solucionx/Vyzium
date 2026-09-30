@@ -4,6 +4,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const {
+  beginRestoreTransaction,
+  commitRestoreTransaction,
+  rollbackRestoreTransaction,
+  recoverRestoreTransaction
+} = require('./restore-transaction');
+const {
   readBackupState,
   writeCurrentBackupState,
   markRemoteBase
@@ -54,6 +60,13 @@ class BackupRestoreCoordinator {
     this.audit = typeof audit === 'function' ? audit : () => {};
     this.plans = new Map();
     this.skippedHeadId = null;
+    this.busy = false;
+  }
+
+  async _exclusive(action) {
+    if (this.busy) throw new Error('Já existe uma operação de restauração em andamento. Aguarde a conclusão.');
+    this.busy = true;
+    try { return await action(); } finally { this.busy = false; }
   }
 
   _event(name, details = {}) {
@@ -73,6 +86,7 @@ class BackupRestoreCoordinator {
   }
 
   async preflight({ failOpen = true } = {}) {
+    recoverRestoreTransaction(this.securityManager);
     const local = this._localDatabases();
     const security = await this.securityManager.status();
     try {
@@ -132,6 +146,7 @@ class BackupRestoreCoordinator {
   }
 
   skipForSession(headId) {
+    if (this.busy) throw new Error('Aguarde a operação de restauração terminar.');
     const id = String(headId || '').trim().toLowerCase();
     if (!/^[a-f0-9]{64}$/.test(id)) throw new Error('Backup remoto inválido.');
     this.skippedHeadId = id;
@@ -140,6 +155,7 @@ class BackupRestoreCoordinator {
   }
 
   clearSession() {
+    if (this.busy) throw new Error('Aguarde a operação de restauração terminar antes de sair da conta.');
     this.skippedHeadId = null;
     for (const plan of this.plans.values()) {
       this._cleanupPlan(plan).catch(()=>{});
@@ -160,6 +176,10 @@ class BackupRestoreCoordinator {
   }
 
   async prepare() {
+    return this._exclusive(()=>this._prepare());
+  }
+
+  async _prepare() {
     const preflight = await this.preflight({failOpen:false});
     if (!preflight.authorized) throw new Error('Este usuário ainda não está autorizado no Vyzium Server.');
     if (!preflight.head_id) return {available:true,has_remote:false,needs_sync:false};
@@ -168,19 +188,19 @@ class BackupRestoreCoordinator {
     // must recover that same key before any download can be opened.
     for (const moduleName of ['followup','compras']) this.securityManager.getModuleKeyHex(moduleName);
 
-    await this.stopServices();
     const manager = this.getRemoteManager();
-    const listing = await manager.list();
-    if (preflight.local_has_data && !listing.lineage_capable) {
-      throw new Error('Atualize o Vyzium Server do celular antes de combinar dados de dois computadores. A restauração completa em um PC vazio é segura, mas o merge precisa da proteção de linhagem do servidor novo.');
-    }
-    if (listing.head_id !== preflight.head_id) {
-      throw new Error('O backup principal mudou durante a preparação. Tente novamente para comparar com a versão mais recente.');
-    }
-
-    const headExtract = await manager.downloadExtract(listing.head_id);
+    let headExtract = null;
     let baseExtract = null;
     try {
+      await this.stopServices();
+      const listing = await manager.list();
+      if (preflight.local_has_data && !listing.lineage_capable) {
+        throw new Error('Atualize o Vyzium Server do celular antes de combinar dados de dois computadores. A restauração completa em um PC vazio é segura, mas o merge precisa da proteção de linhagem do servidor novo.');
+      }
+      if (listing.head_id !== preflight.head_id) {
+        throw new Error('O backup principal mudou durante a preparação. Tente novamente para comparar com a versão mais recente.');
+      }
+      headExtract = await manager.downloadExtract(listing.head_id);
       const remoteFiles = await this._validateExtraction(headExtract);
       const state = readBackupState(this.securityManager);
       const local = this._localDatabases();
@@ -259,7 +279,7 @@ class BackupRestoreCoordinator {
         summary
       };
     } catch (error) {
-      await manager.cleanupExtracted(headExtract.dir).catch(()=>{});
+      if (headExtract) await manager.cleanupExtracted(headExtract.dir).catch(()=>{});
       if (baseExtract) await manager.cleanupExtracted(baseExtract.dir).catch(()=>{});
       await this.startServices().catch(()=>{});
       throw error;
@@ -288,7 +308,9 @@ class BackupRestoreCoordinator {
 
   async _atomicInstall(candidates,planId) {
     const installed=[];
+    let transaction=null;
     try {
+      // Stage and validate every module before touching any live file.
       for (const [moduleName,candidate] of Object.entries(candidates)) {
         const target=this.securityManager.moduleDb(moduleName);
         fs.mkdirSync(path.dirname(target),{recursive:true});
@@ -296,67 +318,50 @@ class BackupRestoreCoordinator {
         fs.rmSync(next,{force:true});
         this._syncFile(candidate,next);
         await this.securityManager.validateBackupDatabase(moduleName,next);
-
-        const oldBase=`${target}.restore-${planId}.old`;
-        const moved=[];
-        for (const suffix of ['', '-wal', '-shm']) {
-          const source=target+suffix;
-          const old=oldBase+(suffix||'.db');
-          if (fs.existsSync(source)) {
-            fs.rmSync(old,{force:true});
-            fs.renameSync(source,old);
-            moved.push({source,old});
-          }
-        }
-        try {
-          fs.renameSync(next,target);
-          await this.securityManager.validateBackupDatabase(moduleName,target);
-          installed.push({moduleName,target,moved});
-        } catch (error) {
-          fs.rmSync(target,{force:true});
-          for (const item of [...moved].reverse()) if (fs.existsSync(item.old)) fs.renameSync(item.old,item.source);
-          throw error;
-        }
+        installed.push({moduleName,target,next});
+      }
+      transaction=beginRestoreTransaction(this.securityManager,planId,Object.keys(candidates));
+      installed.transaction=transaction;
+      for (const {moduleName,target,next} of installed) {
+        for (const suffix of ['-wal','-shm']) fs.rmSync(target+suffix,{force:true});
+        fs.renameSync(next,target);
+        await this.securityManager.validateBackupDatabase(moduleName,target);
       }
       return installed;
     } catch (error) {
-      for (const entry of [...installed].reverse()) {
-        fs.rmSync(entry.target,{force:true});
-        fs.rmSync(entry.target+'-wal',{force:true});
-        fs.rmSync(entry.target+'-shm',{force:true});
-        for (const item of [...entry.moved].reverse()) if (fs.existsSync(item.old)) fs.renameSync(item.old,item.source);
+      if (transaction) {
+        try { rollbackRestoreTransaction(transaction); }
+        catch (rollbackError) {
+          this._event('rollback-blocked',{message:String(rollbackError.message).slice(0,300)});
+          throw rollbackError;
+        }
+      }
+      for (const moduleName of Object.keys(candidates)) {
+        try { fs.rmSync(`${this.securityManager.moduleDb(moduleName)}.restore-${planId}.new`,{force:true}); } catch (_) {}
       }
       throw error;
     }
   }
 
   _rollbackInstalled(installed) {
-    for (const entry of [...(installed || [])].reverse()) {
-      try { fs.rmSync(entry.target,{force:true}); } catch (_) {}
-      try { fs.rmSync(entry.target+'-wal',{force:true}); } catch (_) {}
-      try { fs.rmSync(entry.target+'-shm',{force:true}); } catch (_) {}
-      for (const item of [...(entry.moved || [])].reverse()) {
-        try {
-          if (fs.existsSync(item.old)) fs.renameSync(item.old,item.source);
-        } catch (_) {}
-      }
-    }
+    if (installed?.transaction) rollbackRestoreTransaction(installed.transaction);
   }
 
   _cleanupOldRaw(installed) {
-    for (const entry of installed || []) {
-      for (const item of entry.moved || []) {
-        try { fs.rmSync(item.old,{force:true}); } catch (_) {}
-      }
-    }
+    if (installed?.transaction) commitRestoreTransaction(installed.transaction);
   }
 
   async apply(planId,resolutions={}) {
+    return this._exclusive(()=>this._apply(planId,resolutions));
+  }
+
+  async _apply(planId,resolutions={}) {
     const id=String(planId||'');
     const plan=this.plans.get(id);
     if (!plan) throw new Error('O plano de restauração expirou. Compare os backups novamente.');
     if (Date.now()-plan.createdAt > 30*60*1000) {
       this.plans.delete(id);await this._cleanupPlan(plan);
+      await this.startServices().catch(()=>{});
       throw new Error('O plano de restauração expirou por segurança. Compare novamente.');
     }
 
@@ -371,21 +376,20 @@ class BackupRestoreCoordinator {
     const unresolved=expectedConflicts.filter(c=>!cleanResolutions[c.id]);
     if (unresolved.length) throw new Error(`Existem ${unresolved.length} conflitos que ainda precisam de uma escolha.`);
 
-    await this.stopServices();
     const manager=this.getRemoteManager();
-    const latest=await manager.list();
-    if (latest.head_id!==plan.headId) {
-      throw new Error('Outro computador publicou um backup mais novo enquanto você revisava os conflitos. Nada foi alterado; compare novamente.');
-    }
-
     const stageDir=path.join(this.securityManager.workspaceRoot(),'backups','restore-stage',id);
-    fs.rmSync(stageDir,{recursive:true,force:true});
-    fs.mkdirSync(stageDir,{recursive:true});
     const candidates={};
     const recoveryPoints={};
     let installed=[];
     let databaseCommitComplete=false;
     try {
+      await this.stopServices();
+      const latest=await manager.list();
+      if (latest.head_id!==plan.headId) {
+        throw new Error('Outro computador publicou um backup mais novo enquanto você revisava os conflitos. Nada foi alterado; compare novamente.');
+      }
+      fs.rmSync(stageDir,{recursive:true,force:true});
+      fs.mkdirSync(stageDir,{recursive:true});
       const resolutionPath=path.join(stageDir,'resolutions.json');
       fs.writeFileSync(resolutionPath,JSON.stringify(cleanResolutions,null,2),{encoding:'utf8',mode:0o600});
 
@@ -408,7 +412,6 @@ class BackupRestoreCoordinator {
 
       installed=await this._atomicInstall(candidates,id);
       await this.securityManager.activateRestoredWorkspace({sourceId:plan.headId});
-      databaseCommitComplete=true;
 
       const hadLocal=Object.values(plan.local).some(x=>x.exists);
       let promotion=null;
@@ -426,6 +429,11 @@ class BackupRestoreCoordinator {
         // child. A failed upload never rolls the local merge back.
         markRemoteBase(this.securityManager,{objectId:plan.headId,serverHeadId:plan.headId});
       }
+
+      // Activation and lineage belong to the same durable local commit as
+      // both database files. Never start engines while the journal is pending.
+      this._cleanupOldRaw(installed);
+      databaseCommitComplete=true;
 
       let servicesStarted=true;
       let serviceWarning=null;
@@ -456,7 +464,6 @@ class BackupRestoreCoordinator {
         }
       }
 
-      this._cleanupOldRaw(installed);
       this.skippedHeadId=null;
       this.plans.delete(id);
       await this._cleanupPlan(plan);
@@ -472,17 +479,25 @@ class BackupRestoreCoordinator {
       };
     } catch (error) {
       if (!databaseCommitComplete && installed.length) {
-        this._rollbackInstalled(installed);
+        try { this._rollbackInstalled(installed); }
+        catch (rollbackError) {
+          this._event('rollback-blocked',{message:String(rollbackError.message).slice(0,300)});
+          throw rollbackError;
+        }
       }
       // Verified pre-sync snapshots remain on disk even after a successful
       // byte-level rollback, providing an additional operator recovery point.
-      await this.startServices().catch(()=>{});
+      if (!error.restoreUnsafe) await this.startServices().catch(()=>{});
       this._event('apply-failed',{headId:plan.headId,rolledBack:!databaseCommitComplete,message:String(error?.message||error).slice(0,500)});
       throw error;
     }
   }
 
   async cancel(planId) {
+    return this._exclusive(()=>this._cancel(planId));
+  }
+
+  async _cancel(planId) {
     const plan=this.plans.get(String(planId||''));
     if (!plan) return {cancelled:false};
     this.plans.delete(plan.id);

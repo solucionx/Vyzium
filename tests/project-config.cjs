@@ -12,7 +12,7 @@ test('3.4 RC package is isolated from the production Vyzium installation', () =>
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
   assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional.rc340');
   assert.equal(pkg.build?.productName, 'Vyzium 3.4 RC Sandbox');
-  assert.equal(pkg.build?.artifactName, "Vyzium-3.4.0-RC1-Sandbox-Setup.${ext}");
+  assert.equal(pkg.build?.artifactName, "Vyzium-3.4.0-RC2-Sandbox-Setup.${ext}");
   const main=read('electron/main.js');
   const security=read('electron/security-manager.js');
   const updates=read('electron/updates.js');
@@ -120,7 +120,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.4.0-rc.1');
+  assert.equal(pkg.version, '3.4.0-rc.2');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',

@@ -15,7 +15,7 @@ jobs:
     env:
       PUPPETEER_SKIP_DOWNLOAD: "true"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      VYZIUM_APP_VERSION: "3.4.0-rc.1"
+      VYZIUM_APP_VERSION: "3.4.0-rc.2"
 
     steps:
       - name: Checkout
@@ -97,16 +97,68 @@ jobs:
 
       - name: Create portable RC archive
         shell: pwsh
-        run: Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Vyzium-3.4.0-RC1-Portable.zip" -CompressionLevel Optimal
+        run: Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Vyzium-3.4.0-RC2-Portable.zip" -CompressionLevel Optimal
+
+      - name: Archive exact source and calculate checksums
+        shell: pwsh
+        run: |
+          git archive --format=zip --output=dist/Vyzium-3.4.0-RC2-Source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao arquivar o código validado." }
+          $files = @(
+            "dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe",
+            "dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe.blockmap",
+            "dist/Vyzium-3.4.0-RC2-Portable.zip",
+            "dist/Vyzium-3.4.0-RC2-Source.zip"
+          )
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content -Encoding utf8 dist/SHA256SUMS.txt
 
       - name: Upload RC artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Vyzium-3.4.0-RC1-Safe-Restore
+          name: Vyzium-3.4.0-RC2-Safe-Restore
           path: |
-            dist/Vyzium-3.4.0-RC1-Sandbox-Setup.exe
-            dist/Vyzium-3.4.0-RC1-Sandbox-Setup.exe.blockmap
-            dist/latest.yml
-            dist/Vyzium-3.4.0-RC1-Portable.zip
+            dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe
+            dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe.blockmap
+            dist/rc.yml
+            dist/Vyzium-3.4.0-RC2-Portable.zip
+            dist/Vyzium-3.4.0-RC2-Source.zip
+            dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
+
+      - name: Prepare Draft for manual publication by Levi
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not $env:GH_TOKEN) { throw "VYZIUM_RELEASE_TOKEN ausente; nenhum Draft foi criado." }
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($pkg.build.publish[0].releaseType -ne 'draft') { throw "Release deve permanecer como Draft." }
+          $tag = "v$($pkg.version)"
+          $repo = 'solucionx/Vyzium-Releases'
+          gh release view $tag --repo $repo --json isDraft *> $null
+          if ($LASTEXITCODE -eq 0) {
+            $existing = gh release view $tag --repo $repo --json isDraft | ConvertFrom-Json
+            if ($LASTEXITCODE -ne 0 -or -not $existing.isDraft) { throw "A versão já foi publicada; gere uma nova versão." }
+          } else {
+            gh release create $tag --repo $repo --target main --draft --prerelease --title "Vyzium $tag — Sandbox" --notes-file docs/VALIDACAO_3.4_RC2.md
+            if ($LASTEXITCODE -ne 0) { throw "Falha ao criar Draft." }
+          }
+          $assets = @(
+            'dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe',
+            'dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe.blockmap',
+            'dist/Vyzium-3.4.0-RC2-Portable.zip',
+            'dist/Vyzium-3.4.0-RC2-Source.zip',
+            'dist/SHA256SUMS.txt'
+          )
+          if (Test-Path dist/rc.yml) { $assets += 'dist/rc.yml' }
+          gh release upload $tag @assets --repo $repo --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao anexar arquivos ao Draft." }
+          $release = gh release view $tag --repo $repo --json isDraft,url | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.isDraft) { throw "A release não está como Draft; verifique antes de continuar." }
+          "Draft preparado: $($release.url). Publicação manual pelo botão Publish release." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append

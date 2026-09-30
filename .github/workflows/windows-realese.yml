@@ -1,6 +1,6 @@
 name: Windows Release
 
-# Durante a transição para o repositório privado, a publicação é MANUAL.
+# Regra permanente: gerar somente Draft; Levi publica manualmente no GitHub.
 # Commits e tags no repositório de código NÃO criam Releases automaticamente.
 on:
   workflow_dispatch:
@@ -198,4 +198,4 @@ jobs:
           }
 
           Write-Host "Draft $tag criada/atualizada SOMENTE em $releaseRepo."
-          Write-Host "O repositório solucionx/Vyzium não recebeu uma GitHub Release."
+          Write-Host "Aguardando Levi clicar em Publish release. Este workflow não publica a versão."

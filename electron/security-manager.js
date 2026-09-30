@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { recoverRestoreTransaction } = require('./restore-transaction');
 const {
   generateRootKey,
   deriveModuleKey,
@@ -281,6 +282,9 @@ class SecurityManager {
   async status() {
     const authState = this.auth.getState();
     if (!authState.authenticated) return { authenticated: false, ready: false };
+    // Recover an interrupted cross-module swap before inspecting readiness or
+    // allowing an engine to create/open either operational database.
+    recoverRestoreTransaction(this);
     const workspaceId = authState.workspaceId || authState.uid;
     const vault = fs.existsSync(this.vaultPath(workspaceId));
     let vaultUsable = false;

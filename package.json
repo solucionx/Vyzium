@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.0-rc.1",
-  "description": "Vyzium 3.4 RC1 Sandbox: restauração segura, merge com conflitos, linhagem e proteção contra regressão, isolado da produção.",
+  "version": "3.4.0-rc.2",
+  "description": "Vyzium 3.4 RC2 Sandbox: restauração segura, merge com conflitos, linhagem e proteção contra regressão, isolado da produção.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -60,13 +60,13 @@
       "installerSidebar": "build/installer-sidebar.bmp",
       "uninstallerSidebar": "build/installer-sidebar.bmp"
     },
-    "artifactName": "Vyzium-3.4.0-RC1-Sandbox-Setup.${ext}",
+    "artifactName": "Vyzium-3.4.0-RC2-Sandbox-Setup.${ext}",
     "publish": [
       {
         "provider": "github",
         "owner": "solucionx",
         "repo": "Vyzium-Releases",
-        "releaseType": "release"
+        "releaseType": "draft"
       }
     ],
     "asarUnpack": [
