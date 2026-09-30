@@ -275,7 +275,9 @@ class BackupRestoreCoordinator {
     fs.mkdirSync(path.dirname(target),{recursive:true});
     fs.copyFileSync(source,target);
     try { fs.chmodSync(target,0o600); } catch (_) {}
-    const fd=fs.openSync(target,'r');
+    // Windows requires a writable file handle for FlushFileBuffers/fsync.
+    // Keep the durability barrier instead of silently skipping it.
+    const fd=fs.openSync(target,'r+');
     try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
   }
 
