@@ -102,6 +102,8 @@ class BackupRestoreCoordinator {
         head_id:head,
         head:head ? listing.backups.find(x=>x.id===head) || null : null,
         retention:listing.retention,
+        lineage_capable:listing.lineage_capable===true,
+        server_upgrade_required:listing.lineage_capable!==true,
         backups:listing.backups.map(x=>({
           id:x.id,bytes:x.bytes,created_ms:x.created_ms,role:x.role,parent_id:x.parent_id
         })),
@@ -169,6 +171,9 @@ class BackupRestoreCoordinator {
     await this.stopServices();
     const manager = this.getRemoteManager();
     const listing = await manager.list();
+    if (preflight.local_has_data && !listing.lineage_capable) {
+      throw new Error('Atualize o Vyzium Server do celular antes de combinar dados de dois computadores. A restauração completa em um PC vazio é segura, mas o merge precisa da proteção de linhagem do servidor novo.');
+    }
     if (listing.head_id !== preflight.head_id) {
       throw new Error('O backup principal mudou durante a preparação. Tente novamente para comparar com a versão mais recente.');
     }
