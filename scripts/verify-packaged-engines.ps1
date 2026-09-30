@@ -4,7 +4,8 @@ $Resources = Join-Path $ProjectRoot "dist\win-unpacked\resources\backend"
 
 $required = @(
   (Join-Path $Resources "followup-engine.exe"),
-  (Join-Path $Resources "compras-engine.exe")
+  (Join-Path $Resources "compras-engine.exe"),
+  (Join-Path $Resources "backup-sync-engine.exe")
 )
 
 foreach ($file in $required) {
@@ -27,3 +28,9 @@ if (-not $security.available -or -not $security.cipher_version) {
   throw "O pacote Windows foi gerado sem SQLCipher funcional."
 }
 Write-Host "SQLCIPHER EMPACOTADO OK | versão $($security.cipher_version)"
+
+$syncHelp = & (Join-Path $Resources "backup-sync-engine.exe") --help 2>&1
+if ($LASTEXITCODE -ne 0 -or -not ($syncHelp -join "`n").Contains("Vyzium safe backup merge")) {
+  throw "O pacote Windows contém um motor de restauração/merge inválido."
+}
+Write-Host "BACKUP SYNC EMPACOTADO OK"

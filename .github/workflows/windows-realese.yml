@@ -124,6 +124,18 @@ jobs:
           --workpath build/pyinstaller-compras
           backend/compras_engine.py
 
+      - name: Compilar motor de restauração e merge
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name backup-sync-engine
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-backup-sync
+          backend/backup_sync.py
+
       - name: Verificar motores antes do empacotamento
         shell: pwsh
         run: ./scripts/verify-engines.ps1

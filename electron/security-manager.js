@@ -3,6 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { recoverRestoreTransaction } = require('./restore-transaction');
 const {
   generateRootKey,
   deriveModuleKey,
@@ -41,7 +42,11 @@ class SecurityManager {
   }
 
   get userData() { return this.app.getPath('userData'); }
-  get legacyComprasDir() { return path.join(this.app.getPath('appData'), 'Vyzium-Compras'); }
+  get legacyComprasDir() {
+    return process.env.VYZIUM_STORAGE_NAMESPACE
+      ? path.join(this.userData, 'legacy-compras')
+      : path.join(this.app.getPath('appData'), 'Vyzium-Compras');
+  }
   get legacyFollowupDb() { return path.join(this.userData, 'followup.db'); }
   get legacyComprasDb() { return path.join(this.legacyComprasDir, 'compras.sqlite3'); }
   get legacyWhatsApp() { return path.join(this.userData, 'whatsapp-session'); }
@@ -73,7 +78,8 @@ class SecurityManager {
     // userData is normally under AppData\Roaming, so keep browser runtime data
     // explicitly in LOCALAPPDATA while the Vyzium metadata stays in the workspace.
     const localRoot = process.env.LOCALAPPDATA || this.app.getPath('userData');
-    return path.join(localRoot, 'Vyzium', 'workspaces', workspaceId, 'whatsapp-runtime');
+    const namespace = process.env.VYZIUM_STORAGE_NAMESPACE || 'Vyzium';
+    return path.join(localRoot, namespace, 'workspaces', workspaceId, 'whatsapp-runtime');
   }
 
   vaultPath(workspaceId = this._workspaceId()) {
@@ -163,6 +169,33 @@ class SecurityManager {
     }
   }
 
+  async _recoveryEnvelopeForWorkspace(workspaceId, { strictRemote = false } = {}) {
+    const cached = this._loadRecoveryEnvelope(workspaceId);
+    if (cached) return cached;
+    const authState = this.auth.getState();
+    if (!authState?.authenticated || !authState?.emailVerified) return null;
+    if (authState?.offline) {
+      if (strictRemote) throw new Error('Não foi possível confirmar a chave de recuperação desta conta enquanto o Vyzium está offline. Conecte-se à internet e tente novamente; nenhuma chave nova foi criada.');
+      return null;
+    }
+    try {
+      const idToken = await this.auth.getIdToken();
+      const remote = await this.firebase.getRecoveryEnvelope(workspaceId, idToken);
+      if (remote?.ciphertext && remote?.tag) {
+        this._saveRecoveryEnvelope(remote, workspaceId);
+        return remote;
+      }
+      // A successful online null response is the only safe proof that a new
+      // account does not already have recovery material.
+      return null;
+    } catch (error) {
+      if (strictRemote) {
+        throw new Error('O Vyzium não conseguiu confirmar se esta conta já possui uma chave de recuperação. Por segurança, a criação de uma chave nova foi bloqueada; tente novamente quando o Firebase estiver acessível.');
+      }
+      return null;
+    }
+  }
+
   _saveRootKey(rootKey, workspaceId) {
     if (!this._encryptionAvailable()) throw new Error('A proteção segura de chaves do Windows não está disponível.');
     const encrypted = this.safeStorage.encryptString(rootKey.toString('hex')).toString('base64');
@@ -173,6 +206,23 @@ class SecurityManager {
       encryptedRootKey: encrypted,
       createdAt: new Date().toISOString()
     });
+  }
+
+  _quarantineUnactivatedVault(workspaceId, reason = 'recovery-key-conflict') {
+    const vault = this.vaultPath(workspaceId);
+    if (!fs.existsSync(vault)) return null;
+    let marker = null;
+    try { marker = JSON.parse(fs.readFileSync(this.statePath(workspaceId), 'utf8')); } catch (_) {}
+    if (marker?.active) {
+      throw new Error('O Vyzium recusou substituir uma chave ativa deste workspace.');
+    }
+    const dir = path.join(this.workspaceRoot(workspaceId), 'backups', 'security-conflict');
+    fs.mkdirSync(dir, { recursive:true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const destination = path.join(dir, `vault-${String(reason).replace(/[^a-z0-9_-]/gi,'-')}-${stamp}.json`);
+    fs.renameSync(vault, destination);
+    try { fs.rmSync(this.validationCachePath(workspaceId), { force:true }); } catch (_) {}
+    return destination;
   }
 
   _loadRootKey(workspaceId = this._workspaceId()) {
@@ -232,6 +282,9 @@ class SecurityManager {
   async status() {
     const authState = this.auth.getState();
     if (!authState.authenticated) return { authenticated: false, ready: false };
+    // Recover an interrupted cross-module swap before inspecting readiness or
+    // allowing an engine to create/open either operational database.
+    recoverRestoreTransaction(this);
     const workspaceId = authState.workspaceId || authState.uid;
     const vault = fs.existsSync(this.vaultPath(workspaceId));
     let vaultUsable = false;
@@ -252,6 +305,11 @@ class SecurityManager {
     let marker = null;
     try { marker = JSON.parse(fs.readFileSync(this.statePath(workspaceId), 'utf8')); } catch (_) {}
     const active = Boolean(marker?.active);
+    let recoveryEnvelopeAvailable = fs.existsSync(this.recoveryEnvelopePath(workspaceId));
+    if (!vaultUsable && authState.emailVerified) {
+      try { recoveryEnvelopeAvailable = Boolean(await this._recoveryEnvelopeForWorkspace(workspaceId)); }
+      catch (_) {}
+    }
     return {
       authenticated: true,
       workspaceId,
@@ -260,10 +318,11 @@ class SecurityManager {
       vaultUsable,
       vaultError,
       recoveryEnvelopeLocal: fs.existsSync(this.recoveryEnvelopePath(workspaceId)),
+      recoveryEnvelopeAvailable,
       secure: { followup: followupSecure, compras: comprasSecure },
       legacy: { followup: legacyFollowup, compras: legacyCompras },
       migrationRequired: !active || !vaultUsable || (legacyFollowup && !followupSecure) || (legacyCompras && !comprasSecure),
-      recoveryRequired: active && !vaultUsable,
+      recoveryRequired: !vaultUsable && (active || recoveryEnvelopeAvailable),
       ready: Boolean(active && vaultUsable),
       marker
     };
@@ -325,6 +384,49 @@ class SecurityManager {
     return results;
   }
 
+  async validateBackupDatabase(moduleName, target) {
+    if (!['followup', 'compras'].includes(moduleName)) throw new Error('Módulo de backup inválido.');
+    const file = path.resolve(String(target || ''));
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) throw new Error('Banco restaurado não encontrado.');
+    let keyHex = this.getModuleKeyHex(moduleName);
+    try {
+      const result = await this.runSecurityTool(
+        ['validate-db', '--path', file, '--module', moduleName],
+        { VYZIUM_DB_KEY_HEX: keyHex }
+      );
+      if (!result?.ok) throw new Error('O banco restaurado não passou na validação de integridade.');
+      return result;
+    } finally {
+      keyHex = '';
+    }
+  }
+
+  async activateRestoredWorkspace({ sourceId = null } = {}) {
+    const authState = this.auth.getState();
+    if (!authState.authenticated || !authState.emailVerified) throw new Error('Entre em uma conta verificada para ativar o backup.');
+    const workspaceId = authState.workspaceId || authState.uid;
+    const rootKey = this._loadRootKey(workspaceId);
+    if (!rootKey) throw new Error('Recupere a chave deste workspace antes de restaurar dados.');
+    rootKey.fill(0);
+
+    const protectedValidation = await this.validateProtectedDatabases({ force: true });
+    const marker = {
+      version: 2,
+      active: true,
+      workspaceId,
+      activatedAt: new Date().toISOString(),
+      restoredFromRemote: true,
+      restoredBackupId: sourceId || null,
+      legacyDatabasesRetained: true,
+      legacyPaths: { followup: this.legacyFollowupDb, compras: this.legacyComprasDb },
+      securePaths: { followup: this.moduleDb('followup', workspaceId), compras: this.moduleDb('compras', workspaceId) },
+      migrations: {},
+      protectedValidation
+    };
+    this._writeJsonAtomic(this.statePath(workspaceId), marker);
+    return { ready:true, marker };
+  }
+
 
   _quarantineFailedMigrationTarget(moduleName, target, workspaceId) {
     const dir = path.join(this.workspaceRoot(workspaceId), 'backups', 'migration-failed');
@@ -371,6 +473,10 @@ class SecurityManager {
     this._progress('Preparando a chave protegida pelo Windows…', { stage: 'key' });
     let rootKey = this._loadRootKey(workspaceId);
     if (!rootKey) {
+      const existingRecovery = await this._recoveryEnvelopeForWorkspace(workspaceId, { strictRemote: true });
+      if (existingRecovery) {
+        throw new Error('Esta conta já possui uma chave de recuperação. Informe o código de recuperação para usar a mesma chave neste computador; o Vyzium bloqueou a criação de uma chave nova para não tornar seus backups antigos inacessíveis.');
+      }
       rootKey = generateRootKey();
       this._saveRootKey(rootKey, workspaceId);
     }
@@ -397,11 +503,23 @@ class SecurityManager {
         // code never leave this process. Keep a local ciphertext copy as an extra
         // disaster-recovery aid; it is useless without the recovery code.
         this._progress('Salvando o envelope criptografado de recuperação…', { stage: 'recovery-envelope' });
-        await this._withTimeout(
-          this.firebase.putRecoveryEnvelope(workspaceId, envelope, idToken),
-          45_000,
-          'O salvamento do envelope de recuperação no Firebase excedeu 45 segundos. Nenhum banco foi migrado; tente novamente.'
-        );
+        const previousEnvelope = this._loadRecoveryEnvelope(workspaceId);
+        try {
+          await this._withTimeout(
+            this.firebase.putRecoveryEnvelope(workspaceId, envelope, idToken, { expectedExistingEnvelope: previousEnvelope }),
+            45_000,
+            'O salvamento do envelope de recuperação no Firebase excedeu 45 segundos. Nenhum banco foi migrado; tente novamente.'
+          );
+        } catch (error) {
+          if (error?.code === 'RECOVERY_KEY_CONFLICT') {
+            const quarantined = this._quarantineUnactivatedVault(workspaceId, 'recovery-key-conflict');
+            const suffix = quarantined
+              ? ' A chave local não ativada foi isolada para diagnóstico; nenhum banco de produção foi apagado.'
+              : '';
+            throw new Error('Outro computador registrou uma chave diferente para esta conta. Por segurança, o Vyzium não substituiu a chave remota. Use o código de recuperação da conta neste computador.' + suffix);
+          }
+          throw error;
+        }
         this._saveRecoveryEnvelope(envelope, workspaceId);
       }
       this._progress('Preparação concluída.', { stage: 'prepared' });

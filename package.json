@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.3.8",
-  "description": "Vyzium 3.3.8: backup criptografado no Vyzium Server (manual e ao fechar) e correção de primeira conexão do WhatsApp.",
+  "version": "3.4.0-rc.2",
+  "description": "Vyzium 3.4 RC2 Sandbox: restauração segura, merge com conflitos, linhagem e proteção contra regressão, isolado da produção.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -10,9 +10,10 @@
     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
-    "test:node": "node --test tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/remote-backup.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
-    "test": "npm run test:backend && npm run test:node",
-    "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs"
+    "test:node": "node --test tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/remote-backup.cjs tests/backup-restore.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs && node tests/sort.cjs",
+    "test": "npm run test:syntax && npm run test:backend && npm run test:node",
+    "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs",
+    "test:syntax": "node --check electron/main.js && node --check electron/remote-backup.js && node --check electron/backup-restore.js && node --check electron/backup-state.js && node --check renderer/auth.js"
   },
   "dependencies": {
     "whatsapp-web.js": "1.34.7",
@@ -24,8 +25,8 @@
     "electron-builder": "26.0.0"
   },
   "build": {
-    "appId": "com.vyzium.gestaooperacional",
-    "productName": "Vyzium",
+    "appId": "com.vyzium.gestaooperacional.rc340",
+    "productName": "Vyzium 3.4 RC Sandbox",
     "files": [
       "electron/**/*",
       "renderer/**/*",
@@ -38,7 +39,8 @@
         "to": "backend",
         "filter": [
           "followup-engine.exe",
-          "compras-engine.exe"
+          "compras-engine.exe",
+          "backup-sync-engine.exe"
         ]
       }
     ],
@@ -58,7 +60,7 @@
       "installerSidebar": "build/installer-sidebar.bmp",
       "uninstallerSidebar": "build/installer-sidebar.bmp"
     },
-    "artifactName": "Vyzium-Setup.${ext}",
+    "artifactName": "Vyzium-3.4.0-RC2-Sandbox-Setup.${ext}",
     "publish": [
       {
         "provider": "github",

@@ -698,7 +698,15 @@ function wireDataSafetyPanel() {
     button.textContent = 'Criando e enviando…';
     try {
       const result = await api('POST', '/remote-backup/create', {});
-      showToast(result.uploaded ? `Backup online confirmado: ${String(result.id || '').slice(0, 12)}…` : (result.reason || 'Backup não enviado.'), !result.uploaded && result.state !== 'pending');
+      const divergent = result.uploaded && result.promoted === false;
+      showToast(
+        divergent
+          ? (result.reason || 'Backup preservado como divergente. Compare com o backup principal antes de promovê-lo.')
+          : result.uploaded
+            ? `Backup online confirmado como principal: ${String(result.id || '').slice(0, 12)}…`
+            : (result.reason || 'Backup não enviado.'),
+        divergent || (!result.uploaded && result.state !== 'pending')
+      );
       await refreshDataSafetyPanel();
     } catch (error) {
       showToast(`Falha ao criar backup: ${String(error.message || error)}`, true);

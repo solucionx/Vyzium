@@ -364,7 +364,7 @@ def migrate_plain_database(
     *,
     key_hex: str,
     module_name: str,
-    app_version: str = os.environ.get('VYZIUM_APP_VERSION', '3.3.8'),
+    app_version: str = os.environ.get('VYZIUM_APP_VERSION', '3.4.0-rc.2'),
 ) -> dict[str, Any]:
     source = Path(source_path).expanduser().resolve()
     target = Path(target_path).expanduser().resolve()

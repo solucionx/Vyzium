@@ -25,6 +25,40 @@ test('Firestore value codec preserves nested recovery envelope fields', () => {
   assert.deepEqual(decodeValue(encodeValue(source)), source);
 });
 
+test('recovery envelope refuses a different root-key salt instead of overwriting Firestore', async () => {
+  const docPath='workspaces/uid-race/keyRecovery/current';
+  const docs=new Map([[docPath,{
+    version:{integerValue:'1'},
+    algorithm:{stringValue:'AES-256-GCM'},
+    kdf:{stringValue:'scrypt-N16384-r8-p1'},
+    salt:{stringValue:'AAAAAAAAAAAAAAAAAAAAAA=='},
+    iv:{stringValue:'AAAAAAAAAAAAAAAA'},
+    ciphertext:{stringValue:'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'},
+    tag:{stringValue:'AAAAAAAAAAAAAAAAAAAAAA=='}
+  }]]);
+  let commits=0;
+  const client=new FirebaseClient({fetchImpl:async(url,opts={})=>{
+    const method=opts.method||'GET';
+    if(method==='GET'&&url.includes('/documents/')){
+      const marker='/documents/';
+      const p=decodeURIComponent(url.slice(url.indexOf(marker)+marker.length));
+      const fields=docs.get(p);
+      return fields?response(200,{name:p,fields}):response(404,{error:{message:'NOT_FOUND'}});
+    }
+    if(url.endsWith('/documents:commit')&&method==='POST'){commits++;return response(200,{writeResults:[]});}
+    throw new Error('unexpected');
+  }});
+  await assert.rejects(
+    ()=>client.putRecoveryEnvelope('uid-race',{
+      version:1,algorithm:'AES-256-GCM',kdf:'scrypt-N16384-r8-p1',
+      salt:'BBBBBBBBBBBBBBBBBBBBBB==',iv:'BBBBBBBBBBBBBBBB',
+      ciphertext:'BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB',tag:'BBBBBBBBBBBBBBBBBBBBBB=='
+    },'token'),
+    error=>error?.code==='RECOVERY_KEY_CONFLICT'
+  );
+  assert.equal(commits,0);
+});
+
 test('unknown Firebase errors do not expose successful access', async () => {
   const client = new FirebaseClient({fetchImpl: async () => response(403, {error:{message:'PERMISSION_DENIED'}})});
   await assert.rejects(() => client.firestoreGet('users/x', 'bad-token'));

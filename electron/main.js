@@ -12,12 +12,22 @@ const { AuthManager } = require('./auth-manager');
 const { SecurityManager } = require('./security-manager');
 const { FullDiagnostics } = require('./diagnostics');
 const { RemoteBackupManager } = require('./remote-backup');
+const { BackupRestoreCoordinator } = require('./backup-restore');
+const { readBackupState, writeCurrentBackupState, writeCandidateBackupState } = require('./backup-state');
 const { createSentryReporter, shouldPromoteWhatsAppEvent } = require('./sentry-client');
+
+const RC_SANDBOX = String(app.getVersion()).includes('-rc.');
+if (RC_SANDBOX) {
+  const rcUserData = path.join(app.getPath('appData'), 'Vyzium-3.4-RC-Sandbox');
+  app.setPath('userData', rcUserData);
+  process.env.VYZIUM_STORAGE_NAMESPACE = 'Vyzium-3.4-RC-Sandbox';
+}
 
 let window;
 let whatsapp;
 let whatsappBridge;
 let remoteBackup;
+let restoreCoordinator;
 let updater;
 let firebaseClient;
 let authManager;
@@ -46,7 +56,7 @@ const engineToken = crypto.randomBytes(24).toString('hex');
 // electron-builder. Without an explicit AppUserModelID, development runs can
 // be grouped under electron.exe and show Electron's generic taskbar icon.
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.vyzium.gestaooperacional');
+  app.setAppUserModelId(RC_SANDBOX ? 'com.vyzium.gestaooperacional.rc340' : 'com.vyzium.gestaooperacional');
 }
 
 function appIconPath() {
@@ -331,44 +341,43 @@ function pathInside(root, candidate) {
   return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
-function remoteBackupStatePath() {
-  return path.join(securityManager.workspaceRoot(), 'backups', 'remote-state.json');
-}
-
 function snapshotSignature(snapshots) {
   return snapshots
-    .map(item => ({
-      module:String(item.module || ''),
-      size_bytes:Number(item.size_bytes || 0),
-      sha256:String(item.sha256 || '').toLowerCase()
+    .map(item=>({
+      module:String(item.module||''),
+      size_bytes:Number(item.size_bytes||0),
+      sha256:String(item.sha256||'').toLowerCase()
     }))
-    .sort((a,b) => a.module.localeCompare(b.module));
+    .sort((a,b)=>a.module.localeCompare(b.module));
 }
 
-function readRemoteBackupState() {
+function getDeviceId() {
+  const file=path.join(app.getPath('userData'),'security','device-id.json');
   try {
-    const parsed = JSON.parse(fs.readFileSync(remoteBackupStatePath(), 'utf8'));
-    return parsed && typeof parsed === 'object' ? parsed : null;
-  } catch (_) {
-    return null;
-  }
+    const parsed=JSON.parse(fs.readFileSync(file,'utf8'));
+    const id=String(parsed?.id||'');
+    if(/^[A-Za-z0-9._-]{8,128}$/.test(id)) return id;
+  } catch (_) {}
+  const id='device-'+crypto.randomUUID();
+  fs.mkdirSync(path.dirname(file),{recursive:true});
+  const tmp=file+'.tmp';
+  fs.writeFileSync(tmp,JSON.stringify({version:1,id,createdAt:new Date().toISOString()},null,2),{encoding:'utf8',mode:0o600});
+  fs.renameSync(tmp,file);
+  return id;
 }
 
-function writeRemoteBackupState(result, snapshots, reason, sourceFingerprint) {
-  const target = remoteBackupStatePath();
-  fs.mkdirSync(path.dirname(target), { recursive:true });
-  const tmp = target + '.tmp';
-  const payload = {
-    version:1,
-    last_success_at:new Date().toISOString(),
-    object_id:String(result?.id || ''),
-    bytes:Number(result?.bytes || 0),
-    reason:String(reason || ''),
-    source_fingerprint:sourceFingerprint || null,
-    snapshot_signature:snapshotSignature(snapshots)
-  };
-  fs.writeFileSync(tmp, JSON.stringify(payload, null, 2), {encoding:'utf8', mode:0o600});
-  fs.renameSync(tmp, target);
+function createRemoteBackupManager() {
+  return new RemoteBackupManager({
+    tempRoot:path.join(securityManager.workspaceRoot(),'backups','remote-transfer'),
+    getToken:()=>authManager.getIdToken(),
+    getUid:()=>authManager.getState().uid,
+    withBackupKey:callback=>securityManager.withRemoteBackupKey(callback),
+    audit:(event,details)=>{try{fullDiagnostics?.event(event,details);}catch(_){}}
+  });
+}
+
+function getRemoteBackupManager() {
+  return remoteBackup || createRemoteBackupManager();
 }
 
 async function createRemoteBackupSnapshots(reason = 'remote-upload') {
@@ -413,38 +422,64 @@ async function createRemoteBackupSnapshots(reason = 'remote-upload') {
   return snapshots;
 }
 
-async function performRemoteBackup({reason='manual', skipIfUnchanged=false} = {}) {
-  if (!workspaceServicesStarted || !remoteBackup) {
-    throw new Error('O backup remoto só fica disponível após entrar na sua conta Vyzium.');
-  }
-  const access = await remoteBackup.status();
-  if (!access.authorized) {
+async function performRemoteBackup({
+  reason='manual',
+  skipIfUnchanged=false,
+  parentOverride=null,
+  mergeSourceId=null
+}={}) {
+  if(!workspaceServicesStarted || !remoteBackup) throw new Error('O backup remoto só fica disponível após entrar na sua conta Vyzium.');
+  const access=await remoteBackup.status();
+  if(!access.authorized){
     return {
-      uploaded:false,
-      authorized:false,
-      state:access.state,
-      reason:access.state === 'pending'
-        ? 'Solicitação registrada no Poco. Autorize este usuário no aplicativo do servidor e tente novamente.'
-        : `Acesso ao backup não autorizado no Poco (estado: ${access.state}).`
+      uploaded:false,authorized:false,state:access.state,
+      reason:access.state==='pending'
+        ?'Solicitação registrada no Poco. Autorize este usuário no aplicativo do servidor e tente novamente.'
+        :`Acesso ao backup não autorizado no Poco (estado: ${access.state}).`
     };
   }
 
-  const sourceFingerprint = securityManager.remoteBackupFingerprint();
-  const previous = readRemoteBackupState();
-  if (skipIfUnchanged && previous?.source_fingerprint === sourceFingerprint) {
-    fullDiagnostics?.event('remote-backup.close-skip-unchanged', {});
-    return {
-      uploaded:false,
-      authorized:true,
-      skipped:true,
-      unchanged:true,
-      reason:'Nenhuma alteração desde o último backup remoto confirmado.'
-    };
+  const sourceFingerprint=securityManager.remoteBackupFingerprint();
+  const previous=readBackupState(securityManager);
+  if(skipIfUnchanged && (
+    previous?.source_fingerprint===sourceFingerprint ||
+    previous?.candidate_fingerprint===sourceFingerprint
+  )){
+    fullDiagnostics?.event('remote-backup.close-skip-unchanged',{candidate:Boolean(previous?.candidate_fingerprint===sourceFingerprint)});
+    return {uploaded:false,authorized:true,skipped:true,unchanged:true,reason:'Nenhuma alteração desde o último envio remoto confirmado.'};
   }
 
-  const snapshots = await createRemoteBackupSnapshots(`remote-${reason}`);
-  const result = await remoteBackup.upload(snapshots, {appVersion:app.getVersion()});
-  if (result?.uploaded) writeRemoteBackupState(result, snapshots, reason, sourceFingerprint);
+  const snapshots=await createRemoteBackupSnapshots(`remote-${reason}`);
+  const parentId=parentOverride || previous?.object_id || null;
+  const result=await remoteBackup.upload(snapshots,{
+    appVersion:app.getVersion(),
+    parentId,
+    deviceId:getDeviceId(),
+    mergeSourceId
+  });
+
+  if(result?.uploaded){
+    if(result.promoted){
+      writeCurrentBackupState(securityManager,{
+        objectId:result.id,
+        bytes:result.bytes,
+        reason,
+        sourceFingerprint,
+        snapshotSignature:snapshotSignature(snapshots),
+        serverHeadId:result.head_id || result.id,
+        clearCandidate:true
+      });
+    }else{
+      writeCandidateBackupState(securityManager,{
+        candidateId:result.id,
+        sourceFingerprint,
+        serverHeadId:result.head_id || null,
+        bytes:result.bytes,
+        reason
+      });
+      result.reason='O backup foi recebido e preservado, mas este computador está baseado em uma versão antiga. Ele não substituiu o backup principal; compare e combine os dados antes de promover uma nova versão.';
+    }
+  }
   return result;
 }
 
@@ -606,6 +641,58 @@ async function getOverview() {
 }
 
 
+function backupSyncCommand() {
+  if (app.isPackaged) return {executable:resolvePackagedEngine('backup-sync-engine.exe'),args:[]};
+  const python=process.env.FOLLOWUP_PYTHON || (process.platform==='win32'?'python':'python3');
+  return {executable:python,args:[path.join(__dirname,'..','backend','backup_sync.py')]};
+}
+
+async function runBackupSyncTool(moduleName,args) {
+  if (!['followup','compras'].includes(moduleName)) throw new Error('Módulo de sincronização inválido.');
+  const command=backupSyncCommand();
+  let keyHex=securityManager.getModuleKeyHex(moduleName);
+  try {
+    return await new Promise((resolve,reject)=>{
+      const child=spawn(command.executable,[...command.args,...args],{
+        env:{
+          ...process.env,
+          VYZIUM_DB_KEY_HEX:keyHex,
+          VYZIUM_APP_VERSION:app.getVersion(),
+          PYTHONUNBUFFERED:'1',
+          PYTHONUTF8:'1',
+          PYTHONIOENCODING:'utf-8'
+        },
+        windowsHide:true,
+        stdio:['ignore','pipe','pipe']
+      });
+      let stdout='',stderr='';let settled=false;
+      const timer=setTimeout(()=>{
+        if(settled)return;settled=true;
+        killProcessTree(child).catch(()=>{});
+        reject(new Error('A comparação segura de backups excedeu 5 minutos. Nenhum banco ativo foi alterado.'));
+      },5*60*1000);
+      child.stdout.on('data',chunk=>{stdout+=chunk.toString('utf8');});
+      child.stderr.on('data',chunk=>{stderr=(stderr+chunk.toString('utf8')).slice(-16000);});
+      child.once('error',error=>{if(settled)return;settled=true;clearTimeout(timer);reject(error);});
+      child.once('exit',code=>{
+        if(settled)return;settled=true;clearTimeout(timer);
+        let parsed=null;
+        try {
+          const line=stdout.trim().split(/\r?\n/).filter(Boolean).at(-1)||'{}';
+          parsed=JSON.parse(line);
+        } catch (_) {}
+        if(code!==0 || parsed?.ok===false) {
+          return reject(new Error(parsed?.error || stderr.trim() || 'O motor de comparação de backups encerrou com erro.'));
+        }
+        if(!parsed || typeof parsed!=='object') return reject(new Error('O motor de comparação retornou uma resposta inválida.'));
+        resolve(parsed);
+      });
+    });
+  } finally {
+    keyHex='';
+  }
+}
+
 async function runSecurityTool(args, extraEnv = {}) {
   const command = engineCommand('followup');
   return new Promise((resolve, reject) => {
@@ -715,13 +802,7 @@ async function startWorkspaceServices() {
   fullDiagnostics?.stage('Sessao WhatsApp criada', 'OK', {diagnosticDirectory:whatsapp.diagnosticDirectory()});
   whatsappBridge = await startBridge(whatsapp, engineToken);
   fullDiagnostics?.stage('Bridge local do WhatsApp iniciado', 'OK');
-  remoteBackup = new RemoteBackupManager({
-    tempRoot: path.join(securityManager.workspaceRoot(), 'backups', 'remote-transfer'),
-    getToken: () => authManager.getIdToken(),
-    getUid: () => authManager.getState().uid,
-    withBackupKey: callback => securityManager.withRemoteBackupKey(callback),
-    audit: (event, details) => { try { fullDiagnostics?.event(event, details); } catch (_) {} }
-  });
+  remoteBackup = createRemoteBackupManager();
   fullDiagnostics?.stage('Backup remoto Poco preparado', 'OK');
   workspaceServicesStarted = true;
   startEngine('followup').catch(error => {
@@ -927,6 +1008,11 @@ ipcMain.handle('auth-login', (_event, body) => authManager.login(body || {}));
 ipcMain.handle('auth-resend-verification', () => authManager.resendVerification());
 ipcMain.handle('auth-refresh-verification', () => authManager.refreshVerification());
 ipcMain.handle('auth-reset-password', (_event, email) => authManager.resetPassword(email));
+ipcMain.handle('backup-sync-preflight',()=>restoreCoordinator.preflight({failOpen:true}));
+ipcMain.handle('backup-sync-prepare',()=>restoreCoordinator.prepare());
+ipcMain.handle('backup-sync-apply',(_event,body={})=>restoreCoordinator.apply(body.planId,body.resolutions||{}));
+ipcMain.handle('backup-sync-cancel',(_event,planId)=>restoreCoordinator.cancel(planId));
+ipcMain.handle('backup-sync-skip',(_event,headId)=>restoreCoordinator.skipForSession(headId));
 ipcMain.handle('security-status', () => securityManager.status());
 ipcMain.handle('security-setup', async () => {
   if (workspaceServicesStarted) await stopWorkspaceServices();
@@ -938,13 +1024,16 @@ ipcMain.handle('security-finalize', async () => {
 });
 ipcMain.handle('security-recover', (_event, code) => securityManager.recoverWithCode(code));
 ipcMain.handle('security-enter-app', async () => {
-  const auth = authManager.getState();
-  if (!auth.authenticated || !auth.emailVerified) throw new Error('Confirme sua conta antes de continuar.');
-  const security = await securityManager.status();
-  if (!security.ready) throw new Error('Conclua a proteção dos dados antes de abrir o Vyzium.');
+  const auth=authManager.getState();
+  if(!auth.authenticated || !auth.emailVerified) throw new Error('Confirme sua conta antes de continuar.');
+  const security=await securityManager.status();
+  if(!security.ready) throw new Error('Conclua a proteção dos dados antes de abrir o Vyzium.');
+  const preflight=await restoreCoordinator.preflight({failOpen:true});
+  if(preflight.needs_sync) throw new Error('Existe um backup mais recente desta conta no Vyzium Server. Compare/restaure ou escolha continuar sem restaurar nesta sessão.');
   return enterApplication();
 });
 ipcMain.handle('auth-logout', async () => {
+  restoreCoordinator?.clearSession();
   const result = authManager.logout();
   securityManager.clearKeyFromMemory();
   await returnToAuth();
@@ -979,6 +1068,21 @@ app.whenReady().then(async () => {
       reportProgress: payload => {
         if (window && !window.isDestroyed()) window.webContents.send('security-progress', payload);
       }
+    });
+
+    restoreCoordinator = new BackupRestoreCoordinator({
+      securityManager,
+      getRemoteManager:()=>getRemoteBackupManager(),
+      runSyncTool:(moduleName,args)=>runBackupSyncTool(moduleName,args),
+      stopServices:()=>stopWorkspaceServices(),
+      startServices:()=>startWorkspaceServices(),
+      promoteMergedBackup:({parentOverride,mergeSourceId})=>performRemoteBackup({
+        reason:'merge',
+        skipIfUnchanged:false,
+        parentOverride,
+        mergeSourceId
+      }),
+      audit:(event,details)=>{try{fullDiagnostics?.event(event,details);}catch(_){}}
     });
 
     updater = createUpdater({
@@ -1033,12 +1137,18 @@ app.whenReady().then(async () => {
     if (restored.authenticated && restored.emailVerified) {
       security = await securityManager.status();
     }
-    const ready = Boolean(restored.authenticated && restored.emailVerified && security?.ready);
-    activeModule = ready ? 'home' : 'auth';
-    if (ready) {
+    const ready=Boolean(restored.authenticated && restored.emailVerified && security?.ready);
+    let reviewRemote=false;
+    if(ready){
+      const preflight=await restoreCoordinator.preflight({failOpen:true});
+      reviewRemote=Boolean(preflight.needs_sync);
+      if(preflight.error) fullDiagnostics?.event('backup-restore.startup-preflight-unavailable',{message:preflight.error});
+    }
+    activeModule=ready&&!reviewRemote?'home':'auth';
+    if(ready&&!reviewRemote){
       await startWorkspaceServices();
       await createWindow('index.html');
-    } else {
+    }else{
       await createWindow('auth.html');
     }
   } catch (error) {

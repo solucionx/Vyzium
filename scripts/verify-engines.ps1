@@ -4,7 +4,8 @@ $DistEngine = Join-Path $ProjectRoot "dist-engine"
 
 $required = @(
   (Join-Path $DistEngine "followup-engine.exe"),
-  (Join-Path $DistEngine "compras-engine.exe")
+  (Join-Path $DistEngine "compras-engine.exe"),
+  (Join-Path $DistEngine "backup-sync-engine.exe")
 )
 
 foreach ($file in $required) {
@@ -30,3 +31,9 @@ if (-not $security.available -or -not $security.cipher_version) {
   throw "SQLCipher não foi incorporado ao motor do Vyzium. Build bloqueado."
 }
 Write-Host "SQLCIPHER OK | versão $($security.cipher_version)"
+
+$syncHelp = & (Join-Path $DistEngine "backup-sync-engine.exe") --help 2>&1
+if ($LASTEXITCODE -ne 0 -or -not ($syncHelp -join "`n").Contains("Vyzium safe backup merge")) {
+  throw "O motor de restauração/merge não iniciou corretamente."
+}
+Write-Host "BACKUP SYNC ENGINE OK"

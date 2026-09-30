@@ -47,9 +47,23 @@ function recoveryKek(code, salt) {
   });
 }
 
+function recoverySaltForRootKey(rootKey) {
+  if (!Buffer.isBuffer(rootKey) || rootKey.length !== 32) throw new Error('Chave raiz inválida.');
+  // Scrypt salts need uniqueness, not secrecy. The workspace root key is already
+  // 256 bits of random material, so a domain-separated digest gives each root key
+  // a stable, random-looking 128-bit salt. This also lets the Firebase client
+  // distinguish a safe recovery-code rotation for the SAME root key from a
+  // concurrent attempt to register a DIFFERENT root key on another computer.
+  return crypto.createHash('sha256')
+    .update(Buffer.from('vyzium-recovery-salt-v1\0', 'utf8'))
+    .update(rootKey)
+    .digest()
+    .subarray(0, 16);
+}
+
 function wrapRootKeyForRecovery(rootKey, recoveryCode) {
   if (!Buffer.isBuffer(rootKey) || rootKey.length !== 32) throw new Error('Chave raiz inválida.');
-  const salt = crypto.randomBytes(16);
+  const salt = recoverySaltForRootKey(rootKey);
   const iv = crypto.randomBytes(12);
   const kek = recoveryKek(recoveryCode, salt);
   const cipher = crypto.createCipheriv('aes-256-gcm', kek, iv);

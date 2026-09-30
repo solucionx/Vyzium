@@ -8,10 +8,18 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('package identity remains compatible with the existing Vyzium installation', () => {
+test('3.4 RC package is isolated from the production Vyzium installation', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
-  assert.equal(pkg.build?.productName, 'Vyzium');
+  assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional.rc340');
+  assert.equal(pkg.build?.productName, 'Vyzium 3.4 RC Sandbox');
+  assert.equal(pkg.build?.artifactName, "Vyzium-3.4.0-RC2-Sandbox-Setup.${ext}");
+  const main=read('electron/main.js');
+  const security=read('electron/security-manager.js');
+  const updates=read('electron/updates.js');
+  assert.match(main,/Vyzium-3\.4-RC-Sandbox/);
+  assert.match(main,/app\.setPath\('userData'/);
+  assert.match(security,/VYZIUM_STORAGE_NAMESPACE/);
+  assert.match(updates,/RC é isolado/);
 });
 
 test('release version changes preserve the original dependency versions and archive URLs', () => {
@@ -31,7 +39,7 @@ test('release version changes preserve the original dependency versions and arch
 });
 
 
-test('3.3.8 keeps one authoritative release version across package, Python and renderer', () => {
+test('3.4 RC keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -66,9 +74,12 @@ test('Windows installer assets referenced by electron-builder exist', () => {
   }
 });
 
-test('Windows runtime uses the Vyzium taskbar identity and explicit app icon', () => {
+test('Windows runtime keeps production and RC taskbar identities explicit with the Vyzium icon', () => {
   const main = read('electron/main.js');
-  assert.match(main, /app\.setAppUserModelId\(['"]com\.vyzium\.gestaooperacional['"]\)/);
+  assert.match(main, /app\.setAppUserModelId\(/);
+  assert.match(main, /com\.vyzium\.gestaooperacional\.rc340/);
+  assert.match(main, /com\.vyzium\.gestaooperacional/);
+  assert.match(main, /RC_SANDBOX/);
   assert.match(main, /function appIconPath\(\)/);
   assert.match(main, /build['"], ['"]icon\.ico/);
   assert.match(main, /icon:\s*appIconPath\(\)/);
@@ -90,6 +101,7 @@ test('release packages both Python engines as extraResources', () => {
   const serialized = JSON.stringify(pkg.build?.extraResources || []);
   assert.match(serialized, /followup-engine\.exe/);
   assert.match(serialized, /compras-engine\.exe/);
+  assert.match(serialized, /backup-sync-engine\.exe/);
 });
 
 test('release workflow builds, validates and packages SQLCipher-enabled engines', () => {
@@ -108,7 +120,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.3.8');
+  assert.equal(pkg.version, '3.4.0-rc.2');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
@@ -123,7 +135,7 @@ test('3.1 data safety and authentication files are included', () => {
 
 
 
-test('3.3.8 keeps the exact upstream WhatsApp bootstrap validated on a clean account', () => {
+test('3.4 RC keeps the exact upstream WhatsApp bootstrap validated on a clean account', () => {
   assert.equal(pkg.dependencies?.['whatsapp-web.js'], '1.34.7');
   assert.equal(pkg.overrides, undefined);
   assert.equal(pkg.scripts?.postinstall, undefined);
@@ -137,7 +149,7 @@ test('3.3.8 keeps the exact upstream WhatsApp bootstrap validated on a clean acc
   assert.match(main, /com\.vyzium\.gestaooperacional/);
 });
 
-test('3.3.8 wires encrypted Poco backup only for manual action and normal app shutdown', () => {
+test('3.4 RC preserves manual/on-close backup policy while adding safe restore', () => {
   const main = read('electron/main.js');
   const remote = read('electron/remote-backup.js');
   const security = read('electron/security-manager.js');
@@ -157,6 +169,28 @@ test('3.3.8 wires encrypted Poco backup only for manual action and normal app sh
   assert.doesNotMatch(remote, /DELETE/);
   assert.match(followupUi, /Criar e enviar backup/);
   assert.match(comprasUi, /Criar e enviar backup/);
+});
+
+test('3.4 restore architecture is fail-safe and lineage aware', () => {
+  const main=read('electron/main.js');
+  const restore=read('electron/backup-restore.js');
+  const remote=read('electron/remote-backup.js');
+  const security=read('electron/security-manager.js');
+  const preload=read('electron/preload.js');
+  assert.match(main,/backup-sync-preflight/);
+  assert.match(main,/parentOverride/);
+  assert.match(main,/writeCandidateBackupState/);
+  assert.match(restore,/pre-sync/);
+  assert.match(restore,/_atomicInstall/);
+  assert.match(restore,/Otro|Outro|backup principal mudou/i);
+  assert.match(remote,/X-Vyzium-Parent/);
+  assert.match(remote,/BACKUP_DOWNLOAD_CHECKSUM_MISMATCH/);
+  assert.match(remote,/BACKUP_AUTHENTICATION_FAILED/);
+  assert.match(security,/_recoveryEnvelopeForWorkspace/);
+  assert.match(security,/bloqueou a criação de uma chave nova/);
+  assert.match(preload,/backupSync/);
+  assert.equal(fs.existsSync(path.join(root,'backend','backup_sync.py')),true);
+  assert.equal(fs.existsSync(path.join(root,'backend','test_backup_sync.py')),true);
 });
 
 test('3.1 keeps updates on the dedicated public releases repository', () => {

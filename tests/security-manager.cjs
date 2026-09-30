@@ -115,6 +115,42 @@ test('prepare reports visible setup stages instead of a generic endless spinner'
   }
 });
 
+test('existing account recovery envelope blocks creation of a different root key on a new PC', async () => {
+  const f=fixture();
+  try {
+    const prepared=await f.manager.prepare();
+    assert.ok(prepared.recoveryCode);
+    fs.unlinkSync(f.manager.vaultPath('uid-test-123'));
+    await assert.rejects(
+      f.manager.prepare(),
+      /já possui uma chave de recuperação|bloqueou a criação de uma chave nova/i
+    );
+    assert.equal(fs.existsSync(f.manager.vaultPath('uid-test-123')),false);
+    const status=await f.manager.status();
+    assert.equal(status.recoveryEnvelopeAvailable,true);
+    assert.equal(status.recoveryRequired,true);
+  } finally { f.cleanup(); }
+});
+
+test('losing a concurrent first-run recovery race quarantines the unactivated local vault', async () => {
+  const f=fixture();
+  try {
+    f.manager.firebase.putRecoveryEnvelope=async()=>{
+      const error=new Error('different recovery key');
+      error.code='RECOVERY_KEY_CONFLICT';
+      throw error;
+    };
+    await assert.rejects(
+      ()=>f.manager.prepare(),
+      /Outro computador registrou uma chave diferente|não substituiu a chave remota/i
+    );
+    assert.equal(fs.existsSync(f.manager.vaultPath('uid-test-123')),false);
+    const dir=path.join(f.manager.workspaceRoot('uid-test-123'),'backups','security-conflict');
+    assert.equal(fs.existsSync(dir),true);
+    assert.ok(fs.readdirSync(dir).some(name=>name.startsWith('vault-recovery-key-conflict-')));
+  } finally { f.cleanup(); }
+});
+
 test('an unusable local vault fails closed and advertises recovery instead of ready', async () => {
   const f = fixture();
   try {
