@@ -104,8 +104,8 @@ jobs:
         with:
           name: Vyzium-3.4.0-RC1-Safe-Restore
           path: |
-            dist/Vyzium-Setup.exe
-            dist/Vyzium-Setup.exe.blockmap
+            dist/Vyzium-3.4.0-RC1-Sandbox-Setup.exe
+            dist/Vyzium-3.4.0-RC1-Sandbox-Setup.exe.blockmap
             dist/latest.yml
             dist/Vyzium-3.4.0-RC1-Portable.zip
           if-no-files-found: error
