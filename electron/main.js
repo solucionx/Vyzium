@@ -16,6 +16,13 @@ const { BackupRestoreCoordinator } = require('./backup-restore');
 const { readBackupState, writeCurrentBackupState, writeCandidateBackupState } = require('./backup-state');
 const { createSentryReporter, shouldPromoteWhatsAppEvent } = require('./sentry-client');
 
+const RC_SANDBOX = String(app.getVersion()).includes('-rc.');
+if (RC_SANDBOX) {
+  const rcUserData = path.join(app.getPath('appData'), 'Vyzium-3.4-RC-Sandbox');
+  app.setPath('userData', rcUserData);
+  process.env.VYZIUM_STORAGE_NAMESPACE = 'Vyzium-3.4-RC-Sandbox';
+}
+
 let window;
 let whatsapp;
 let whatsappBridge;
@@ -49,7 +56,7 @@ const engineToken = crypto.randomBytes(24).toString('hex');
 // electron-builder. Without an explicit AppUserModelID, development runs can
 // be grouped under electron.exe and show Electron's generic taskbar icon.
 if (process.platform === 'win32') {
-  app.setAppUserModelId('com.vyzium.gestaooperacional');
+  app.setAppUserModelId(RC_SANDBOX ? 'com.vyzium.gestaooperacional.rc340' : 'com.vyzium.gestaooperacional');
 }
 
 function appIconPath() {
