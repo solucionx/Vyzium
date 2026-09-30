@@ -207,6 +207,23 @@ class SecurityManager {
     });
   }
 
+  _quarantineUnactivatedVault(workspaceId, reason = 'recovery-key-conflict') {
+    const vault = this.vaultPath(workspaceId);
+    if (!fs.existsSync(vault)) return null;
+    let marker = null;
+    try { marker = JSON.parse(fs.readFileSync(this.statePath(workspaceId), 'utf8')); } catch (_) {}
+    if (marker?.active) {
+      throw new Error('O Vyzium recusou substituir uma chave ativa deste workspace.');
+    }
+    const dir = path.join(this.workspaceRoot(workspaceId), 'backups', 'security-conflict');
+    fs.mkdirSync(dir, { recursive:true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const destination = path.join(dir, `vault-${String(reason).replace(/[^a-z0-9_-]/gi,'-')}-${stamp}.json`);
+    fs.renameSync(vault, destination);
+    try { fs.rmSync(this.validationCachePath(workspaceId), { force:true }); } catch (_) {}
+    return destination;
+  }
+
   _loadRootKey(workspaceId = this._workspaceId()) {
     if (!this._encryptionAvailable()) throw new Error('A proteção segura de chaves do sistema não está disponível.');
     const file = this.vaultPath(workspaceId);
@@ -482,11 +499,23 @@ class SecurityManager {
         // code never leave this process. Keep a local ciphertext copy as an extra
         // disaster-recovery aid; it is useless without the recovery code.
         this._progress('Salvando o envelope criptografado de recuperação…', { stage: 'recovery-envelope' });
-        await this._withTimeout(
-          this.firebase.putRecoveryEnvelope(workspaceId, envelope, idToken),
-          45_000,
-          'O salvamento do envelope de recuperação no Firebase excedeu 45 segundos. Nenhum banco foi migrado; tente novamente.'
-        );
+        const previousEnvelope = this._loadRecoveryEnvelope(workspaceId);
+        try {
+          await this._withTimeout(
+            this.firebase.putRecoveryEnvelope(workspaceId, envelope, idToken, { expectedExistingEnvelope: previousEnvelope }),
+            45_000,
+            'O salvamento do envelope de recuperação no Firebase excedeu 45 segundos. Nenhum banco foi migrado; tente novamente.'
+          );
+        } catch (error) {
+          if (error?.code === 'RECOVERY_KEY_CONFLICT') {
+            const quarantined = this._quarantineUnactivatedVault(workspaceId, 'recovery-key-conflict');
+            const suffix = quarantined
+              ? ' A chave local não ativada foi isolada para diagnóstico; nenhum banco de produção foi apagado.'
+              : '';
+            throw new Error('Outro computador registrou uma chave diferente para esta conta. Por segurança, o Vyzium não substituiu a chave remota. Use o código de recuperação da conta neste computador.' + suffix);
+          }
+          throw error;
+        }
         this._saveRecoveryEnvelope(envelope, workspaceId);
       }
       this._progress('Preparação concluída.', { stage: 'prepared' });
