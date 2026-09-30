@@ -281,30 +281,39 @@ def _source_snapshot_info(module: str, path: Path, key_hex: str | None) -> dict[
         count = 0
         stamp = ""
         if module == "followup":
-            row = con.execute("SELECT imported_at FROM import_batches ORDER BY id DESC LIMIT 1").fetchone()
-            stamp = str(row[0]) if row and row[0] else ""
+            try:
+                row = con.execute("SELECT imported_at FROM import_batches ORDER BY id DESC LIMIT 1").fetchone()
+                stamp = str(row[0]) if row and row[0] else ""
+            except Exception:
+                stamp = ""
             columns = [str(r[1]) for r in con.execute("PRAGMA table_info(orders)").fetchall()]
             stable = [c for c in columns if c not in {"imported_at", "source_file"}]
             if stable:
-                for row in con.execute(f"SELECT {','.join(stable)} FROM orders ORDER BY item_key").fetchall():
+                order_by = "item_key" if "item_key" in stable else ",".join(stable)
+                for row in con.execute(f"SELECT {','.join(stable)} FROM orders ORDER BY {order_by}").fetchall():
                     digest.update(_json(list(row)).encode("utf-8"))
                     digest.update(b"\n")
                     count += 1
             receipt_cols = [str(r[1]) for r in con.execute("PRAGMA table_info(receipts)").fetchall()]
             if receipt_cols:
-                for row in con.execute(f"SELECT {','.join(receipt_cols)} FROM receipts ORDER BY receipt_key").fetchall():
+                order_by = "receipt_key" if "receipt_key" in receipt_cols else ",".join(receipt_cols)
+                for row in con.execute(f"SELECT {','.join(receipt_cols)} FROM receipts ORDER BY {order_by}").fetchall():
                     digest.update(_json(list(row)).encode("utf-8"))
                     digest.update(b"\n")
             return {"signature": digest.hexdigest() if count or receipt_cols else "", "import_at": stamp, "count": count}
 
         if module == "compras":
-            row = con.execute("SELECT data FROM settings WHERE id='import'").fetchone()
-            if row:
-                try:
+            try:
+                row = con.execute("SELECT data FROM settings WHERE id='import'").fetchone()
+                if row:
                     stamp = str(json.loads(row[0]).get("at") or "")
-                except Exception:
-                    stamp = ""
-            for rid, raw in con.execute("SELECT id,data FROM items ORDER BY id").fetchall():
+            except Exception:
+                stamp = ""
+            try:
+                rows = con.execute("SELECT id,data FROM items ORDER BY id").fetchall()
+            except Exception:
+                rows = []
+            for rid, raw in rows:
                 try:
                     data = json.loads(raw)
                 except Exception:
@@ -314,11 +323,8 @@ def _source_snapshot_info(module: str, path: Path, key_hex: str | None) -> dict[
                 count += 1
             return {"signature": digest.hexdigest() if count else "", "import_at": stamp, "count": count}
         return {"signature": "", "import_at": "", "count": 0}
-    except Exception:
-        return {"signature": "", "import_at": "", "count": 0}
     finally:
         con.close()
-
 
 def _set_source_choice(
     report: MergeReport,
