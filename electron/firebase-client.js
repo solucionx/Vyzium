@@ -69,6 +69,27 @@ function decodeDocument(document) {
   return { name: document.name || '', ...data };
 }
 
+const RECOVERY_FIELDS = ['version','algorithm','kdf','salt','iv','ciphertext','tag'];
+
+function sameRecoveryEnvelope(left, right) {
+  if (!left || !right) return false;
+  return RECOVERY_FIELDS.every(key => String(left[key] ?? '') === String(right[key] ?? ''));
+}
+
+function sameRecoveryRoot(left, right) {
+  const a = String(left?.salt || '');
+  const b = String(right?.salt || '');
+  return Boolean(a && b && a === b);
+}
+
+function recoveryConflict() {
+  return new FirebaseError(
+    'Esta conta já possui uma chave de recuperação diferente. O Vyzium bloqueou a substituição para proteger os backups existentes.',
+    'RECOVERY_KEY_CONFLICT',
+    409
+  );
+}
+
 class FirebaseClient {
   constructor({ fetchImpl = globalThis.fetch, firebaseConfig = config } = {}) {
     if (typeof fetchImpl !== 'function') throw new Error('Fetch não disponível.');
@@ -243,9 +264,8 @@ class FirebaseClient {
     return { user, workspace, member, workspaceId };
   }
 
-  async putRecoveryEnvelope(workspaceId, envelope, idToken) {
+  async putRecoveryEnvelope(workspaceId, envelope, idToken, { expectedExistingEnvelope = null } = {}) {
     const path = `workspaces/${encodeURIComponent(workspaceId)}/keyRecovery/current`;
-    const existing = await this.firestoreGet(path, idToken);
     const fields = {
       version: Number(envelope.version),
       algorithm: String(envelope.algorithm),
@@ -255,8 +275,44 @@ class FirebaseClient {
       ciphertext: String(envelope.ciphertext),
       tag: String(envelope.tag)
     };
-    if (!existing) return this.firestoreCreate(path, fields, idToken, { requestTimeField: 'updatedAt' });
-    return this.firestorePatch(path, fields, idToken, { requestTimeField: 'updatedAt' });
+
+    let existing = await this.firestoreGet(path, idToken);
+    if (!existing) {
+      try {
+        return await this.firestoreCreate(path, fields, idToken, { requestTimeField: 'updatedAt' });
+      } catch (error) {
+        // The create uses currentDocument.exists=false. If two first-run PCs race,
+        // only one may win. Re-read after a failed/ambiguous create: an exact
+        // envelope or the same stable root-key salt means our write committed or
+        // another operation with the same root key won. A different salt is a
+        // different root key and must never be overwritten.
+        try { existing = await this.firestoreGet(path, idToken); } catch (_) { throw error; }
+        if (!existing) throw error;
+        if (sameRecoveryEnvelope(existing, fields)) return { idempotent:true };
+        if (sameRecoveryRoot(existing, fields)) {
+          return this.firestorePatch(path, fields, idToken, { requestTimeField:'updatedAt' });
+        }
+        throw recoveryConflict();
+      }
+    }
+
+    if (sameRecoveryEnvelope(existing, fields)) return { idempotent:true };
+
+    // v3.4 envelopes use a deterministic, domain-separated salt per root key.
+    // Same salt => same 256-bit root key with overwhelming confidence, so
+    // rotating the human recovery code is safe. Different salt => fail closed.
+    if (sameRecoveryRoot(existing, fields)) {
+      return this.firestorePatch(path, fields, idToken, { requestTimeField:'updatedAt' });
+    }
+
+    // Legacy 3.3.x envelopes used a random salt. The only safe automatic upgrade
+    // is when this machine has the exact previously cached envelope that matches
+    // Firestore, proving continuity before replacing it with the new format.
+    if (expectedExistingEnvelope && sameRecoveryEnvelope(existing, expectedExistingEnvelope)) {
+      return this.firestorePatch(path, fields, idToken, { requestTimeField:'updatedAt' });
+    }
+
+    throw recoveryConflict();
   }
 
   async getRecoveryEnvelope(workspaceId, idToken) {
