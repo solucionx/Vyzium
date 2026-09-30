@@ -434,8 +434,8 @@ async function performRemoteBackup({
     return {
       uploaded:false,authorized:false,state:access.state,
       reason:access.state==='pending'
-        ?'Solicitação registrada no Poco. Autorize este usuário no aplicativo do servidor e tente novamente.'
-        :`Acesso ao backup não autorizado no Poco (estado: ${access.state}).`
+        ?'Solicitação registrada no servidor. Autorize este usuário no aplicativo do servidor e tente novamente.'
+        :`Acesso ao backup não autorizado no servidor (estado: ${access.state}).`
     };
   }
 
@@ -518,7 +518,7 @@ async function backupOnNormalClose() {
     });
   } catch (error) {
     // Closing the application must never modify, roll back or delete production
-    // databases because the Poco/server is offline. The live SQLCipher files are
+    // databases because the server is offline. The live SQLCipher files are
     // untouched; only a consistent snapshot may have been created.
     fullDiagnostics?.event('remote-backup.close-failed', {
       code:String(error?.code || 'REMOTE_BACKUP_CLOSE_ERROR'),
@@ -803,7 +803,7 @@ async function startWorkspaceServices() {
   whatsappBridge = await startBridge(whatsapp, engineToken);
   fullDiagnostics?.stage('Bridge local do WhatsApp iniciado', 'OK');
   remoteBackup = createRemoteBackupManager();
-  fullDiagnostics?.stage('Backup remoto Poco preparado', 'OK');
+  fullDiagnostics?.stage('Backup remoto no servidor preparado', 'OK');
   workspaceServicesStarted = true;
   startEngine('followup').catch(error => {
     console.error('[followup-engine]', error);
