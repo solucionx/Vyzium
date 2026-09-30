@@ -106,10 +106,14 @@ test('combined backup uploads exact envelope bytes then verifies the object in s
       const id = crypto.createHash('sha256').update(body).digest('hex');
       assert.equal(args.route, '/v1/backups/' + id);
       stored = {id, bytes:body.length};
-      return {status:200, body:Buffer.from(JSON.stringify({status:'stored'}))};
+      return {status:200, body:Buffer.from(JSON.stringify({status:'created',classification:'current',head_id:id}))};
     }
     if (args.method === 'GET' && args.route === '/v1/backups') {
-      return {status:200, body:Buffer.from(JSON.stringify({backups:[{...stored,created_ms:12345}]}))};
+      return {status:200, body:Buffer.from(JSON.stringify({
+        head_id:stored?.id || null,
+        retention:3,
+        backups:stored?[{...stored,created_ms:12345,role:'current',parent_id:null}]:[]
+      }))};
     }
     throw new Error('unexpected request');
   };
@@ -122,18 +126,40 @@ test('combined backup uploads exact envelope bytes then verifies the object in s
     requestFn
   });
 
-  const result = await manager.upload(snapshots, {appVersion:'3.3.7'});
+  const result = await manager.upload(snapshots, {appVersion:'3.4.0-rc.1',deviceId:'device-test-87654321'});
   assert.equal(result.uploaded, true);
   assert.equal(result.modules.length, 2);
   assert.equal(result.id, stored.id);
   assert.equal(result.bytes, stored.bytes);
   assert.deepEqual(calls.map(call => call.method + ' ' + call.route.split('/').slice(0,3).join('/')), [
     'GET /v1/access',
+    'GET /v1/backups',
     'PUT /v1/backups',
     'GET /v1/backups'
   ]);
   assert.equal(fs.readdirSync(path.join(dir,'transfer')).length, 0);
   key.fill(0);
+});
+
+test('3.4 refuses uploads to a server that does not advertise lineage retention', async t => {
+  const dir=tmpdir();t.after(()=>fs.rmSync(dir,{recursive:true,force:true}));
+  const source=path.join(dir,'followup.db');fs.writeFileSync(source,crypto.randomBytes(256));
+  const snapshot={module:'followup',path:source,filename:'followup.db',size_bytes:256,sha256:await sha256File(source),encrypted:true};
+  let putCalled=false;
+  const manager=new RemoteBackupManager({
+    tempRoot:path.join(dir,'transfer'),
+    getToken:()=> 'token-without-whitespace-1234567890',
+    getUid:()=> 'legacyServerUser_123456',
+    withBackupKey:async cb=>cb(crypto.randomBytes(32)),
+    requestFn:async args=>{
+      if(args.route==='/v1/access/status')return{status:200,body:Buffer.from(JSON.stringify({state:'active',authorized:true}))};
+      if(args.route==='/v1/backups'&&args.method==='GET')return{status:200,body:Buffer.from(JSON.stringify({backups:[]}))};
+      if(args.method==='PUT'){putCalled=true;throw new Error('must not upload');}
+      throw new Error('unexpected');
+    }
+  });
+  await assert.rejects(()=>manager.upload([snapshot],{appVersion:'3.4.0-rc.1',deviceId:'device-test-87654321'}),error=>error?.code==='BACKUP_SERVER_UPGRADE_REQUIRED');
+  assert.equal(putCalled,false);
 });
 
 test('lineage metadata prevents a divergent upload from being reported as promoted', async t => {
