@@ -34,6 +34,31 @@ def make_compras(path: Path, maps=None, messages=None):
     finally: con.close()
 
 
+def add_followup_source(path: Path, label: str, stamp: str):
+    con=sqlite3.connect(path)
+    try:
+        con.executescript("""
+        CREATE TABLE orders(item_key TEXT PRIMARY KEY,description TEXT,source_file TEXT,imported_at TEXT);
+        CREATE TABLE receipts(receipt_key TEXT PRIMARY KEY,item_key TEXT);
+        CREATE TABLE import_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,source_file TEXT,source_rows INTEGER,order_items INTEGER,duplicate_rows INTEGER,imported_at TEXT);
+        """)
+        con.execute("INSERT INTO orders VALUES(?,?,?,?)",("item-1",label,"base.xlsx",stamp))
+        con.execute("INSERT INTO import_batches(source_file,source_rows,order_items,duplicate_rows,imported_at) VALUES(?,?,?,?,?)",("base.xlsx",1,1,0,stamp))
+        con.commit()
+    finally:
+        con.close()
+
+
+def add_compras_source(path: Path, stamp: str, item: dict):
+    con=sqlite3.connect(path)
+    try:
+        con.execute("INSERT OR REPLACE INTO items(id,data) VALUES(?,?)",(item["id"],json.dumps(item)))
+        con.execute("INSERT OR REPLACE INTO settings(id,data) VALUES('import',?)",(json.dumps({"id":"import","at":stamp,"filename":"base.xls"}),))
+        con.commit()
+    finally:
+        con.close()
+
+
 class BackupMergeTests(unittest.TestCase):
     def test_local_new_note_is_preserved_when_remote_is_blank(self):
         with tempfile.TemporaryDirectory() as td:
@@ -59,15 +84,18 @@ class BackupMergeTests(unittest.TestCase):
 
     def test_remote_imported_base_remains_authoritative_while_local_controls_survive(self):
         with tempfile.TemporaryDirectory() as td:
-            td=Path(td);l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            td=Path(td);b=td/"b.db";l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            make_followup(b)
             make_followup(l,("100","a","Enviado","Trabalho local",None,"2026-09-29T12:00:00"))
             make_followup(r,("200","b","Pendente","Trabalho remoto",None,"2026-09-29T11:00:00"))
-            for path,label in ((l,"BASE ANTIGA"),(r,"BASE NOVA")):
-                con=sqlite3.connect(path)
-                con.execute("CREATE TABLE orders(item_key TEXT PRIMARY KEY,description TEXT,imported_at TEXT)")
-                con.execute("INSERT INTO orders VALUES(?,?,?)",("item-1",label,"2026-09-29T10:00:00"))
-                con.commit();con.close()
-            apply_merge("followup",l,r,o,None,None,{})
+            add_followup_source(b,"BASE ANTIGA","2026-09-29T08:00:00")
+            add_followup_source(l,"BASE ANTIGA","2026-09-29T12:00:00")
+            add_followup_source(r,"BASE NOVA","2026-09-29T11:00:00")
+
+            report=analyze("followup",l,r,b,None)
+            self.assertEqual(report["source_choice"],"remote")
+            self.assertFalse(any(c["kind"]=="source_snapshot" for c in report["conflicts"]))
+            apply_merge("followup",l,r,o,b,None,{})
             con=sqlite3.connect(o)
             base=con.execute("SELECT description FROM orders WHERE item_key='item-1'").fetchone()[0]
             controls=con.execute("SELECT oc,note FROM order_controls ORDER BY oc").fetchall()
@@ -75,54 +103,68 @@ class BackupMergeTests(unittest.TestCase):
             self.assertEqual(base,"BASE NOVA")
             self.assertEqual(controls,[("100","Trabalho local"),("200","Trabalho remoto")])
 
-    def test_newer_local_daily_import_is_not_regressed_by_older_remote_head(self):
+    def test_local_import_changed_from_common_base_is_preserved_without_using_pc_clock(self):
         with tempfile.TemporaryDirectory() as td:
-            td=Path(td);l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            td=Path(td);b=td/"b.db";l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            base_control=("100","a","Enviado","",None,"2026-09-29T09:00:00")
+            make_followup(b,base_control)
             make_followup(l,("100","a","Enviado","Preenchimento local",None,"2026-09-29T13:00:00"))
-            make_followup(r,("100","a","Enviado","",None,"2026-09-29T09:00:00"))
-            for path,label,stamp in (
-                (l,"BASE LOCAL MAIS NOVA","2026-09-29T13:30:00"),
-                (r,"BASE REMOTA ANTIGA","2026-09-29T08:30:00"),
-            ):
-                con=sqlite3.connect(path)
-                con.execute("CREATE TABLE orders(item_key TEXT PRIMARY KEY,description TEXT,imported_at TEXT)")
-                con.execute("CREATE TABLE receipts(receipt_key TEXT PRIMARY KEY,item_key TEXT)")
-                con.execute("CREATE TABLE import_batches(id INTEGER PRIMARY KEY AUTOINCREMENT,source_file TEXT,source_rows INTEGER,order_items INTEGER,duplicate_rows INTEGER,imported_at TEXT)")
-                con.execute("INSERT INTO orders VALUES(?,?,?)",("item-1",label,stamp))
-                con.execute("INSERT INTO import_batches(source_file,source_rows,order_items,duplicate_rows,imported_at) VALUES(?,?,?,?,?)",("base.xlsx",1,1,0,stamp))
-                con.commit();con.close()
-            report=analyze("followup",l,r,None,None)
+            make_followup(r,base_control)
+            add_followup_source(b,"BASE REMOTA ANTIGA","2026-09-29T09:00:00")
+            add_followup_source(r,"BASE REMOTA ANTIGA","2099-12-31T23:59:59")
+            add_followup_source(l,"BASE LOCAL DIFERENTE","2000-01-01T00:00:00")
+
+            report=analyze("followup",l,r,b,None)
             self.assertEqual(report["source_choice"],"local")
-            apply_merge("followup",l,r,o,None,None,{})
+            self.assertEqual(report["conflict_count"],0)
+            apply_merge("followup",l,r,o,b,None,{})
             con=sqlite3.connect(o)
             base=con.execute("SELECT description FROM orders WHERE item_key='item-1'").fetchone()[0]
             note=con.execute("SELECT note FROM order_controls WHERE oc='100'").fetchone()[0]
             con.close()
-            self.assertEqual(base,"BASE LOCAL MAIS NOVA")
+            self.assertEqual(base,"BASE LOCAL DIFERENTE")
             self.assertEqual(note,"Preenchimento local")
 
-    def test_compras_uses_newer_local_import_snapshot_but_keeps_remote_and_local_maps(self):
+    def test_compras_local_source_changed_from_base_but_keeps_remote_and_local_maps(self):
         with tempfile.TemporaryDirectory() as td:
-            td=Path(td);l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            td=Path(td);b=td/"b.db";l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            make_compras(b)
             make_compras(l,{"local-map":{"name":"Local","created":"2026-09-29T12:00:00"}})
             make_compras(r,{"remote-map":{"name":"Remote","created":"2026-09-29T11:00:00"}})
-            for path,stamp,item in (
-                (l,"2026-09-29T14:00:00",{"id":"new-item","description":"local newest"}),
-                (r,"2026-09-29T09:00:00",{"id":"old-item","description":"remote older"}),
-            ):
-                con=sqlite3.connect(path)
-                con.execute("INSERT OR REPLACE INTO items(id,data) VALUES(?,?)",(item["id"],json.dumps(item)))
-                con.execute("INSERT OR REPLACE INTO settings(id,data) VALUES('import',?)",(json.dumps({"id":"import","at":stamp,"filename":"base.xls"}),))
-                con.commit();con.close()
-            report=analyze("compras",l,r,None,None)
+            old_item={"id":"old-item","description":"common base"}
+            add_compras_source(b,"2026-09-29T08:00:00",old_item)
+            add_compras_source(r,"2099-12-31T23:59:59",old_item)
+            add_compras_source(l,"2000-01-01T00:00:00",{"id":"new-item","description":"local changed source"})
+
+            report=analyze("compras",l,r,b,None)
             self.assertEqual(report["source_choice"],"local")
-            apply_merge("compras",l,r,o,None,None,{})
+            self.assertFalse(any(c["kind"]=="source_snapshot" for c in report["conflicts"]))
+            apply_merge("compras",l,r,o,b,None,{})
             con=sqlite3.connect(o)
             items=[json.loads(row[0])["id"] for row in con.execute("SELECT data FROM items")]
             maps={row[0] for row in con.execute("SELECT id FROM maps")}
             con.close()
             self.assertEqual(items,["new-item"])
             self.assertEqual(maps,{"local-map","remote-map"})
+
+    def test_different_imported_snapshots_without_common_base_require_user_choice(self):
+        with tempfile.TemporaryDirectory() as td:
+            td=Path(td);l=td/"l.db";r=td/"r.db";o=td/"o.db"
+            make_followup(l);make_followup(r)
+            add_followup_source(l,"BASE LOCAL","2000-01-01T00:00:00")
+            add_followup_source(r,"BASE REMOTA","2099-12-31T23:59:59")
+
+            report=analyze("followup",l,r,None,None)
+            source=[c for c in report["conflicts"] if c["kind"]=="source_snapshot"]
+            self.assertEqual(len(source),1)
+            self.assertEqual(report["source_choice"],"conflict")
+            with self.assertRaises(ValueError):
+                apply_merge("followup",l,r,o,None,None,{})
+            apply_merge("followup",l,r,o,None,None,{source[0]["id"]:"local"})
+            con=sqlite3.connect(o)
+            chosen=con.execute("SELECT description FROM orders WHERE item_key='item-1'").fetchone()[0]
+            con.close()
+            self.assertEqual(chosen,"BASE LOCAL")
 
     def test_same_field_divergence_requires_explicit_resolution(self):
         with tempfile.TemporaryDirectory() as td:
