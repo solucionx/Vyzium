@@ -1,9 +1,9 @@
-name: Validate Vyzium 3.4 Restore RC
+name: Validate Vyzium 3.4 Production
 
 on:
   push:
     branches:
-      - feature/v3.4-safe-restore-merge
+      - release/v3.4.0-production
 
 permissions:
   contents: read
@@ -15,7 +15,7 @@ jobs:
     env:
       PUPPETEER_SKIP_DOWNLOAD: "true"
       CSC_IDENTITY_AUTO_DISCOVERY: "false"
-      VYZIUM_APP_VERSION: "3.4.0-rc.2"
+      VYZIUM_APP_VERSION: "3.4.0"
 
     steps:
       - name: Checkout
@@ -88,44 +88,48 @@ jobs:
         shell: pwsh
         run: ./scripts/verify-engines.ps1
 
-      - name: Build Windows RC installer
+      - name: Build Windows production installer
         run: npm run build
 
       - name: Verify packaged engines
         shell: pwsh
         run: ./scripts/verify-packaged-engines.ps1
 
-      - name: Create portable RC archive
+      - name: Create portable production archive
         shell: pwsh
-        run: Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Vyzium-3.4.0-RC2-Portable.zip" -CompressionLevel Optimal
+        run: Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Vyzium-3.4.0-Portable.zip" -CompressionLevel Optimal
 
       - name: Archive exact source and calculate checksums
         shell: pwsh
         run: |
-          git archive --format=zip --output=dist/Vyzium-3.4.0-RC2-Source.zip HEAD
+          git archive --format=zip --output=dist/Vyzium-3.4.0-Source.zip HEAD
           if ($LASTEXITCODE -ne 0) { throw "Falha ao arquivar o código validado." }
           $files = @(
-            "dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe",
-            "dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe.blockmap",
-            "dist/Vyzium-3.4.0-RC2-Portable.zip",
-            "dist/Vyzium-3.4.0-RC2-Source.zip"
+            "dist/Vyzium-Setup.exe",
+            "dist/Vyzium-Setup.exe.blockmap",
+            "dist/latest.yml",
+            "dist/Vyzium-3.4.0-Portable.zip",
+            "dist/Vyzium-3.4.0-Source.zip"
           )
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Artefato obrigatório ausente: $file" }
+          }
           $lines = foreach ($file in $files) {
             $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
             "$hash  $([IO.Path]::GetFileName($file))"
           }
           $lines | Set-Content -Encoding utf8 dist/SHA256SUMS.txt
 
-      - name: Upload RC artifacts
+      - name: Upload validated production artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: Vyzium-3.4.0-RC2-Safe-Restore
+          name: Vyzium-3.4.0-Production
           path: |
-            dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe
-            dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe.blockmap
-            dist/rc.yml
-            dist/Vyzium-3.4.0-RC2-Portable.zip
-            dist/Vyzium-3.4.0-RC2-Source.zip
+            dist/Vyzium-Setup.exe
+            dist/Vyzium-Setup.exe.blockmap
+            dist/latest.yml
+            dist/Vyzium-3.4.0-Portable.zip
+            dist/Vyzium-3.4.0-Source.zip
             dist/SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 30
@@ -138,7 +142,11 @@ jobs:
           $ErrorActionPreference = 'Stop'
           if (-not $env:GH_TOKEN) { throw "VYZIUM_RELEASE_TOKEN ausente; nenhum Draft foi criado." }
           $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($pkg.version -ne '3.4.0') { throw "Versão de produção inesperada: $($pkg.version)" }
+          if ($pkg.build.appId -ne 'com.vyzium.gestaooperacional') { throw "appId não corresponde à instalação estável." }
+          if ($pkg.build.productName -ne 'Vyzium') { throw "productName não corresponde à instalação estável." }
           if ($pkg.build.publish[0].releaseType -ne 'draft') { throw "Release deve permanecer como Draft." }
+
           $tag = "v$($pkg.version)"
           $repo = 'solucionx/Vyzium-Releases'
           gh release view $tag --repo $repo --json isDraft *> $null
@@ -146,19 +154,23 @@ jobs:
             $existing = gh release view $tag --repo $repo --json isDraft | ConvertFrom-Json
             if ($LASTEXITCODE -ne 0 -or -not $existing.isDraft) { throw "A versão já foi publicada; gere uma nova versão." }
           } else {
-            gh release create $tag --repo $repo --target main --draft --prerelease --title "Vyzium $tag — Sandbox" --notes-file docs/VALIDACAO_3.4_RC2.md
+            gh release create $tag --repo $repo --target main --draft --title "Vyzium $tag" --notes-file docs/VALIDACAO_3.4.0_PRODUCAO.md
             if ($LASTEXITCODE -ne 0) { throw "Falha ao criar Draft." }
           }
+
           $assets = @(
-            'dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe',
-            'dist/Vyzium-3.4.0-RC2-Sandbox-Setup.exe.blockmap',
-            'dist/Vyzium-3.4.0-RC2-Portable.zip',
-            'dist/Vyzium-3.4.0-RC2-Source.zip',
+            'dist/Vyzium-Setup.exe',
+            'dist/Vyzium-Setup.exe.blockmap',
+            'dist/latest.yml',
+            'dist/Vyzium-3.4.0-Portable.zip',
+            'dist/Vyzium-3.4.0-Source.zip',
             'dist/SHA256SUMS.txt'
           )
-          if (Test-Path dist/rc.yml) { $assets += 'dist/rc.yml' }
           gh release upload $tag @assets --repo $repo --clobber
           if ($LASTEXITCODE -ne 0) { throw "Falha ao anexar arquivos ao Draft." }
-          $release = gh release view $tag --repo $repo --json isDraft,url | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or -not $release.isDraft) { throw "A release não está como Draft; verifique antes de continuar." }
-          "Draft preparado: $($release.url). Publicação manual pelo botão Publish release." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+
+          $release = gh release view $tag --repo $repo --json isDraft,isPrerelease,url | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or -not $release.isDraft -or $release.isPrerelease) {
+            throw "A release final deve permanecer Draft e não pode estar marcada como prerelease."
+          }
+          "Draft de produção preparado: $($release.url). Publicação manual pelo botão Publish release." | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
