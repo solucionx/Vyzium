@@ -36,6 +36,21 @@ test('recovery envelope round-trips root key and rejects wrong code', () => {
 });
 
 
+test('recovery envelope salt is stable for the same root key and distinct across root keys', () => {
+  const rootA = generateRootKey();
+  const rootB = generateRootKey();
+  const codeA = generateRecoveryCode();
+  const codeB = generateRecoveryCode();
+  const first = wrapRootKeyForRecovery(rootA, codeA);
+  const second = wrapRootKeyForRecovery(rootA, codeB);
+  const other = wrapRootKeyForRecovery(rootB, generateRecoveryCode());
+  assert.equal(first.salt, second.salt);
+  assert.notEqual(first.salt, other.salt);
+  assert.notEqual(first.iv, second.iv);
+  assert.deepEqual(unwrapRootKeyFromRecovery(first, codeA), rootA);
+  assert.deepEqual(unwrapRootKeyFromRecovery(second, codeB), rootA);
+});
+
 test('recovery code accepts formatting differences without changing the key', () => {
   const root = generateRootKey();
   const code = generateRecoveryCode();
