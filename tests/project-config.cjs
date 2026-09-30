@@ -74,9 +74,12 @@ test('Windows installer assets referenced by electron-builder exist', () => {
   }
 });
 
-test('Windows runtime uses the Vyzium taskbar identity and explicit app icon', () => {
+test('Windows runtime keeps production and RC taskbar identities explicit with the Vyzium icon', () => {
   const main = read('electron/main.js');
-  assert.match(main, /app\.setAppUserModelId\(['"]com\.vyzium\.gestaooperacional['"]\)/);
+  assert.match(main, /app\.setAppUserModelId\(/);
+  assert.match(main, /com\.vyzium\.gestaooperacional\.rc340/);
+  assert.match(main, /com\.vyzium\.gestaooperacional/);
+  assert.match(main, /RC_SANDBOX/);
   assert.match(main, /function appIconPath\(\)/);
   assert.match(main, /build['"], ['"]icon\.ico/);
   assert.match(main, /icon:\s*appIconPath\(\)/);
