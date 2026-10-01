@@ -60,3 +60,7 @@ O único ajuste em `electron/main.js` é a ponte de fornecedores para permitir q
 Esta candidata deve ser gerada como Draft em `solucionx/Vyzium-Releases`.
 
 A publicação final permanece manual.
+
+## Validação automatizada
+
+A candidata é bloqueada por escopo fechado, testes completos, compilação dos dois motores e build Windows antes da criação/atualização da Draft.
