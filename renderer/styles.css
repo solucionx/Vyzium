@@ -1508,3 +1508,34 @@ body.sidebar-collapsed .content {
 @media (prefers-reduced-motion: reduce) {
   .sidebar, main { transition: none; }
 }
+
+
+/* Vyzium 3.4.2 — atualização visual da sidebar: item normal, sem caixa branca. */
+#check-updates.button.secondary {
+  width: 100%;
+  min-height: 39px;
+  margin-top: 4px;
+  justify-content: flex-start;
+  padding: 8px 10px;
+  color: #adbac4 !important;
+  background: transparent !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  font-size: inherit;
+  font-weight: 600;
+}
+#check-updates.button.secondary:hover {
+  color: #ffffff !important;
+  background: #104a70 !important;
+  border-color: transparent !important;
+}
+#check-updates.button.secondary .nav-icon {
+  flex: 0 0 auto;
+}
+body.sidebar-collapsed #check-updates.button.secondary {
+  min-height: 42px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
