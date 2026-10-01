@@ -1,0 +1,1001 @@
+/* Vyzium 3.4.2 — Operational UI
+   Camada visual derivada da sandbox aprovada.
+   Escopo: renderer. Não altera APIs, banco, filtros, WhatsApp ou regras de negócio. */
+
+:root {
+  --op-navy: #0b3a5b;
+  --op-navy-deep: #082d47;
+  --op-blue: #13577f;
+  --op-blue-soft: #e9f1f5;
+  --op-teal: #2f758e;
+  --op-bg: #f4f6f7;
+  --op-surface: #ffffff;
+  --op-line: #dce4e8;
+  --op-line-strong: #cbd7dd;
+  --op-ink: #263945;
+  --op-muted: #7b8992;
+  --op-red: #b64e58;
+  --op-red-bg: #fbecee;
+  --op-amber: #9b6d28;
+  --op-amber-bg: #fff3df;
+  --op-green: #34765b;
+  --op-green-bg: #eaf5ef;
+  --op-purple: #66708f;
+  --op-purple-bg: #eef0f6;
+  --op-shadow: 0 4px 14px rgba(8,35,56,.055);
+}
+
+body.module-followup,
+body.module-compras {
+  background: var(--op-bg);
+  color: var(--op-ink);
+  font-family: "Segoe UI Variable", "Segoe UI", Arial, sans-serif;
+}
+
+body.module-followup main,
+body.module-compras main {
+  background: var(--op-bg);
+}
+
+/* Sidebar: mantém o azul mais claro aprovado, mas usa a hierarquia da sandbox. */
+body.module-followup .sidebar,
+body.module-compras .sidebar {
+  background: var(--op-navy) !important;
+  border-right: 1px solid #1c5878 !important;
+  padding-top: 14px;
+}
+
+body.module-followup .brand,
+body.module-compras .brand {
+  min-height: 52px;
+  margin-bottom: 10px;
+}
+
+body.module-followup .brand strong,
+body.module-compras .brand strong {
+  font-family: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
+  letter-spacing: .2px;
+}
+
+body.module-followup .nav-item,
+body.module-compras .nav-item {
+  position: relative;
+  min-height: 39px;
+  border-radius: 6px !important;
+  font-size: 10px;
+  font-weight: 650;
+  box-shadow: none !important;
+}
+
+body.module-followup .nav-item:hover,
+body.module-compras .nav-item:hover {
+  background: #104a70 !important;
+}
+
+body.module-followup .nav-item.active,
+body.module-compras .nav-item.active {
+  background: var(--op-blue) !important;
+  border-color: #2a6d91 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+body.module-followup .nav-item.active::before,
+body.module-compras .nav-item.active::before {
+  content: "";
+  position: absolute;
+  left: -10px;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: #7bc3dc;
+}
+
+body.sidebar-collapsed.module-followup .nav-item.active::before,
+body.sidebar-collapsed.module-compras .nav-item.active::before {
+  left: -10px;
+}
+
+/* Topbar: mesma leitura operacional da sandbox. */
+body.module-followup .topbar,
+body.module-compras .topbar {
+  min-height: 78px;
+  height: 78px;
+  padding: 0 28px;
+  background: rgba(250,251,252,.98);
+  border-bottom: 1px solid var(--op-line);
+  box-shadow: none;
+  backdrop-filter: blur(8px);
+}
+
+body.module-followup .topbar .eyebrow,
+body.module-compras .topbar .eyebrow {
+  margin: 0;
+  color: #84929c;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 1.15px;
+}
+
+body.module-followup .topbar h1,
+body.module-compras .topbar h1 {
+  margin: 3px 0 0;
+  color: #253c4a;
+  font-family: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-size: 21px;
+  font-weight: 600;
+}
+
+body.module-followup .top-actions,
+body.module-compras .top-actions {
+  gap: 8px;
+}
+
+body.module-followup .module-switch,
+body.module-compras .module-switch {
+  background: #fff !important;
+  color: #49606f !important;
+  border-color: var(--op-line-strong) !important;
+}
+
+/* Área principal e cabeçalhos de seção. */
+body.module-followup .content,
+body.module-compras .content {
+  padding: 22px 24px 38px;
+}
+
+body.module-followup .panel,
+body.module-compras .panel,
+body.module-compras .map-card,
+body.module-compras .map-library-toolbar {
+  border-color: var(--op-line) !important;
+  border-radius: 9px !important;
+  background: var(--op-surface);
+  box-shadow: var(--op-shadow) !important;
+}
+
+body.module-followup .panel,
+body.module-compras .panel {
+  margin-bottom: 14px;
+  padding: 16px 18px;
+}
+
+body.module-followup .panel-head,
+body.module-followup .section-head,
+body.module-compras .panel-head,
+body.module-compras .section-head {
+  align-items: flex-end;
+  margin-bottom: 13px;
+}
+
+body.module-followup .section-kicker,
+body.module-compras .section-kicker,
+body.module-compras .map-kicker {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--op-teal);
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 1.15px;
+}
+
+body.module-followup .panel-head h2,
+body.module-followup .section-head h2,
+body.module-compras .panel-head h2,
+body.module-compras .section-head h2,
+body.module-compras .quote-workbench-head h2,
+body.module-compras .results-heading h2 {
+  margin: 0;
+  color: #2c404c;
+  font-family: Bahnschrift, "Segoe UI Variable", "Segoe UI", sans-serif;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+body.module-followup .panel-head p,
+body.module-followup .section-head p,
+body.module-compras .panel-head p,
+body.module-compras .section-head p,
+body.module-compras .muted {
+  color: var(--op-muted);
+  font-size: 9.5px;
+  line-height: 1.45;
+}
+
+/* Botões: menos "SaaS", mais ferramenta operacional. */
+body.module-followup .button,
+body.module-compras .button {
+  min-height: 32px;
+  padding: 0 11px;
+  border-radius: 6px !important;
+  border-color: var(--op-line-strong);
+  box-shadow: none !important;
+  font-size: 9px;
+  font-weight: 750;
+}
+
+body.module-followup .button.primary,
+body.module-compras .button.primary {
+  background: var(--op-navy-deep) !important;
+  border-color: var(--op-navy-deep) !important;
+  color: #fff !important;
+}
+
+body.module-followup .button.primary:hover,
+body.module-compras .button.primary:hover {
+  background: #0d3e5f !important;
+}
+
+body.module-followup .button.secondary,
+body.module-compras .button.secondary {
+  background: #fff !important;
+  color: #536774 !important;
+}
+
+body.module-followup .button.danger,
+body.module-compras .button.danger {
+  background: #fff !important;
+  border-color: #e6c5c9 !important;
+  color: #a54852 !important;
+}
+
+/* Barras de filtros e busca — iguais ao painel compacto do preview. */
+body.module-followup .toolbar,
+body.module-compras .toolbar,
+body.module-compras .supplier-directory-toolbar {
+  gap: 7px;
+  padding: 10px 0;
+  border: 0;
+}
+
+body.module-followup .toolbar .search,
+body.module-followup .toolbar input[type="text"],
+body.module-compras .filters-grid input,
+body.module-compras .filters-grid select,
+body.module-followup .toolbar select,
+body.module-followup .multi-filter > summary,
+body.module-compras .supplier-directory-search input,
+body.module-compras .shared-supplier-phone {
+  min-height: 32px;
+  border: 1px solid var(--op-line-strong);
+  border-radius: 6px !important;
+  background: #fafbfb;
+  color: #40535f;
+  box-shadow: none !important;
+  font-size: 9px;
+}
+
+body.module-followup .toolbar .search:focus,
+body.module-followup .toolbar input:focus,
+body.module-followup .toolbar select:focus,
+body.module-compras input:focus,
+body.module-compras select:focus,
+body.module-compras textarea:focus {
+  border-color: #7da6b9;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(47,117,142,.08) !important;
+}
+
+body.module-followup .multi-filter {
+  min-width: 132px;
+}
+
+body.module-followup .multi-filter > summary {
+  padding: 5px 8px;
+}
+
+body.module-followup .multi-filter-title {
+  color: #7c8a93;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+
+body.module-followup .multi-filter > summary strong {
+  color: #415660;
+  font-size: 8.5px;
+}
+
+body.module-followup .multi-filter-menu {
+  border: 1px solid var(--op-line);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(15,45,63,.12);
+}
+
+body.module-followup .multi-filter-option {
+  font-size: 9px;
+}
+
+body.module-followup .multi-filter-clear {
+  color: var(--op-teal);
+  font-size: 8px;
+}
+
+/* Tabelas: header claro, linhas densas e menos caixas. */
+body.module-followup .table-wrap,
+body.module-compras .purchase-table,
+body.module-followup .items-grid {
+  border: 1px solid var(--op-line);
+  border-radius: 7px !important;
+  background: #fff;
+  overflow: auto;
+}
+
+body.module-followup table,
+body.module-compras table {
+  border-collapse: collapse;
+  background: #fff;
+}
+
+body.module-followup th,
+body.module-compras th,
+body.module-followup .table-wrap th,
+body.module-compras .purchase-table th {
+  height: 35px;
+  padding: 7px 9px !important;
+  background: #f3f5f6 !important;
+  color: #6b7a84 !important;
+  border-bottom: 1px solid var(--op-line) !important;
+  font-size: 7.5px !important;
+  font-weight: 850 !important;
+  letter-spacing: .62px;
+  text-transform: uppercase;
+}
+
+body.module-followup td,
+body.module-compras td,
+body.module-followup .table-wrap td,
+body.module-compras .purchase-table td {
+  padding: 7px 9px !important;
+  border-bottom: 1px solid #e8ecef !important;
+  color: #43545f;
+  font-size: 9px !important;
+  vertical-align: middle;
+}
+
+body.module-followup tbody tr:hover,
+body.module-compras tbody tr:hover {
+  background: #f9fbfc !important;
+}
+
+body.module-followup tbody tr:hover td,
+body.module-compras tbody tr:hover td {
+  background: #f9fbfc !important;
+}
+
+body.module-followup table strong,
+body.module-compras table strong {
+  color: #30434e;
+}
+
+body.module-followup table small,
+body.module-compras table small {
+  color: #8e9aa2;
+  font-size: 7.5px;
+}
+
+body.module-followup .sort-heading,
+body.module-compras th button {
+  color: inherit !important;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+}
+
+/* Status e bolhas, discretos como no preview. */
+body.module-followup .badge,
+body.module-compras .badge,
+body.module-compras .map-deadline,
+body.module-followup .control-bubble {
+  min-height: 20px;
+  padding: 3px 6px;
+  border-radius: 4px !important;
+  border: 0 !important;
+  box-shadow: none !important;
+  font-size: 7.5px !important;
+  font-weight: 750;
+}
+
+body.module-followup .status-critical,
+body.module-followup .status-overdue,
+body.module-followup .action-urgent,
+body.module-compras .map-deadline-overdue {
+  color: var(--op-red) !important;
+  background: var(--op-red-bg) !important;
+}
+
+body.module-followup .status-due_soon,
+body.module-followup .action-attention,
+body.module-compras .map-deadline-today {
+  color: var(--op-amber) !important;
+  background: var(--op-amber-bg) !important;
+}
+
+body.module-followup .attendance-attended,
+body.module-followup .approval-approved,
+body.module-followup .action-normal,
+body.module-compras .approval-approved {
+  color: var(--op-green) !important;
+  background: var(--op-green-bg) !important;
+}
+
+body.module-followup .attendance-partial {
+  color: var(--op-purple) !important;
+  background: var(--op-purple-bg) !important;
+}
+
+/* Controle Operacional: tela cheia, como a sandbox. */
+body.module-followup.view-operational .content {
+  max-width: none !important;
+  padding: 18px 18px 30px;
+}
+
+body.module-followup .operational-workspace {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+body.module-followup .operational-workspace > .panel-head {
+  padding: 15px 16px 10px;
+  margin: 0;
+}
+
+body.module-followup .operational-workspace > .toolbar {
+  padding: 10px 12px;
+  border-top: 1px solid #edf0f2;
+  border-bottom: 1px solid var(--op-line);
+  background: #fff;
+}
+
+body.module-followup .operational-workspace > .toolbar .search {
+  flex: 1 1 270px;
+  min-width: 220px;
+}
+
+body.module-followup .operational-full {
+  max-height: calc(100vh - 235px);
+  border: 0;
+  border-radius: 0 !important;
+}
+
+body.module-followup .operational-full table {
+  min-width: 1180px;
+}
+
+body.module-followup .operational-full td:nth-child(5) {
+  min-width: 220px;
+  white-space: normal;
+}
+
+body.module-followup .operational-full td:nth-child(9) {
+  min-width: 150px;
+}
+
+/* Dashboard como faixa de métricas, não cartões gigantes. */
+body.module-followup .source-strip {
+  margin-bottom: 12px;
+  padding: 12px 15px;
+  border-radius: 8px !important;
+  background: #eef4f7 !important;
+  border: 1px solid #d8e4ea !important;
+  color: #45616f !important;
+  box-shadow: none !important;
+}
+
+body.module-followup .source-strip strong {
+  color: #294c60 !important;
+}
+
+body.module-followup .cards.operational-cards {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 0 !important;
+  margin-bottom: 14px;
+  overflow: hidden;
+  border: 1px solid var(--op-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--op-shadow);
+}
+
+body.module-followup .cards.operational-cards .card {
+  min-height: 92px;
+  margin: 0;
+  padding: 13px 14px;
+  border: 0 !important;
+  border-right: 1px solid var(--op-line) !important;
+  border-radius: 0 !important;
+  background: #fff !important;
+  box-shadow: none !important;
+}
+
+body.module-followup .cards.operational-cards .card:nth-child(4n) {
+  border-right: 0 !important;
+}
+
+body.module-followup .cards.operational-cards .card::before {
+  content: "";
+  display: block;
+  width: 2px;
+  height: 48px;
+  position: absolute;
+  margin-left: -14px;
+  background: #83a7b7;
+}
+
+body.module-followup .cards.operational-cards .card.danger::before { background: var(--op-red); }
+body.module-followup .cards.operational-cards .card.warning::before { background: #c08b38; }
+body.module-followup .cards.operational-cards .card.success::before { background: #4d8b70; }
+
+body.module-followup .cards.operational-cards .label {
+  color: #7c8991;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+body.module-followup .cards.operational-cards .value {
+  margin: 7px 0 4px;
+  color: #2c4351 !important;
+  font: 600 22px/1 Bahnschrift, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+body.module-followup .cards.operational-cards .detail {
+  color: #929da4;
+  font-size: 7.5px;
+}
+
+body.module-followup .dashboard-lower {
+  gap: 12px;
+}
+
+/* Pedidos e fornecedores seguem a mesma densidade. */
+body.module-followup .orders-panel,
+body.module-followup .followup-supplier-directory {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+body.module-followup .orders-panel > .panel-head,
+body.module-followup .followup-supplier-directory > .panel-head {
+  padding: 15px 16px 8px;
+}
+
+body.module-followup .orders-panel > .toolbar,
+body.module-followup .followup-supplier-directory > .toolbar {
+  padding: 9px 12px;
+  border-top: 1px solid #edf0f2;
+  border-bottom: 1px solid var(--op-line);
+}
+
+body.module-followup .orders-panel > .table-wrap,
+body.module-followup .followup-supplier-directory > .table-wrap {
+  border: 0;
+  border-radius: 0 !important;
+}
+
+body.module-followup .phone-missing {
+  padding: 5px 6px;
+  border-radius: 5px;
+  background: #fff7e8;
+  color: #8b652a;
+}
+
+body.module-followup .phone-registered {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+body.module-followup .inline-order-detail {
+  background: #f7fafb;
+  border-color: #dce6ea;
+}
+
+/* Compras: cartões viram indicadores compactos e a fila ganha protagonismo. */
+body.module-compras .summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4,minmax(0,1fr));
+  gap: 0;
+  margin-bottom: 12px;
+  overflow: hidden;
+  border: 1px solid var(--op-line);
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: var(--op-shadow);
+}
+
+body.module-compras .summary-grid > .metric,
+body.module-compras .summary-grid > button.metric {
+  min-height: 86px;
+  margin: 0;
+  padding: 13px 15px !important;
+  border: 0 !important;
+  border-right: 1px solid var(--op-line) !important;
+  border-radius: 0 !important;
+  background: #fff !important;
+  box-shadow: none !important;
+  text-align: left;
+}
+
+body.module-compras .summary-grid > :last-child {
+  border-right: 0 !important;
+}
+
+body.module-compras .summary-grid .metric small {
+  margin: 0 0 7px;
+  color: #7d8991;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+body.module-compras .summary-grid .metric strong {
+  color: #2d4350;
+  font: 600 21px/1 Bahnschrift, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+body.module-compras .items-catalog-panel {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+body.module-compras .items-catalog-panel > .section-head {
+  padding: 15px 16px 8px;
+  margin: 0;
+}
+
+body.module-compras .filters-grid {
+  grid-template-columns: repeat(4,minmax(120px,1fr));
+  gap: 7px;
+  padding: 10px 12px;
+  margin: 0;
+  border-top: 1px solid #edf0f2;
+  border-bottom: 1px solid var(--op-line);
+  background: #fff;
+}
+
+body.module-compras .filters-grid label {
+  gap: 4px;
+  color: #75848d;
+  font-size: 7px;
+  font-weight: 800;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+
+body.module-compras .items-catalog-panel > .toolbar {
+  padding: 9px 12px 0;
+}
+
+body.module-compras .items-catalog-panel > p.muted {
+  margin: 8px 12px;
+}
+
+body.module-compras #items-table .purchase-table {
+  margin: 0 12px;
+  max-height: 58vh;
+}
+
+body.module-compras .purchase-table .overdue td {
+  background: #fffafa !important;
+}
+
+body.module-compras .purchase-table .soon td {
+  background: #fffdf7 !important;
+}
+
+/* Biblioteca de mapas: lista visual mais próxima da sandbox. */
+body.module-compras .map-library-toolbar {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 11px 12px;
+  margin-bottom: 10px;
+  box-shadow: none !important;
+}
+
+body.module-compras .map-library-tabs {
+  padding: 3px;
+  border-radius: 7px;
+}
+
+body.module-compras .map-library-tab {
+  padding: 7px 10px;
+  border-radius: 5px;
+  font-size: 9px;
+}
+
+body.module-compras .map-library-tab.active {
+  background: var(--op-blue-soft);
+  color: #2f6884;
+}
+
+body.module-compras .map-library-search {
+  width: min(430px,45vw);
+}
+
+body.module-compras .map-library-search > span {
+  font-size: 7px;
+  letter-spacing: .5px;
+}
+
+body.module-compras .map-cards {
+  grid-template-columns: repeat(3,minmax(0,1fr));
+  gap: 10px;
+}
+
+body.module-compras .map-library-card {
+  min-height: 205px;
+  padding: 14px !important;
+  border-radius: 8px !important;
+  box-shadow: var(--op-shadow) !important;
+}
+
+body.module-compras .map-library-card h3 {
+  margin: 10px 0 5px;
+  color: #304550;
+  font-size: 13px;
+}
+
+body.module-compras .map-card-count,
+body.module-compras .map-card-reference,
+body.module-compras .map-card-items {
+  font-size: 8px;
+}
+
+/* Mapa aberto: mantém todas as funções, mas reduz peso visual. */
+body.module-compras .map-workspace {
+  gap: 12px;
+}
+
+body.module-compras .map-command-panel {
+  padding: 16px 18px !important;
+  background: #fff !important;
+}
+
+body.module-compras .map-name-field input {
+  max-width: 580px;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: #f7f9fa;
+  font-size: 15px;
+}
+
+body.module-compras .map-status-row {
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 8.5px;
+}
+
+body.module-compras .map-status,
+body.module-compras .item-quote-progress,
+body.module-compras .best-offer-tag,
+body.module-compras .tie-offer-tag,
+body.module-compras .result-price {
+  border-radius: 4px !important;
+}
+
+body.module-compras .map-actions {
+  gap: 6px;
+  padding-top: 14px;
+}
+
+body.module-compras .map-progress-line {
+  height: 3px;
+  background: #e8eef1;
+}
+
+body.module-compras .map-progress-line span {
+  background: #4284a0 !important;
+}
+
+body.module-compras .supplier-manager {
+  border-top-color: var(--op-line);
+}
+
+body.module-compras .supplier-manager > summary {
+  font-size: 9px;
+}
+
+body.module-compras .supplier-card {
+  gap: 8px;
+  padding: 7px 0;
+}
+
+body.module-compras .quote-workbench {
+  padding: 0 !important;
+}
+
+body.module-compras .quote-workbench-head {
+  padding: 14px 16px 10px;
+}
+
+body.module-compras .map-workspace .map-quote-table {
+  border-radius: 0 !important;
+  border-left: 0;
+  border-right: 0;
+}
+
+body.module-compras .map-workspace .map-quote-table th,
+body.module-compras .map-workspace .map-quote-table thead .sticky-col {
+  background: #f2f5f6 !important;
+  color: #657680 !important;
+}
+
+body.module-compras .map-workspace .map-quote-table td {
+  padding: 6px 7px !important;
+}
+
+body.module-compras .quote-card {
+  min-height: 84px;
+  padding: 7px;
+  border-radius: 6px;
+}
+
+body.module-compras .quote-cell.is-winner .quote-card {
+  background: #f3faf6;
+  border-color: #c7e2d2;
+  box-shadow: inset 2px 0 0 #4c9671;
+}
+
+body.module-compras .quote-cell.is-tie .quote-card {
+  background: #fffaf1;
+  border-color: #ead9b5;
+  box-shadow: inset 2px 0 0 #b9904e;
+}
+
+body.module-compras .map-results-panel {
+  padding: 16px !important;
+}
+
+body.module-compras .map-summary-grid {
+  gap: 7px;
+}
+
+body.module-compras .map-metric {
+  min-height: 88px;
+  padding: 11px;
+  border-radius: 7px;
+  background: #fafbfb;
+}
+
+body.module-compras .supplier-result-grid {
+  gap: 8px;
+}
+
+body.module-compras .supplier-result-card {
+  padding: 11px;
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+/* Diretório de fornecedores compartilhado. */
+body.module-compras .supplier-directory,
+body.module-followup .followup-supplier-directory {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+body.module-compras .supplier-directory > .section-head {
+  padding: 15px 16px 8px;
+  margin: 0;
+}
+
+body.module-compras .supplier-directory-toolbar {
+  padding: 9px 12px;
+  border-top: 1px solid #edf0f2;
+  border-bottom: 1px solid var(--op-line);
+}
+
+body.module-compras .supplier-directory-table {
+  max-height: 66vh;
+  border: 0;
+  border-radius: 0 !important;
+}
+
+/* Configurações: painéis limpos, sem aparência de formulário genérico. */
+body.module-followup .settings-stack,
+body.module-compras .settings-stack {
+  display: grid;
+  gap: 12px;
+}
+
+body.module-followup .settings-panel,
+body.module-compras .settings-panel {
+  margin: 0;
+}
+
+body.module-followup .form-grid,
+body.module-compras .form-grid {
+  gap: 10px;
+}
+
+body.module-followup .field label,
+body.module-compras label {
+  color: #6f7f89;
+  font-size: 8px;
+  font-weight: 750;
+}
+
+body.module-followup input,
+body.module-followup select,
+body.module-followup textarea,
+body.module-compras input,
+body.module-compras select,
+body.module-compras textarea {
+  border-color: var(--op-line-strong);
+  border-radius: 6px;
+  box-shadow: none;
+}
+
+body.module-followup .callout,
+body.module-compras .notice {
+  border-radius: 7px;
+  box-shadow: none;
+}
+
+/* Modais e atualização seguem a mesma identidade. */
+body.module-followup .modal-card,
+body.module-compras .modal-card,
+body.module-followup .update-modal-card,
+body.module-compras .update-modal-card {
+  border-radius: 9px;
+  border: 1px solid var(--op-line);
+  box-shadow: 0 18px 50px rgba(12,38,54,.18);
+}
+
+body.module-followup .modal-card h2,
+body.module-compras .modal-card h2 {
+  color: #2d414d;
+  font-family: Bahnschrift, "Segoe UI", sans-serif;
+  font-size: 17px;
+}
+
+/* Responsividade interna sem esconder funções. */
+@media (max-width: 1260px) {
+  body.module-followup .cards.operational-cards {
+    grid-template-columns: repeat(3,minmax(0,1fr));
+  }
+  body.module-followup .cards.operational-cards .card:nth-child(4n) {
+    border-right: 1px solid var(--op-line) !important;
+  }
+  body.module-followup .cards.operational-cards .card:nth-child(3n) {
+    border-right: 0 !important;
+  }
+  body.module-compras .map-cards {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+}
+
+@media (max-width: 1040px) {
+  body.module-followup .cards.operational-cards,
+  body.module-compras .summary-grid {
+    grid-template-columns: repeat(2,minmax(0,1fr));
+  }
+  body.module-compras .filters-grid {
+    grid-template-columns: repeat(3,minmax(120px,1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  body.module-followup .topbar,
+  body.module-compras .topbar {
+    height: auto;
+    min-height: 78px;
+    padding: 12px 18px;
+  }
+  body.module-followup .content,
+  body.module-compras .content {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+  body.module-followup .cards.operational-cards,
+  body.module-compras .summary-grid,
+  body.module-compras .map-cards,
+  body.module-compras .filters-grid {
+    grid-template-columns: 1fr;
+  }
+}
