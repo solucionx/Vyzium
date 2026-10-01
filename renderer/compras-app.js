@@ -41,6 +41,36 @@ function mapDueBadgeHtml(map) {
  const due=mapDueState(map);
  return `<span class="map-deadline map-deadline-${due.state}">${esc(due.label)}</span>`;
 }
+function completeMapDialog(map) {
+ return new Promise(resolve=>{
+  const overlay=document.createElement('div');
+  overlay.className='modal complete-map-modal';
+  overlay.innerHTML=`<div class="modal-card complete-map-card" role="dialog" aria-modal="true" aria-labelledby="complete-map-title">
+    <div class="complete-map-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5 9.2 17 19 7"/><circle cx="12" cy="12" r="9"/></svg></div>
+    <span class="complete-map-kicker">FINALIZAR COTAÇÃO</span>
+    <h2 id="complete-map-title">Concluir mapa de compra?</h2>
+    <p class="complete-map-name">${esc(map?.name||'Mapa de compra')}</p>
+    <p class="complete-map-copy">Ao concluir, este mapa deixa a área de cotação ativa e passa para <strong>Concluídos</strong>.</p>
+    <div class="complete-map-effects">
+      <div><span class="complete-map-effect-mark">01</span><p><strong>Mapa preservado</strong><small>Cotações, valores e decisões continuam disponíveis para consulta.</small></p></div>
+      <div><span class="complete-map-effect-mark">02</span><p><strong>Itens liberados</strong><small>Os itens poderão ser utilizados novamente em novos mapas de compra.</small></p></div>
+      ${dirty?'<div><span class="complete-map-effect-mark">03</span><p><strong>Alterações pendentes</strong><small>O Vyzium salvará as alterações atuais antes de concluir o mapa.</small></p></div>':''}
+    </div>
+    <div class="complete-map-actions">
+      <button type="button" class="button secondary" data-complete-action="cancel">Cancelar</button>
+      <button type="button" class="button primary" data-complete-action="confirm">Concluir mapa</button>
+    </div>
+  </div>`;
+  const finish=value=>{document.removeEventListener('keydown',onKey);overlay.remove();resolve(value);};
+  const onKey=e=>{if(e.key==='Escape')finish(false);};
+  overlay.addEventListener('click',e=>{if(e.target===overlay)finish(false);});
+  overlay.querySelector('[data-complete-action="cancel"]').addEventListener('click',()=>finish(false));
+  overlay.querySelector('[data-complete-action="confirm"]').addEventListener('click',()=>finish(true));
+  document.addEventListener('keydown',onKey);
+  document.body.appendChild(overlay);
+  overlay.querySelector('[data-complete-action="cancel"]')?.focus();
+ });
+}
 function leaveMapDialog(destination) {
  return new Promise(resolve=>{
   const overlay=document.createElement('div');
@@ -336,7 +366,7 @@ function renderMap(detail) {
  on($('#save-map'),'click',saveMap);
  if($('#add-map-items'))on($('#add-map-items'),'click',addMapItemsDialog);
  on($('#export-map'),'click',async()=>{if(dirty)await saveMap();if(await window.followup.exportMap(m.id))toast('Mapa exportado.');});
- if($('#complete-map'))on($('#complete-map'),'click',async()=>{if(!confirm('Concluir este mapa de compra? Ele sairá de Em cotação, ficará disponível em Concluídos e os itens poderão ser usados em novos mapas.'))return;if(dirty)await saveMap();await api('POST','/maps/complete',{id:m.id});dirty=false;activeMap=null;mapListScope='completed';toast('Mapa concluído e movido para Concluídos.');await navigate('maps');});
+ if($('#complete-map'))on($('#complete-map'),'click',async()=>{if(!(await completeMapDialog(m)))return;if(dirty)await saveMap();await api('POST','/maps/complete',{id:m.id});dirty=false;activeMap=null;mapListScope='completed';toast('Mapa concluído e movido para Concluídos.');await navigate('maps');});
  on($('#delete-map'),'click',async()=>{if(!confirm('Excluir definitivamente este mapa e todas as cotações registradas nele? Mensagens já enviadas permanecem no Histórico. Esta ação não pode ser desfeita pela tela.'))return;await api('POST','/maps/delete',{id:m.id});dirty=false;activeMap=null;toast('Mapa e cotações excluídos.');await navigate('maps');});
  on($('#add-supplier'),'click',()=>addSupplierDialog(detail));
  document.querySelectorAll('[data-remove-supplier]').forEach(el=>on(el,'click',()=>{if(!confirm('Remover este fornecedor e os preços dele deste mapa?'))return;captureMap();m.suppliers=m.suppliers.filter(s=>s.id!==el.dataset.removeSupplier);for(const [itemId,award] of Object.entries(m.awards||{})){if(award.supplier_id===el.dataset.removeSupplier)delete m.awards[itemId];}renderMap({...detail,result:r});markDirty();}));
