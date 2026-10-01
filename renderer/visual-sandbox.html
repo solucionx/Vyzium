@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'">
+  <title>Vyzium · Sandbox Visual</title>
+  <link rel="stylesheet" href="visual-sandbox.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-symbol"><img src="assets/vyzium-mark-white.svg" alt=""></div>
+        <div class="brand-copy">
+          <strong>Vyzium</strong>
+          <span>Operational UI</span>
+        </div>
+      </div>
+
+      <div class="sandbox-flag">
+        <span class="sandbox-dot"></span>
+        <div><strong>Sandbox visual</strong><small>Dados fictícios · offline</small></div>
+      </div>
+
+      <nav class="nav" aria-label="Navegação">
+        <button class="nav-item active" data-view="overview" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
+          <span>Visão geral</span>
+        </button>
+        <button class="nav-item" data-view="followup" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 4h10v16H7zM9.5 8h5M9.5 12h5M9.5 16h3"/></svg>
+          <span>Acompanhamento</span><b>14</b>
+        </button>
+        <button class="nav-item" data-view="quotes" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 4-8 4-8-4 8-4Zm-8 8 8 4 8-4M4 15l8 4 8-4"/></svg>
+          <span>Cotação &amp; Mapas</span><b>38</b>
+        </button>
+        <button class="nav-item" data-view="settings" type="button">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6Zm8 3-2.1-.8a7 7 0 0 0-.5-1.2l.9-2-2.3-2.3-2 .9a7 7 0 0 0-1.2-.5L12 4H9l-.8 2.1a7 7 0 0 0-1.2.5l-2-.9L2.7 8l.9 2a7 7 0 0 0-.5 1.2L1 12v3l2.1.8c.1.4.3.8.5 1.2l-.9 2L5 21.3l2-.9c.4.2.8.4 1.2.5L9 23h3l.8-2.1c.4-.1.8-.3 1.2-.5l2 .9 2.3-2.3-.9-2c.2-.4.4-.8.5-1.2L20 15v-3Z"/></svg>
+          <span>Configurações</span>
+        </button>
+      </nav>
+
+      <div class="sidebar-footer">
+        <div class="system-line"><span class="ok-dot"></span><div><strong>Preview isolado</strong><small>Sem serviços externos</small></div></div>
+        <div class="solucionx">Desenvolvido por Solucionx</div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div>
+          <div class="breadcrumb">VYZIUM / <span id="breadcrumb-label">VISÃO GERAL</span></div>
+          <h1 id="page-title">Operação</h1>
+        </div>
+        <div class="topbar-actions">
+          <div class="clock">
+            <span id="date-label">01 OUT 2026</span>
+            <strong id="time-label">14:13</strong>
+          </div>
+          <button class="icon-button" type="button" aria-label="Notificações">
+            <svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg>
+            <span class="notification-dot"></span>
+          </button>
+          <div class="avatar">LD</div>
+        </div>
+      </header>
+
+      <div class="preview-banner">
+        <strong>AMBIENTE VISUAL ISOLADO</strong>
+        <span>Este executável usa apenas dados fictícios e não possui Firebase, banco, WhatsApp, backup ou atualizador.</span>
+      </div>
+
+      <section class="view active" id="view-overview">
+        <div class="section-heading">
+          <div><span class="section-label">OPERAÇÃO</span><h2>Boa tarde. 7 pontos precisam da sua atenção.</h2><p>Prioridades, módulos e atividade recente em uma única visão.</p></div>
+          <div class="status-chip"><span></span>Sistema normal</div>
+        </div>
+
+        <div class="metric-grid">
+          <article class="metric critical"><span class="metric-label">OCs em risco</span><strong>14</strong><small>+3 desde a última base</small></article>
+          <article class="metric"><span class="metric-label">Itens em cotação</span><strong>38</strong><small>12 próximos do prazo</small></article>
+          <article class="metric"><span class="metric-label">Mapas ativos</span><strong>06</strong><small>2 aguardando decisão</small></article>
+          <article class="metric neutral"><span class="metric-label">Prazo médio</span><strong>2h18</strong><small>tempo para próxima ação</small></article>
+        </div>
+
+        <div class="overview-layout">
+          <div class="workspace-stack">
+            <article class="workspace-card" data-open-view="followup">
+              <div class="workspace-accent"></div>
+              <div class="workspace-main">
+                <div class="workspace-header">
+                  <div><span class="section-label">ACOMPANHAMENTO</span><h3>Controle operacional</h3></div>
+                  <button class="text-button" type="button">Abrir módulo <span>↗</span></button>
+                </div>
+                <div class="workspace-stats">
+                  <span><strong>8</strong> atrasadas</span>
+                  <span><strong>6</strong> próximas</span>
+                  <span><strong>12</strong> aguardando fornecedor</span>
+                </div>
+                <div class="progress-track"><i style="width:68%"></i></div>
+                <div class="workspace-foot"><span>Última importação</span><strong>BASE SCI · 13:42</strong></div>
+              </div>
+            </article>
+
+            <article class="workspace-card quotes-card" data-open-view="quotes">
+              <div class="workspace-accent"></div>
+              <div class="workspace-main">
+                <div class="workspace-header">
+                  <div><span class="section-label">COTAÇÃO &amp; MAPAS</span><h3>Compras em andamento</h3></div>
+                  <button class="text-button" type="button">Abrir módulo <span>↗</span></button>
+                </div>
+                <div class="workspace-stats">
+                  <span><strong>38</strong> itens</span>
+                  <span><strong>4</strong> mapas ativos</span>
+                  <span><strong>R$ 18.420</strong> economia</span>
+                </div>
+                <div class="progress-track"><i style="width:47%"></i></div>
+                <div class="workspace-foot"><span>Mapa com maior prazo</span><strong>HOTEL PRAIA · 2 dias</strong></div>
+              </div>
+            </article>
+          </div>
+
+          <aside class="activity-panel">
+            <div class="panel-title"><div><span class="section-label">AGORA</span><h3>Atividade recente</h3></div><span class="live-indicator">AO VIVO</span></div>
+            <div class="activity-list">
+              <div class="activity-item"><time>13:42</time><span class="activity-icon import">↧</span><div><strong>BASE SCI importada</strong><small>286 linhas processadas</small></div></div>
+              <div class="activity-item"><time>13:31</time><span class="activity-icon send">→</span><div><strong>Follow-up enviado</strong><small>Fornecedor Atlântico</small></div></div>
+              <div class="activity-item"><time>12:58</time><span class="activity-icon map">◇</span><div><strong>Mapa atualizado</strong><small>HOTEL-023 · 4 fornecedores</small></div></div>
+              <div class="activity-item"><time>12:40</time><span class="activity-icon warn">!</span><div><strong>Prazo sinalizado</strong><small>OC 48321 exige atenção</small></div></div>
+              <div class="activity-item"><time>11:55</time><span class="activity-icon ok">✓</span><div><strong>Pedido confirmado</strong><small>OC 48190 · Hotel Mar</small></div></div>
+            </div>
+            <div class="infra-status">
+              <div><span class="ok-dot"></span><small>WhatsApp</small><strong>Conectado*</strong></div>
+              <div><span class="ok-dot"></span><small>Backup</small><strong>Sincronizado*</strong></div>
+              <p>* Indicadores meramente visuais neste sandbox.</p>
+            </div>
+          </aside>
+        </div>
+      </section>
+
+      <section class="view" id="view-followup">
+        <div class="module-head">
+          <div><span class="section-label">ACOMPANHAMENTO</span><h2>Controle Operacional</h2><p>Pedidos, fornecedores, prazos e próxima ação.</p></div>
+          <div class="module-actions"><button class="button secondary" type="button">Exportar</button><button class="button primary" type="button">Importar base</button></div>
+        </div>
+
+        <div class="compact-stats">
+          <div><span>Total</span><strong>124</strong></div><div class="danger-text"><span>Em risco</span><strong>14</strong></div><div><span>Pendentes</span><strong>42</strong></div><div><span>Parcial</span><strong>18</strong></div><div><span>No prazo</span><strong>50</strong></div>
+        </div>
+
+        <div class="work-panel">
+          <div class="toolbar">
+            <div class="search-box"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg><input id="followup-search" type="text" placeholder="Pesquisar OC, hotel ou fornecedor..."></div>
+            <div class="filter-group">
+              <button class="filter active" data-filter="all" type="button">Todos <b>124</b></button>
+              <button class="filter" data-filter="risk" type="button">Em risco <b>14</b></button>
+              <button class="filter" data-filter="pending" type="button">Pendentes <b>42</b></button>
+              <button class="filter" data-filter="partial" type="button">Parcial <b>18</b></button>
+            </div>
+            <button class="square-button" type="button" title="Mais filtros">☷</button>
+          </div>
+
+          <div class="table-wrap">
+            <table class="data-table" id="followup-table">
+              <thead><tr><th>PRAZO</th><th>HOTEL</th><th>OC</th><th>FORNECEDOR</th><th>CONTROLE / OBSERVAÇÃO</th><th>PRÓXIMA AÇÃO</th><th>PREVISÃO</th><th>ATENDIMENTO</th><th>APROVAÇÃO</th></tr></thead>
+              <tbody>
+                <tr data-status="risk"><td><span class="date-cell urgent">HOJE<small>01 OUT</small></span></td><td><strong>Hotel Praia Norte</strong><small>Fortaleza</small></td><td class="mono">48321</td><td>Atlântico Suprimentos</td><td><span class="status-tag amber">Aguardando confirmação</span></td><td><strong class="action-text danger-text">Cobrar fornecedor</strong></td><td class="mono">01/10 17:00</td><td><span class="status-tag neutral">Pendente</span></td><td><span class="status-tag green">Aprovado</span></td></tr>
+                <tr data-status="pending"><td><span class="date-cell">02 OUT</span></td><td><strong>Hotel Mar Azul</strong><small>Recife</small></td><td class="mono">48347</td><td>Casa do Enxoval</td><td><span class="status-tag blue">Pedido enviado</span></td><td><strong class="action-text">Aguardar retorno</strong></td><td class="mono">03/10</td><td><span class="status-tag neutral">Pendente</span></td><td><span class="status-tag green">Aprovado</span></td></tr>
+                <tr data-status="partial"><td><span class="date-cell">03 OUT</span></td><td><strong>Resort Sol</strong><small>Natal</small></td><td class="mono">48296</td><td>Global Amenities</td><td><span class="status-tag purple">Parcialmente atendido</span></td><td><strong class="action-text">Confirmar saldo</strong></td><td class="mono">04/10</td><td><span class="status-tag purple">Parcial</span></td><td><span class="status-tag green">Aprovado</span></td></tr>
+                <tr data-status="pending"><td><span class="date-cell">04 OUT</span></td><td><strong>Hotel Dunas</strong><small>Jericoacoara</small></td><td class="mono">48402</td><td>Nordeste Food Service</td><td><span class="status-tag amber">Aguardando pagamento</span></td><td><strong class="action-text">Cobrar cartão</strong></td><td class="mono">05/10</td><td><span class="status-tag neutral">Pendente</span></td><td><span class="status-tag amber">Financeiro</span></td></tr>
+                <tr data-status="risk"><td><span class="date-cell urgent">ATRASADO<small>30 SET</small></span></td><td><strong>Pousada Atlântica</strong><small>Cumbuco</small></td><td class="mono">48177</td><td>Distribuidora Ceará</td><td><span class="status-tag red">Sem atualização</span></td><td><strong class="action-text danger-text">Escalar atraso</strong></td><td class="mono">30/09</td><td><span class="status-tag red">Atrasado</span></td><td><span class="status-tag green">Aprovado</span></td></tr>
+                <tr data-status="pending"><td><span class="date-cell">05 OUT</span></td><td><strong>Hotel Central</strong><small>São Luís</small></td><td class="mono">48426</td><td>Office Mix</td><td><span class="status-tag blue">NF solicitada</span></td><td><strong class="action-text">Aguardar NF</strong></td><td class="mono">06/10</td><td><span class="status-tag neutral">Pendente</span></td><td><span class="status-tag green">Aprovado</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="table-footer"><span>6 de 124 pedidos demonstrativos</span><div><button type="button">‹</button><button class="current" type="button">1</button><button type="button">2</button><button type="button">3</button><button type="button">›</button></div></div>
+        </div>
+      </section>
+
+      <section class="view" id="view-quotes">
+        <div class="module-head">
+          <div><span class="section-label">COMPRAS</span><h2>Cotação &amp; Mapas</h2><p>Itens pendentes, fornecedores e decisões de compra.</p></div>
+          <div class="module-actions"><button class="button secondary" type="button">Histórico</button><button class="button primary" type="button">Nova cotação</button></div>
+        </div>
+
+        <div class="compact-stats purchase-stats">
+          <div><span>SCIs pendentes</span><strong>21</strong></div><div><span>Itens</span><strong>38</strong></div><div><span>Mapas ativos</span><strong>06</strong></div><div class="success-text"><span>Economia</span><strong>R$ 18.420</strong></div><div class="danger-text"><span>Prazo crítico</span><strong>04</strong></div>
+        </div>
+
+        <div class="purchase-layout">
+          <div class="work-panel maps-panel">
+            <div class="panel-title inline"><div><span class="section-label">MAPAS ATIVOS</span><h3>Decisões em andamento</h3></div><div class="search-mini">⌕ <span>Pesquisar mapa...</span></div></div>
+            <div class="map-list">
+              <article class="map-row active">
+                <div class="map-id"><strong>MP-024</strong><small>HOTEL PRAIA NORTE</small></div>
+                <div class="map-content"><strong>Amenities e enxoval</strong><small>8 itens · 4 fornecedores</small></div>
+                <div class="map-progress"><span><i style="width:76%"></i></span><small>76%</small></div>
+                <div class="map-value"><small>Melhor total</small><strong>R$ 12.840</strong></div>
+                <span class="status-tag amber">Em negociação</span>
+              </article>
+              <article class="map-row">
+                <div class="map-id"><strong>MP-023</strong><small>RESORT SOL</small></div>
+                <div class="map-content"><strong>Alimentos e bebidas</strong><small>12 itens · 5 fornecedores</small></div>
+                <div class="map-progress"><span><i style="width:52%"></i></span><small>52%</small></div>
+                <div class="map-value"><small>Melhor total</small><strong>R$ 31.290</strong></div>
+                <span class="status-tag blue">Cotando</span>
+              </article>
+              <article class="map-row">
+                <div class="map-id"><strong>MP-022</strong><small>HOTEL DUNAS</small></div>
+                <div class="map-content"><strong>Manutenção predial</strong><small>6 itens · 3 fornecedores</small></div>
+                <div class="map-progress"><span><i style="width:91%"></i></span><small>91%</small></div>
+                <div class="map-value"><small>Melhor total</small><strong>R$ 8.770</strong></div>
+                <span class="status-tag green">Decisão</span>
+              </article>
+            </div>
+          </div>
+
+          <aside class="decision-panel">
+            <div class="panel-title"><div><span class="section-label">MP-024</span><h3>Melhor cenário</h3></div><span class="status-tag green">Economia 11,8%</span></div>
+            <div class="decision-amount"><small>Total negociado</small><strong>R$ 12.840,00</strong><span>R$ 1.718 abaixo do valor inicial</span></div>
+            <div class="supplier-ranking">
+              <div><span>01</span><div><strong>Atlântico</strong><small>5 itens</small></div><b>R$ 7.430</b></div>
+              <div><span>02</span><div><strong>Casa Enxoval</strong><small>3 itens</small></div><b>R$ 5.410</b></div>
+            </div>
+            <button class="button primary full" type="button">Abrir mapa comparativo</button>
+          </aside>
+        </div>
+
+        <div class="work-panel items-panel">
+          <div class="panel-title inline"><div><span class="section-label">ITENS A COMPRAR</span><h3>Fila de cotação</h3></div><div class="filter-group small"><button class="filter active" type="button">Todos</button><button class="filter" type="button">Críticos</button><button class="filter" type="button">Sem cotação</button></div></div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead><tr><th>PRAZO</th><th>HOTEL</th><th>SCI</th><th>ITEM</th><th>QTD.</th><th>FORNECEDORES</th><th>MENOR PREÇO</th><th>STATUS</th></tr></thead>
+              <tbody>
+                <tr><td><span class="date-cell urgent">HOJE</span></td><td><strong>Hotel Praia Norte</strong></td><td class="mono">SCI-19044</td><td>Toalha banho premium 500g</td><td class="mono">120</td><td><span class="supplier-count">4</span></td><td class="mono"><strong>R$ 32,90</strong></td><td><span class="status-tag amber">Negociando</span></td></tr>
+                <tr><td><span class="date-cell">03 OUT</span></td><td><strong>Resort Sol</strong></td><td class="mono">SCI-19051</td><td>Água mineral 500ml</td><td class="mono">1.200</td><td><span class="supplier-count">5</span></td><td class="mono"><strong>R$ 1,68</strong></td><td><span class="status-tag blue">Cotando</span></td></tr>
+                <tr><td><span class="date-cell">04 OUT</span></td><td><strong>Hotel Dunas</strong></td><td class="mono">SCI-19063</td><td>Lâmpada LED 12W</td><td class="mono">80</td><td><span class="supplier-count">3</span></td><td class="mono"><strong>R$ 8,40</strong></td><td><span class="status-tag green">Pronto</span></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="module-head">
+          <div><span class="section-label">CONFIGURAÇÕES</span><h2>Preferências do Vyzium</h2><p>Preview da linguagem visual proposta para as configurações.</p></div>
+        </div>
+        <div class="settings-layout">
+          <aside class="settings-nav">
+            <button class="active" type="button">Interface</button><button type="button">Acompanhamento</button><button type="button">Compras</button><button type="button">WhatsApp</button><button type="button">Backup &amp; Segurança</button><button type="button">Atualizações</button>
+          </aside>
+          <div class="settings-content">
+            <div class="settings-card">
+              <div><span class="section-label">APARÊNCIA</span><h3>Interface</h3><p>Ajustes visuais locais do aplicativo.</p></div>
+              <div class="setting-row"><div><strong>Zoom da interface</strong><small>Escala padrão para telas operacionais.</small></div><div class="segmented"><button type="button">80%</button><button class="active" type="button">85%</button><button type="button">90%</button><button type="button">100%</button></div></div>
+              <div class="setting-row"><div><strong>Densidade das tabelas</strong><small>Mais linhas visíveis sem perder legibilidade.</small></div><div class="segmented"><button class="active" type="button">Compacta</button><button type="button">Confortável</button></div></div>
+              <div class="setting-row"><div><strong>Realce operacional</strong><small>Usar cor apenas para estado, risco e seleção.</small></div><label class="switch"><input type="checkbox" checked><span></span></label></div>
+            </div>
+            <div class="settings-card">
+              <div><span class="section-label">IDENTIDADE</span><h3>Vyzium Operational UI</h3><p>Azul profundo, superfícies neutras e alta densidade de informação.</p></div>
+              <div class="token-row"><div><span class="token navy"></span><small>Comando</small></div><div><span class="token slate"></span><small>Superfície</small></div><div><span class="token green"></span><small>Sucesso</small></div><div><span class="token amber"></span><small>Atenção</small></div><div><span class="token red"></span><small>Risco</small></div></div>
+            </div>
+            <div class="sandbox-note"><strong>Este menu também é demonstrativo.</strong><span>Nenhuma configuração é salva fora da pasta isolada do preview.</span></div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <script src="visual-sandbox.js"></script>
+</body>
+</html>
