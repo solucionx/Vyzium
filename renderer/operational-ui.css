@@ -1194,3 +1194,329 @@ body.module-compras .complete-map-actions .button {
     width: 100%;
   }
 }
+
+
+/* ==========================================================================
+   VYZIUM 3.4.2 — ESCALA TIPOGRÁFICA ÚNICA
+   Recupera a leitura da 3.4 e impede que cada tela herde tamanhos diferentes.
+   ========================================================================== */
+body.module-followup,
+body.module-compras {
+  --vyz-font-page: 19px;
+  --vyz-font-section: 15px;
+  --vyz-font-subsection: 12px;
+  --vyz-font-body: 10px;
+  --vyz-font-small: 9px;
+  --vyz-font-label: 8.5px;
+  --vyz-font-badge: 9px;
+  color: #082f4a;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-body);
+  font-weight: 400;
+}
+
+body.module-followup button,
+body.module-followup input,
+body.module-followup select,
+body.module-followup textarea,
+body.module-compras button,
+body.module-compras input,
+body.module-compras select,
+body.module-compras textarea {
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+}
+
+/* Títulos equivalentes têm exatamente a mesma escala nos dois módulos. */
+body.module-followup .topbar h1,
+body.module-compras .topbar h1 {
+  color: #082f4a !important;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-page) !important;
+  font-weight: 650 !important;
+  line-height: 1.15;
+}
+
+body.module-followup .panel-head h2,
+body.module-followup .section-head h2,
+body.module-followup .panel > h2,
+body.module-compras .panel-head h2,
+body.module-compras .section-head h2,
+body.module-compras .panel > h2,
+body.module-compras .quote-workbench-head h2,
+body.module-compras .results-heading h2,
+body.module-compras .complete-map-card h2 {
+  color: #082f4a !important;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-section) !important;
+  font-weight: 650 !important;
+  line-height: 1.25;
+}
+
+body.module-followup h3,
+body.module-compras h3,
+body.module-compras .supplier-result-card h3 {
+  color: #082f4a;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-subsection) !important;
+  font-weight: 650 !important;
+  line-height: 1.3;
+}
+
+/* Texto normal: mesmo tamanho em Histórico, Fornecedores, Mapas, Pedidos etc. */
+body.module-followup .content p,
+body.module-followup .content li,
+body.module-followup .content details,
+body.module-followup .content summary,
+body.module-followup .content label,
+body.module-followup .content .count,
+body.module-compras .content p,
+body.module-compras .content li,
+body.module-compras .content details,
+body.module-compras .content summary,
+body.module-compras .content label,
+body.module-compras .content .count {
+  font-size: var(--vyz-font-body);
+  line-height: 1.45;
+}
+
+body.module-followup .muted,
+body.module-followup small,
+body.module-compras .muted,
+body.module-compras small,
+body.module-compras .save-note,
+body.module-compras .map-card-date {
+  font-size: var(--vyz-font-small) !important;
+  line-height: 1.4;
+}
+
+body.module-followup .eyebrow,
+body.module-followup .section-kicker,
+body.module-compras .eyebrow,
+body.module-compras .section-kicker,
+body.module-compras .map-kicker,
+body.module-compras .map-library-search > span {
+  font-size: var(--vyz-font-label) !important;
+  font-weight: 800 !important;
+  letter-spacing: .9px !important;
+}
+
+/* Botões: mantém formato quadrado, tipografia da 3.4 e azul idêntico à sidebar. */
+body.module-followup .button,
+body.module-compras .button {
+  min-height: 32px;
+  border-radius: 6px !important;
+  font-size: var(--vyz-font-body) !important;
+  font-weight: 650 !important;
+  line-height: 1.2;
+}
+
+body.module-followup .button.primary,
+body.module-compras .button.primary {
+  color: #ffffff !important;
+  background: var(--op-navy) !important;
+  border-color: var(--op-navy) !important;
+  box-shadow: none !important;
+}
+
+body.module-followup .button.primary:hover,
+body.module-compras .button.primary:hover {
+  background: #082d47 !important;
+  border-color: #082d47 !important;
+}
+
+body.module-followup .button.secondary,
+body.module-compras .button.secondary {
+  color: #006783 !important;
+  background: #f0fbfc !important;
+  border-color: #b7dde2 !important;
+}
+
+/* Tabelas: nomes, OCs, itens e células deixam de alternar entre minúsculo e exagerado. */
+body.module-followup table td,
+body.module-compras table td,
+body.module-followup .table-wrap td,
+body.module-compras .purchase-table td {
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-body) !important;
+  font-weight: 400;
+  line-height: 1.35;
+}
+
+body.module-followup table th,
+body.module-compras table th,
+body.module-followup .table-wrap th,
+body.module-compras .purchase-table th {
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-label) !important;
+  font-weight: 750 !important;
+  letter-spacing: .5px !important;
+}
+
+body.module-followup table strong,
+body.module-compras table strong,
+body.module-compras .purchase-table .description strong,
+body.module-compras .origin-cell strong,
+body.module-compras .winner-cell strong {
+  color: #082f4a;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-body) !important;
+  font-weight: 650 !important;
+  line-height: 1.35;
+}
+
+body.module-followup .order-number,
+body.module-followup .oc-link,
+body.module-followup .text-button,
+body.module-followup .operational-full .order-number,
+body.module-followup .operational-full .text-button {
+  color: #006783 !important;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-body) !important;
+  font-weight: 700 !important;
+  line-height: 1.25;
+}
+
+/* Badges/status: maiores e legíveis, especialmente no Controle Operacional. */
+body.module-followup .badge,
+body.module-followup .control-bubble,
+body.module-compras .badge,
+body.module-compras .map-status,
+body.module-compras .map-deadline,
+body.module-compras .item-quote-progress,
+body.module-compras .best-offer-tag,
+body.module-compras .tie-offer-tag,
+body.module-compras .financial-offer-tag,
+body.module-compras .history-kind {
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-badge) !important;
+  font-weight: 650 !important;
+  line-height: 1.25;
+}
+
+body.module-followup .operational-full .badge,
+body.module-followup .operational-full .control-bubble,
+body.module-followup .quick-control {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 8px !important;
+  font-size: var(--vyz-font-badge) !important;
+  line-height: 1.25;
+}
+
+body.module-followup .quick-controls {
+  gap: 6px;
+}
+
+body.module-followup .quick-control {
+  border-radius: 6px !important;
+}
+
+/* Mapa aberto: nome do mapa e item usam a mesma escala do restante da aplicação. */
+body.module-compras .map-name-field input {
+  color: #082f4a !important;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1.3;
+}
+
+body.module-compras .map-status-row,
+body.module-compras .map-save-row,
+body.module-compras .supplier-manager,
+body.module-compras .supplier-card,
+body.module-compras .quote-card,
+body.module-compras .quote-insight,
+body.module-compras .quote-total,
+body.module-compras .result-cell,
+body.module-compras .result-explainer,
+body.module-compras .supplier-result-card {
+  font-size: var(--vyz-font-body) !important;
+}
+
+body.module-compras .supplier-heading,
+body.module-compras .supplier-heading span,
+body.module-compras .price-pair label,
+body.module-compras .delivery-field,
+body.module-compras .discount-auto,
+body.module-compras .quote-saving,
+body.module-compras .negotiation-target,
+body.module-compras .result-label,
+body.module-compras .result-price,
+body.module-compras .result-empty,
+body.module-compras .decision-reason,
+body.module-compras .decision-premium {
+  font-size: var(--vyz-font-small) !important;
+}
+
+/* Histórico: corrige especificamente os nomes que estavam enormes. */
+body.module-compras .history-row {
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-body) !important;
+}
+
+body.module-compras .history-row .section-head strong {
+  color: #082f4a !important;
+  font-size: var(--vyz-font-body) !important;
+  font-weight: 650 !important;
+  line-height: 1.35;
+}
+
+body.module-compras .history-row > small,
+body.module-compras .history-row details,
+body.module-compras .history-row summary,
+body.module-compras .history-row p {
+  font-size: var(--vyz-font-body) !important;
+}
+
+body.module-compras .history-row pre {
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: var(--vyz-font-body) !important;
+  line-height: 1.5;
+}
+
+/* Diretório de fornecedores: mesma leitura dos demais cadastros. */
+body.module-followup .followup-supplier-directory td,
+body.module-compras .supplier-directory td,
+body.module-followup .followup-supplier-directory input,
+body.module-compras .supplier-directory input {
+  font-size: var(--vyz-font-body) !important;
+}
+
+body.module-compras .supplier-missing-badge {
+  font-size: var(--vyz-font-small) !important;
+}
+
+/* Evita que estilos anteriores voltem a usar Bahnschrift nos números e títulos. */
+body.module-followup .cards.operational-cards .value,
+body.module-compras .summary-grid .metric strong,
+body.module-compras .map-metric strong,
+body.module-compras .negotiation-summary strong,
+body.module-compras .completion-ring strong {
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+}
+
+/* Verificar atualizações deve se comportar como item de menu, inclusive nos módulos. */
+body.module-followup #check-updates.button.secondary,
+body.module-compras #check-updates.button.secondary {
+  min-height: 39px;
+  color: #adbac4 !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  font-size: 10px !important;
+  font-weight: 600 !important;
+}
+
+body.module-followup #check-updates.button.secondary:hover,
+body.module-compras #check-updates.button.secondary:hover {
+  color: #fff !important;
+  background: #104a70 !important;
+}
+
+/* Mantém os botões destrutivos distintos. */
+body.module-followup .button.danger,
+body.module-compras .button.danger {
+  color: #a52839 !important;
+  background: #fff !important;
+  border-color: #e5bbc2 !important;
+}
