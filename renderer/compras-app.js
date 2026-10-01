@@ -28,6 +28,19 @@ function today() {const d=new Date();return `${d.getFullYear()}-${String(d.getMo
 function days(i) {return PurchaseModel.days(i,today());}
 function dateLabel(v) {return v?v.split('-').reverse().join('/'):'Não informada';}
 function deadline(i) {const d=days(i);return d===null?'Sem data':d<0?`${-d} dias em atraso`:d===0?'Hoje':`Em ${d} dias`;}
+function mapDueState(map) {
+ const due=String(map?.due_date||'');
+ if(!due)return {state:'none',label:'Sem prazo definido'};
+ if(map?.archived)return {state:'completed',label:`Prazo ${dateLabel(due)}`};
+ const reference=today();
+ if(due<reference)return {state:'overdue',label:`Mapa vencido · ${dateLabel(due)}`};
+ if(due===reference)return {state:'today',label:'Vence hoje'};
+ return {state:'future',label:`Vence em ${dateLabel(due)}`};
+}
+function mapDueBadgeHtml(map) {
+ const due=mapDueState(map);
+ return `<span class="map-deadline map-deadline-${due.state}">${esc(due.label)}</span>`;
+}
 function leaveMapDialog(destination) {
  return new Promise(resolve=>{
   const overlay=document.createElement('div');
@@ -75,12 +88,12 @@ window.vyziumBeforeNavigateAway=async context=>{
  return allowed;
 };
 async function navigate(view) {
- const labels={dashboard:'Dashboard',items:'Itens a comprar',maps:'Mapas de compra',history:'Histórico',settings:'Configurações'};
+ const labels={dashboard:'Dashboard',items:'Itens a comprar',maps:'Mapas de compra',suppliers:'Fornecedores',history:'Histórico',settings:'Configurações'};
  if(!(await confirmUnsavedMap(labels[view]||'outra tela')))return;
  dirty=false;stopWhatsAppPanel();currentView=view;
  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
- $('#view-title').textContent=({dashboard:'Dashboard de itens',items:'Itens a comprar',maps:'Mapas de compra',history:'Histórico de cotações',settings:'Configurações',map:'Mapa de compra'})[view];
- if(view==='dashboard'||view==='items')await renderItems();if(view==='maps')await renderMaps();if(view==='history')await renderHistory();if(view==='settings')await renderSettings();
+ $('#view-title').textContent=({dashboard:'Dashboard de itens',items:'Itens a comprar',maps:'Mapas de compra',suppliers:'Fornecedores',history:'Histórico de cotações',settings:'Configurações',map:'Mapa de compra'})[view];
+ if(view==='dashboard'||view==='items')await renderItems();if(view==='maps')await renderMaps();if(view==='suppliers')await renderSuppliers();if(view==='history')await renderHistory();if(view==='settings')await renderSettings();
 }
 document.querySelectorAll('.nav-item').forEach(b=>on(b,'click',()=>navigate(b.dataset.view)));
 on($('#import-button'),'click',async()=>{
@@ -132,8 +145,8 @@ function refreshDiscounts() {
  document.querySelectorAll('.quote-cell').forEach(cell=>{const value=PurchaseModel.negotiation(cell.querySelector('[data-price]').value,cell.querySelector('[data-negotiated]').value);cell.querySelector('.discount-auto').textContent=value.valid?`${value.percent.toLocaleString('pt-BR',{minimumFractionDigits:2,maximumFractionDigits:2})}% de desconto`:value.label;});
 }
 function createMapDialog() {
- modal(`<h2>Novo mapa de compra</h2><p class="muted">${selected.size} itens selecionados. As quantidades e os hotéis serão mantidos.</p><form id="new-map"><label>Nome do mapa<input id="map-name" required maxlength="160" placeholder="Ex.: Manutenção · Setembro"></label><button class="button primary">Criar mapa</button></form>`);
- on($('#new-map'),'submit',async e=>{e.preventDefault();const m=await api('POST','/maps/create',{name:$('#map-name').value,ids:[...selected]});selected.clear();closeModal();await openMap(m.id);});
+ modal(`<h2>Novo mapa de compra</h2><p class="muted">${selected.size} itens selecionados. As quantidades e os hotéis serão mantidos.</p><form id="new-map"><label>Nome do mapa<input id="map-name" required maxlength="160" placeholder="Ex.: Manutenção · Setembro"></label><label>Prazo do mapa <input id="map-due-date-create" type="date"><small class="field-help">Opcional. O prazo pertence ao mapa e não altera o prazo da SCI.</small></label><button class="button primary">Criar mapa</button></form>`);
+ on($('#new-map'),'submit',async e=>{e.preventDefault();const m=await api('POST','/maps/create',{name:$('#map-name').value,due_date:$('#map-due-date-create').value,ids:[...selected]});selected.clear();closeModal();await openMap(m.id);});
 }
 function normalizedSearch(value) {return String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR').trim();}
 function mapMatchesSearch(map,term) {
@@ -143,7 +156,7 @@ function mapMatchesSearch(map,term) {
 function mapCardHtml(m) {
  const scis=(m.scis||[]).slice(0,4),items=(m.items||[]).slice(0,2),moreScis=(m.scis||[]).length-scis.length,moreItems=(m.items||[]).length-items.length;
  const referenceDate=(m.archived?(m.completed_at||m.updated||m.created):m.created)||'';
- return `<article class="map-card map-library-card"><div class="map-card-top"><span class="badge ${m.archived?'action-neutral':'action-normal'}">${m.archived?'Concluído':'Em cotação'}</span><span class="map-card-date">${referenceDate?dateLabel(referenceDate.slice(0,10)):''}</span></div><h3>${esc(m.name)}</h3><p class="map-card-count">${m.count} ${m.count===1?'item':'itens'}</p>${scis.length?`<div class="map-card-reference"><small>SCI</small><span>${scis.map(esc).join(' · ')}${moreScis>0?` · +${moreScis}`:''}</span></div>`:''}${items.length?`<div class="map-card-items">${items.map(item=>`<span>${esc(item)}</span>`).join('')}${moreItems>0?`<small>+ ${moreItems} ${moreItems===1?'item':'itens'}</small>`:''}</div>`:''}<button class="button secondary" data-open-map="${m.id}">Abrir mapa</button></article>`;
+ return `<article class="map-card map-library-card"><div class="map-card-top"><span class="badge ${m.archived?'action-neutral':'action-normal'}">${m.archived?'Concluído':'Em cotação'}</span><span class="map-card-date">${referenceDate?dateLabel(referenceDate.slice(0,10)):''}</span></div><div class="map-card-deadline">${mapDueBadgeHtml(m)}</div><h3>${esc(m.name)}</h3><p class="map-card-count">${m.count} ${m.count===1?'item':'itens'}</p>${scis.length?`<div class="map-card-reference"><small>SCI</small><span>${scis.map(esc).join(' · ')}${moreScis>0?` · +${moreScis}`:''}</span></div>`:''}${items.length?`<div class="map-card-items">${items.map(item=>`<span>${esc(item)}</span>`).join('')}${moreItems>0?`<small>+ ${moreItems} ${moreItems===1?'item':'itens'}</small>`:''}</div>`:''}<button class="button secondary" data-open-map="${m.id}">Abrir mapa</button></article>`;
 }
 function drawMapLibrary(maps) {
  const activeCount=maps.filter(m=>!m.archived).length,completedCount=maps.length-activeCount;
@@ -166,6 +179,7 @@ async function openMap(id) {stopWhatsAppPanel();currentView='map';const d=await 
 function markDirty() {dirty=true;document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');$('#save-note').textContent='Alterações não salvas. Salve para recalcular o resultado.';$('#result-wrap').innerHTML='<div class="notice">Salve os preços e descontos para atualizar os vencedores.</div>';}
 function captureMap() {
  activeMap.name=$('#edit-name').value;
+ activeMap.due_date=$('#map-due-date')?.value||'';
  activeMap.saving_target=$('#saving-target')?.value||activeMap.saving_target||'5';
  activeMap.awards??={};
  document.querySelectorAll('[data-supplier-name]').forEach(el=>{const s=activeMap.suppliers.find(s=>s.id===el.dataset.supplierName);s.name=el.value;s.phone=document.querySelector(`[data-supplier-phone="${s.id}"]`).value;});
@@ -273,7 +287,8 @@ async function awardDialog(itemId) {
  on($('#award-form'),'submit',async e=>{e.preventDefault();const sid=$('#award-supplier').value;activeMap.awards??={};activeMap.choices??={};delete activeMap.choices[itemId];if(!sid)delete activeMap.awards[itemId];else activeMap.awards[itemId]={supplier_id:sid,reason:$('#award-reason').value,note:$('#award-note').value};closeModal();await saveMap();});
 }
 function renderMap(detail) {
- const m=activeMap,r=detail.result;$('#view-title').textContent=m.name;m.awards??={};m.saving_target??='5';
+ const m=activeMap,r=detail.result;$('#view-title').textContent=m.name;m.awards??={};m.saving_target??='5';m.due_date??='';
+ const due=mapDueState(m);
  const defined=Math.max(0,m.items.length-r.unquoted-r.ties),quoted=Math.max(0,m.items.length-r.unquoted);
  const quoteProgress=m.items.length?Math.round((quoted/m.items.length)*100):0;
  $('#content').innerHTML=`${detail.changes.length?`<div class="notice"><strong>Atenção à reimportação:</strong><br>${detail.changes.map(esc).join('<br>')}<br>Preços anteriores foram preservados. O envio fica bloqueado; conclua este mapa e crie outro com os itens atuais.</div>`:''}
@@ -289,6 +304,8 @@ function renderMap(detail) {
          <span>${m.items.length} ${m.items.length===1?'item':'itens'}</span>
          <span>${m.suppliers.length} ${m.suppliers.length===1?'fornecedor':'fornecedores'}</span>
          <span>${defined} ${defined===1?'item definido':'itens definidos'}</span>
+         <label class="map-due-field">Prazo do mapa <input id="map-due-date" type="date" value="${esc(m.due_date)}"></label>
+         <span class="map-deadline map-deadline-${due.state}">${esc(due.label)}</span>
          <label class="saving-target-inline">Meta de saving <span><input id="saving-target" inputmode="decimal" value="${esc(m.saving_target)}" maxlength="6">%</span></label>
        </div>
      </div>
@@ -313,7 +330,7 @@ function renderMap(detail) {
  </section>
  <div id="result-wrap">${resultHtml(r,m)}</div>
  </div>`;
- document.querySelectorAll('#edit-name,#saving-target,[data-supplier-name],[data-supplier-phone],[data-note],[data-type],[data-price],[data-negotiated],[data-delivery]').forEach(el=>on(el,'input',()=>{markDirty();document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');refreshDiscounts();}));
+ document.querySelectorAll('#edit-name,#map-due-date,#saving-target,[data-supplier-name],[data-supplier-phone],[data-note],[data-type],[data-price],[data-negotiated],[data-delivery]').forEach(el=>on(el,'input',()=>{markDirty();document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');refreshDiscounts();}));
  on($('#save-map'),'click',saveMap);
  if($('#add-map-items'))on($('#add-map-items'),'click',addMapItemsDialog);
  on($('#export-map'),'click',async()=>{if(dirty)await saveMap();if(await window.followup.exportMap(m.id))toast('Mapa exportado.');});
@@ -440,13 +457,36 @@ function quoteDialog() {
  on($('#send-quote'),'click',()=>send(false));
  on($('#send-all-quotes'),'click',()=>send(true));controls(false);
 }
+async function renderSuppliers() {
+ const data=await api('GET','/supplier-contacts');
+ const suppliers=Array.isArray(data.suppliers)?data.suppliers:[];
+ $('#content').innerHTML=`<section class="panel supplier-directory"><div class="section-head"><div><span class="section-kicker">CADASTRO COMPARTILHADO</span><h2>Fornecedores</h2><p class="muted">Pesquisa e WhatsApp usam o mesmo cadastro do Acompanhamento. Nenhum fornecedor é duplicado em Compras.</p></div></div><div class="supplier-directory-toolbar"><label class="supplier-directory-search">Pesquisar fornecedor<input id="shared-supplier-search" placeholder="Nome, contato ou telefone" autocomplete="off"></label><label class="supplier-missing-filter"><input id="shared-supplier-missing" type="checkbox"> Somente sem número</label><span id="shared-supplier-count" class="count"></span></div><div class="purchase-table supplier-directory-table"><table><thead><tr><th>Fornecedor</th><th>Contato</th><th>Itens em pedidos</th><th>WhatsApp</th><th>Ação</th></tr></thead><tbody id="shared-supplier-body"></tbody></table></div></section>`;
+ const search=$('#shared-supplier-search'),missing=$('#shared-supplier-missing'),body=$('#shared-supplier-body'),count=$('#shared-supplier-count');
+ const draw=()=>{
+  const query=normalizedSearch(search.value);
+  const rows=suppliers.filter(s=>(!query||normalizedSearch(`${s.name} ${s.contact} ${s.phone}`).includes(query))&&(!missing.checked||!s.phone));
+  count.textContent=`${rows.length} ${rows.length===1?'fornecedor':'fornecedores'}`;
+  body.innerHTML=rows.map(s=>`<tr><td><strong>${esc(s.name)}</strong>${!s.phone?'<span class="supplier-missing-badge">Sem número cadastrado</span>':''}</td><td>${esc(s.contact||'—')}</td><td class="mono">${Number(s.order_items||0).toLocaleString('pt-BR')}</td><td><input class="shared-supplier-phone" data-shared-phone="${esc(s.supplier_key)}" inputmode="tel" value="${esc(s.phone||'')}" placeholder="5585999999999" autocomplete="off"></td><td><button type="button" class="button small primary" data-save-shared-supplier="${esc(s.supplier_key)}">Salvar número</button></td></tr>`).join('')||'<tr><td colspan="5" class="empty-state">Nenhum fornecedor encontrado.</td></tr>';
+  body.querySelectorAll('[data-save-shared-supplier]').forEach(button=>on(button,'click',async()=>{
+   const supplier=suppliers.find(s=>s.supplier_key===button.dataset.saveSharedSupplier);if(!supplier)return;
+   const input=body.querySelector(`[data-shared-phone="${CSS.escape(supplier.supplier_key)}"]`);
+   button.disabled=true;
+   try{
+    const result=await api('POST','/supplier-contacts',{supplier_key:supplier.supplier_key,display_name:supplier.name,contact_name:supplier.contact,phone:input.value,active:true});
+    supplier.phone=result.supplier.phone||'';toast(`WhatsApp de ${supplier.name} salvo no cadastro compartilhado.`);draw();
+   }finally{if(button.isConnected)button.disabled=false;}
+  }));
+ };
+ on(search,'input',draw);on(missing,'change',draw);draw();
+}
+
 async function renderHistory() {
  const rows=await api('GET','/history');const labels={sending:'Em andamento',sent:'Enviada',failed:'Falha antes de concluir',uncertain:'Envio incerto',reviewed_not_received:'Conferida: não recebida'};
  $('#content').innerHTML=`<section class="panel"><h2>Cotações e negociações</h2><p class="muted">“Enviada” indica conclusão da chamada ao WhatsApp, sem comprovar leitura pelo fornecedor.</p>${rows.map(r=>`<article class="history-row"><div class="section-head"><strong>${esc(r.supplier.name)} · ${esc(r.supplier.phone)} <small class="history-kind">${r.kind==='negotiation'?'Negociação':'Cotação'}</small></strong><span class="badge ${r.status==='sent'?'action-normal':'action-attention'}">${labels[r.status]||esc(r.status)}</span></div><small>${esc(r.at.replace('T',' '))}</small>${r.error?`<p>${esc(r.error)}</p>`:''}<details><summary>Ver mensagem</summary><pre>${esc(r.message)}</pre></details>${r.status==='uncertain'?`<p>Confira a conversa no WhatsApp antes de liberar outra tentativa.</p><button class="button secondary" data-review="${r.id}" data-outcome="received">Conferi: foi recebida</button> <button class="button secondary" data-review="${r.id}" data-outcome="not_received">Conferi: não foi recebida</button>`:''}</article>`).join('')||'<div class="empty-state">Nenhuma solicitação enviada.</div>'}</section>`;
  document.querySelectorAll('[data-review]').forEach(el=>on(el,'click',async()=>{if(!confirm('Você conferiu esta mensagem na conversa do fornecedor?'))return;await api('POST','/review',{id:el.dataset.review,outcome:el.dataset.outcome});await renderHistory();}));
 }
 async function renderSettings() {
- $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div id="compras-remote-backup" class="notice" style="margin-top:10px">Backup online: verificando servidor Poco…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar e enviar backup</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.8')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
+ $('#content').innerHTML=whatsappPanel()+`<section class="panel"><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div id="compras-remote-backup" class="notice" style="margin-top:10px">Backup online: verificando servidor Poco…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar e enviar backup</button></div></section><section class="panel"><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.3.9')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section>`;
  startWhatsAppPanel();
  on($('#zoom'),'change',async()=>{ui.zoom=Number($('#zoom').value);await window.followup.setZoom(ui.zoom);await persist();});
  const loadSafety=async()=>{try{const state=await api('GET','/data-safety');const protection=state.encrypted?'🔒 Criptografado com SQLCipher':'Banco legado sem criptografia';$('#compras-data-safety').innerHTML=`<strong>${state.integrity?.ok?'✓ Banco íntegro':'⚠ Verificação requer atenção'}</strong> · ${esc(protection)}<br>Schema ${esc(state.schema_version??'—')}`;}catch(e){$('#compras-data-safety').textContent='Não foi possível verificar a segurança do banco.';}api('GET','/remote-backup/status').then(state=>{$('#compras-remote-backup').textContent=state.authorized?'Backup online: Poco conectado e usuário autorizado. Envio manual ou ao fechar o Vyzium.':`Backup online: acesso ${state.state||'pendente'} no Poco.`;}).catch(e=>{$('#compras-remote-backup').textContent=`Backup online indisponível: ${e.message||e}`;});};
