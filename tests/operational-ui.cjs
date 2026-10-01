@@ -19,15 +19,17 @@ test('operational UI keeps sidebar collapse in renderer only', () => {
   assert.doesNotMatch(functionBody, /localStorage|sessionStorage|ipc|api\(/i);
 });
 
-test('compras exposes active completed maps and shared suppliers', () => {
+test('compras keeps completed maps only inside the maps tabs and shares suppliers', () => {
   const html = read('renderer/compras.html');
   const renderer = read('renderer/compras-app.js');
   const main = read('electron/main.js');
   assert.match(html, /data-view="maps"/);
-  assert.match(html, /data-view="completed"/);
+  assert.doesNotMatch(html, /data-view="completed"/);
   assert.match(html, /data-view="suppliers"/);
   assert.match(html, />Mapas ativos</);
-  assert.match(html, />Concluídos</);
+  assert.match(renderer, /data-map-scope="active"/);
+  assert.match(renderer, /data-map-scope="completed"/);
+  assert.match(renderer, />Concluídos/);
   assert.match(renderer, /renderSuppliers/);
   assert.match(renderer, /POST','\/supplier-contacts'/);
   assert.match(main, /requestEngine\('followup', 'POST', '\/supplier'/);
@@ -48,14 +50,16 @@ test('map deadline is optional and separate from SCI deadline', () => {
   assert.match(backend, /DB_SCHEMA_VERSION = 1/);
 });
 
-test('home uses real overview fields and contains no demo activity feed', () => {
+test('home uses real overview fields and restores the validated Vyzium purpose statement', () => {
   const home = read('renderer/home.js');
   const html = read('renderer/index.html');
   assert.match(home, /followup\.open_orders/);
   assert.match(home, /followup\.ready_messages/);
   assert.match(home, /compras\.total_scis/);
   assert.match(home, /compras\.active_maps/);
-  assert.doesNotMatch(html, /Transforme planilhas|Escolha para onde ir|Fornecedor Atlântico|atividade recente/i);
+  assert.match(html, /Transforme planilhas em uma operação guiada, visual e confiável/);
+  assert.match(html, /reduz ruído operacional, organiza o acompanhamento com fornecedores/);
+  assert.doesNotMatch(html, /Fornecedor Atlântico|HOTEL-023|atividade recente/i);
 });
 
 test('3.4 backup restore stack remains packaged and referenced', () => {
@@ -110,4 +114,22 @@ test('map completion uses Vyzium modal instead of native Windows confirm', () =>
   assert.match(visual, /complete-map-card/);
   assert.match(visual, /complete-map-effects/);
   assert.match(visual, /complete-map-actions/);
+});
+
+
+test('all operational screens use one typography scale and readable status containers', () => {
+  const visual = read('renderer/operational-ui.css');
+  const styles = read('renderer/styles.css');
+  assert.match(visual, /--vyz-font-page: 19px/);
+  assert.match(visual, /--vyz-font-section: 15px/);
+  assert.match(visual, /--vyz-font-body: 10px/);
+  assert.match(visual, /--vyz-font-badge: 9px/);
+  assert.match(visual, /history-row \.section-head strong/);
+  assert.match(visual, /font-size: var\(--vyz-font-body\) !important/);
+  assert.match(visual, /operational-full \.control-bubble/);
+  assert.match(visual, /min-height: 25px/);
+  assert.match(visual, /map-name-field input/);
+  assert.match(visual, /background: var\(--op-navy\) !important/);
+  assert.match(styles, /#check-updates\.button\.secondary/);
+  assert.match(styles, /background: transparent !important/);
 });
