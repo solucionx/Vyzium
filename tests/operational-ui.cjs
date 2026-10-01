@@ -96,3 +96,18 @@ test('3.4.2 visual layer does not introduce WhatsApp code paths', () => {
   assert.match(followup, /whatsappPanel\(\)/);
   assert.match(compras, /whatsappPanel\(\)/);
 });
+
+
+test('map completion uses Vyzium modal instead of native Windows confirm', () => {
+  const renderer = read('renderer/compras-app.js');
+  const visual = read('renderer/operational-ui.css');
+  assert.match(renderer, /function completeMapDialog\(map\)/);
+  assert.match(renderer, /FINALIZAR COTAÇÃO/);
+  assert.match(renderer, /Mapa preservado/);
+  assert.match(renderer, /Itens liberados/);
+  assert.match(renderer, /await completeMapDialog\(m\)/);
+  assert.doesNotMatch(renderer, /confirm\('Concluir este mapa de compra\?/);
+  assert.match(visual, /complete-map-card/);
+  assert.match(visual, /complete-map-effects/);
+  assert.match(visual, /complete-map-actions/);
+});
