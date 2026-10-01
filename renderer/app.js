@@ -720,7 +720,7 @@ function wireDataSafetyPanel() {
 async function renderSettings() {
   const data = await api('GET', '/settings');
   content.innerHTML = `<div class="settings-stack">${whatsappPanel()}${dataSafetyPanelHtml()}<section class="panel narrow settings-panel">
-    <div class="panel-head"><div><h2>Regras do motor</h2><p>Os ajustes passam a valer na próxima análise.</p></div></div>
+    <div class="panel-head"><div><p class="section-kicker">PREFERÊNCIAS</p><h2>Regras do motor</h2><p>Os ajustes passam a valer na próxima análise.</p></div></div>
     <form id="settings-form" class="form-grid">
       <div class="field"><label>Dias para alertar antes do vencimento</label><input name="warning_days" type="number" min="0" max="30" value="${data.warning_days}"></div>
       <div class="field"><label>Atraso crítico depois de quantos dias</label><input name="critical_after_days" type="number" min="1" max="365" value="${data.critical_after_days}"></div>
