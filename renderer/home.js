@@ -9,42 +9,55 @@ function homeToast(message, error = false) {
   homeToast.timer = setTimeout(() => { el.className = 'toast'; }, 4200);
 }
 
-function setModuleStatus(id, html) {
-  const target = document.getElementById(id);
-  if (target) target.innerHTML = html;
-}
-
 function dateTime(value) {
   if (!value) return '';
   try { return new Date(value).toLocaleString('pt-BR'); } catch (_) { return ''; }
 }
 
-function renderHomeOverview(result) {
-  const followup = result?.followup;
-  const compras = result?.compras;
+function setText(id, value) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = value;
+}
 
-  if (followup) {
+function formatCount(value) {
+  const number = Number(value || 0);
+  return Number.isFinite(number) ? number.toLocaleString('pt-BR') : '0';
+}
+
+function renderHomeOverview(result) {
+  const followup = result?.followup || null;
+  const compras = result?.compras || null;
+
+  setText('metric-open-orders', followup ? formatCount(followup.open_orders) : '—');
+  setText('metric-ready-messages', followup ? formatCount(followup.ready_messages) : '—');
+  setText('metric-open-scis', compras ? formatCount(compras.total_scis) : '—');
+  setText('metric-active-maps', compras ? formatCount(compras.active_maps) : '—');
+
+  if (followup?.last_import) {
     const imported = followup.last_import;
-    const baseName = imported?.source_file || imported?.filename || 'nenhuma base importada';
-    const importedAt = imported?.imported_at ? ` · ${dateTime(imported.imported_at)}` : '';
-    setModuleStatus(
-      'followup-status',
-      `<strong>Resumo atual:</strong> ${Number(followup.open_orders || 0).toLocaleString('pt-BR')} pedidos em aberto, ${Number(followup.ready_messages || 0).toLocaleString('pt-BR')} mensagens prontas.<br><strong>Base:</strong> ${baseName}${importedAt}`
-    );
+    const name = imported.source_file || imported.filename || 'Base importada';
+    const at = imported.imported_at ? ` · ${dateTime(imported.imported_at)}` : '';
+    setText('followup-base', name + at);
   } else {
-    setModuleStatus('followup-status', '<strong>Resumo atual:</strong> módulo pronto para uso. Importe a base operacional para começar o acompanhamento.');
+    setText('followup-base', followup ? 'Nenhuma base importada' : 'Resumo indisponível');
+  }
+
+  if (compras?.last_import) {
+    const imported = compras.last_import;
+    const name = imported.filename || 'BASE SCI importada';
+    const at = imported.at ? ` · ${dateTime(imported.at)}` : '';
+    setText('compras-base', name + at);
+  } else {
+    setText('compras-base', compras ? 'Nenhuma BASE SCI importada' : 'Resumo indisponível');
   }
 
   if (compras) {
-    const imported = compras.last_import;
-    const baseName = imported?.filename || 'nenhuma BASE SCI importada';
-    const importedAt = imported?.at ? ` · ${dateTime(imported.at)}` : '';
-    setModuleStatus(
-      'compras-status',
-      `<strong>Resumo atual:</strong> ${Number(compras.total_scis || 0).toLocaleString('pt-BR')} SCIs em aberto, ${Number(compras.active_maps || 0).toLocaleString('pt-BR')} mapas ativos.<br><strong>Base:</strong> ${baseName}${importedAt}`
-    );
-  } else {
-    setModuleStatus('compras-status', '<strong>Resumo atual:</strong> módulo pronto para uso. Importe a BASE SCI para iniciar cotações e mapas.');
+    const overdue = Number(compras.overdue_maps || 0);
+    const today = Number(compras.due_today_maps || 0);
+    const parts = [];
+    if (overdue) parts.push(`${overdue} ${overdue === 1 ? 'vencido' : 'vencidos'}`);
+    if (today) parts.push(`${today} ${today === 1 ? 'vence hoje' : 'vencem hoje'}`);
+    setText('metric-map-alert', parts.length ? parts.join(' · ') : 'Sem alerta de prazo');
   }
 }
 
@@ -53,8 +66,7 @@ async function loadHomeOverview() {
     const result = await window.followup.getOverview();
     renderHomeOverview(result || {});
   } catch (error) {
-    setModuleStatus('followup-status', '<strong>Resumo atual:</strong> não foi possível carregar o resumo do Acompanhamento agora.');
-    setModuleStatus('compras-status', '<strong>Resumo atual:</strong> não foi possível carregar o resumo de Cotação &amp; Mapas agora.');
+    renderHomeOverview({});
     homeToast('Não foi possível carregar os resumos dos módulos.', true);
   }
 }
