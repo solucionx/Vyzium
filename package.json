@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.1",
-  "description": "Vyzium 3.4.1: mantém a base estável 3.4 com restauração/merge seguros e adiciona interface operacional, fornecedores compartilhados e prazo opcional dos mapas.",
+  "version": "3.4.2",
+  "description": "Vyzium 3.4.2: mantém a base estável 3.4.1 e completa a linguagem visual operacional aprovada em Acompanhamento, Compras, Mapas e Configurações.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
