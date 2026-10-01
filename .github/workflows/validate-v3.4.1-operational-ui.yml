@@ -45,7 +45,7 @@ jobs:
             throw "A candidata não deriva exatamente da 3.4.0 estável."
           }
 
-          $changed = @(git diff --name-only "$($env:STABLE_340_SHA)...HEAD")
+          $changed = @(git diff --name-only $env:STABLE_340_SHA HEAD)
           $allowed = @(
             ".github/workflows/validate-v3.4.1-operational-ui.yml",
             "backend/compras_engine.py",
@@ -98,8 +98,8 @@ jobs:
             ".github/workflows/windows-realese.yml"
           )
           foreach ($path in $protected) {
-            git diff --quiet $env:STABLE_340_SHA...HEAD -- $path
-            if ($LASTEXITCODE -ne 0) {
+            $protectedDiff = @(git diff --name-only $env:STABLE_340_SHA HEAD -- $path)
+            if ($protectedDiff.Count -gt 0) {
               throw "Arquivo protegido da 3.4 foi alterado: $path"
             }
           }
