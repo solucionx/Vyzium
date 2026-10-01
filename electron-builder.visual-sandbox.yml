@@ -1,0 +1,31 @@
+appId: com.vyzium.visualsandbox
+productName: Vyzium Visual Sandbox
+artifactName: Vyzium-Visual-Sandbox-Preview.${ext}
+asar: true
+
+directories:
+  output: dist-visual-sandbox
+
+extraMetadata:
+  name: vyzium-visual-sandbox
+  version: 3.3.8-visual.1
+  main: electron/visual-sandbox-main.js
+
+files:
+  - electron/visual-sandbox-main.js
+  - renderer/visual-sandbox.html
+  - renderer/visual-sandbox.css
+  - renderer/visual-sandbox.js
+  - renderer/assets/**/*
+  - build/icon.png
+  - package.json
+
+win:
+  icon: build/icon.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+
+portable:
+  artifactName: Vyzium-Visual-Sandbox-Preview.${ext}
