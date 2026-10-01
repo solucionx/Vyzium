@@ -8,9 +8,9 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('3.4.1 production candidate keeps the stable Vyzium identity and Draft release channel', () => {
+test('3.4.2 production candidate keeps the stable Vyzium identity and Draft release channel', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.version, '3.4.1');
+  assert.equal(pkg.version, '3.4.2');
   assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
   assert.equal(pkg.build?.productName, 'Vyzium');
   assert.equal(pkg.build?.artifactName, "Vyzium-Setup.${ext}");
@@ -53,7 +53,7 @@ test('release version changes preserve the original dependency versions and arch
 });
 
 
-test('3.4 RC keeps one authoritative release version across package, Python and renderer', () => {
+test('3.4 line keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -134,7 +134,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.4.1');
+  assert.equal(pkg.version, '3.4.2');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
@@ -149,7 +149,7 @@ test('3.1 data safety and authentication files are included', () => {
 
 
 
-test('3.4 RC keeps the exact upstream WhatsApp bootstrap validated on a clean account', () => {
+test('3.4 line keeps the exact upstream WhatsApp bootstrap validated on a clean account', () => {
   assert.equal(pkg.dependencies?.['whatsapp-web.js'], '1.34.7');
   assert.equal(pkg.overrides, undefined);
   assert.equal(pkg.scripts?.postinstall, undefined);
@@ -163,7 +163,7 @@ test('3.4 RC keeps the exact upstream WhatsApp bootstrap validated on a clean ac
   assert.match(main, /com\.vyzium\.gestaooperacional/);
 });
 
-test('3.4 RC preserves manual/on-close backup policy while adding safe restore', () => {
+test('3.4 line preserves manual/on-close backup policy while adding safe restore', () => {
   const main = read('electron/main.js');
   const remote = read('electron/remote-backup.js');
   const security = read('electron/security-manager.js');
