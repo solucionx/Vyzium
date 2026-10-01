@@ -1,0 +1,254 @@
+name: Vyzium 3.3.9 Candidate
+
+on:
+  push:
+    branches:
+      - release/3.3.9-operational-ui
+  workflow_dispatch:
+
+concurrency:
+  group: vyzium-3.3.9-candidate
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  candidate:
+    runs-on: windows-latest
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      RELEASE_REPO: "solucionx/Vyzium-Releases"
+      EXPECTED_VERSION: "3.3.9"
+
+    steps:
+      - name: Baixar candidata
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validar escopo fechado
+        shell: pwsh
+        run: |
+          git fetch origin main --no-tags
+          $changed = @(git diff --name-only origin/main...HEAD)
+          $allowed = @(
+            ".github/workflows/windows-candidate-3.3.9.yml",
+            "backend/compras_engine.py",
+            "backend/crypto_migration.py",
+            "backend/engine.py",
+            "backend/test_compras_map_deadline.py",
+            "docs/OPERACIONAL_UI_3.3.9.md",
+            "electron/main.js",
+            "package-lock.json",
+            "package.json",
+            "renderer/acompanhamento.html",
+            "renderer/compras-app.js",
+            "renderer/compras.css",
+            "renderer/compras.html",
+            "renderer/home.css",
+            "renderer/home.js",
+            "renderer/index.html",
+            "renderer/module-switch.js",
+            "renderer/styles.css",
+            "renderer/version.js",
+            "tests/operational-ui.cjs",
+            "tests/project-config.cjs"
+          )
+          $unexpected = @($changed | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -gt 0) {
+            $unexpected | ForEach-Object { Write-Host "Fora do escopo: $_" }
+            throw "A candidata alterou arquivos não autorizados."
+          }
+
+          $protected = @(
+            "electron/whatsapp.js",
+            "electron/whatsapp-hidden-browser.ps1",
+            "electron/auth-manager.js",
+            "electron/security-manager.js",
+            "electron/firebase-client.js",
+            "electron/firebase-config.js",
+            "electron/remote-backup.js",
+            "electron/updates.js",
+            "electron/sentry-client.js",
+            "backend/data_safety.py",
+            "backend/secure_sqlite.py",
+            "firebase/firestore.rules",
+            "firebase/firestore.indexes.json",
+            ".github/workflows/windows-realese.yml"
+          )
+          foreach ($path in $protected) {
+            git diff --quiet origin/main...HEAD -- $path
+            if ($LASTEXITCODE -ne 0) { throw "Arquivo protegido foi alterado: $path" }
+          }
+          Write-Host "Escopo fechado validado."
+          $changed | ForEach-Object { Write-Host " - $_" }
+
+      - name: Verificar repositório seguro
+        shell: pwsh
+        run: ./scripts/verify-repository-safety.ps1
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Validar versão candidata
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          if ($version -ne $env:EXPECTED_VERSION) { throw "Versão inesperada: $version" }
+          $lock = Get-Content package-lock.json | ConvertFrom-Json
+          if ($lock.version -ne $version -or $lock.packages.''.version -ne $version) {
+            throw "package-lock.json não está alinhado."
+          }
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_TAG=v$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VYZIUM_APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Instalar dependências Node
+        run: npm ci
+
+      - name: Verificar sintaxe alterada
+        shell: pwsh
+        run: |
+          node --check renderer/compras-app.js
+          if ($LASTEXITCODE -ne 0) { throw "Falha de sintaxe em compras-app.js" }
+          node --check renderer/home.js
+          if ($LASTEXITCODE -ne 0) { throw "Falha de sintaxe em home.js" }
+          node --check renderer/module-switch.js
+          if ($LASTEXITCODE -ne 0) { throw "Falha de sintaxe em module-switch.js" }
+          node --check electron/main.js
+          if ($LASTEXITCODE -ne 0) { throw "Falha de sintaxe em electron/main.js" }
+
+      - name: Verificar correção do whatsapp-web.js
+        run: npm run verify:whatsapp-patch
+
+      - name: Instalar dependências Python
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Verificar sintaxe Python
+        run: python -m compileall -q backend
+
+      - name: Executar bateria completa de testes
+        run: npm test
+
+      - name: Compilar motor de Acompanhamento
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name followup-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-followup
+          backend/engine.py
+
+      - name: Compilar motor de Cotação e Mapas
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name compras-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --hidden-import xlrd
+          --hidden-import xlwt
+          --distpath dist-engine
+          --workpath build/pyinstaller-compras
+          backend/compras_engine.py
+
+      - name: Verificar motores antes do empacotamento
+        shell: pwsh
+        run: ./scripts/verify-engines.ps1
+
+      - name: Gerar instalador Windows
+        run: npm run build
+
+      - name: Verificar motores no pacote Windows
+        shell: pwsh
+        run: ./scripts/verify-packaged-engines.ps1
+
+      - name: Calcular SHA-256
+        shell: pwsh
+        run: |
+          if (-not (Test-Path "dist/Vyzium-Setup.exe")) { throw "Instalador não encontrado." }
+          $hash = (Get-FileHash "dist/Vyzium-Setup.exe" -Algorithm SHA256).Hash
+          "$hash  Vyzium-Setup.exe" | Out-File -FilePath dist/SHA256.txt -Encoding ascii
+          Write-Host "SHA256: $hash"
+
+      - name: Guardar candidata no Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-Windows-3.3.9-Candidate
+          path: |
+            dist/Vyzium-Setup.exe
+            dist/Vyzium-Setup.exe.blockmap
+            dist/latest.yml
+            dist/SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Validar acesso ao repositório de Releases
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) { throw "Secret VYZIUM_RELEASE_TOKEN não configurado." }
+          if ($env:RELEASE_REPO -ne "solucionx/Vyzium-Releases") { throw "Destino de Release inesperado." }
+          gh repo view $env:RELEASE_REPO --json nameWithOwner,visibility | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Não foi possível acessar o repositório de Releases." }
+
+      - name: Criar ou atualizar Draft v3.3.9
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          $tag = $env:RELEASE_TAG
+          $releaseRepo = $env:RELEASE_REPO
+          $notes = @(
+            "Candidata Vyzium 3.3.9 — aguardando aprovação manual.",
+            "",
+            "Principais alterações:",
+            "- nova Home operacional usando somente dados reais;",
+            "- sidebar azul mais clara e recolhível;",
+            "- Itens a comprar, Mapas ativos, Concluídos e Fornecedores com acesso direto em Compras;",
+            "- fornecedores de Compras reutilizam o mesmo cadastro do Acompanhamento;",
+            "- prazo opcional por mapa com alertas Vence hoje / Mapa vencido;",
+            "- mapas antigos permanecem compatíveis, sem migração de schema SQL.",
+            "",
+            "Escopo preservado:",
+            "WhatsApp, Firebase, autenticação, SQLCipher, backup, atualizador e regras existentes de importação/cotação não foram refatorados.",
+            "",
+            "Esta Release é DRAFT. Publicação somente após aprovação manual."
+          )
+          $notes | Set-Content -Path release-notes.txt -Encoding utf8
+
+          gh release view $tag --repo $releaseRepo *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $releaseRepo --target main --draft --title "Vyzium $tag — Candidata" --notes-file release-notes.txt
+            if ($LASTEXITCODE -ne 0) { throw "Falha ao criar Draft $tag." }
+          } else {
+            $release = gh release view $tag --repo $releaseRepo --json isDraft | ConvertFrom-Json
+            if (-not $release.isDraft) { throw "A Release $tag já está publicada e não será sobrescrita." }
+          }
+
+          gh release upload $tag dist/Vyzium-Setup.exe dist/Vyzium-Setup.exe.blockmap dist/latest.yml dist/SHA256.txt --repo $releaseRepo --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao anexar arquivos à Draft." }
+
+          $draft = gh release view $tag --repo $releaseRepo --json isDraft,tagName,url | ConvertFrom-Json
+          if (-not $draft.isDraft) { throw "Falha de segurança: Release não está em Draft." }
+          Write-Host "Draft confirmada: $($draft.url)"
+          Write-Host "Publicação pendente de aprovação manual."
