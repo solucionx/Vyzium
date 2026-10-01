@@ -88,12 +88,14 @@ window.vyziumBeforeNavigateAway=async context=>{
  return allowed;
 };
 async function navigate(view) {
- const labels={dashboard:'Dashboard',items:'Itens a comprar',maps:'Mapas de compra',suppliers:'Fornecedores',history:'Histórico',settings:'Configurações'};
+ const labels={dashboard:'Dashboard',items:'Itens a comprar',maps:'Mapas ativos',completed:'Concluídos',suppliers:'Fornecedores',history:'Histórico',settings:'Configurações'};
  if(!(await confirmUnsavedMap(labels[view]||'outra tela')))return;
  dirty=false;stopWhatsAppPanel();currentView=view;
+ if(view==='maps')mapListScope='active';
+ if(view==='completed')mapListScope='completed';
  document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
- $('#view-title').textContent=({dashboard:'Dashboard de itens',items:'Itens a comprar',maps:'Mapas de compra',suppliers:'Fornecedores',history:'Histórico de cotações',settings:'Configurações',map:'Mapa de compra'})[view];
- if(view==='dashboard'||view==='items')await renderItems();if(view==='maps')await renderMaps();if(view==='suppliers')await renderSuppliers();if(view==='history')await renderHistory();if(view==='settings')await renderSettings();
+ $('#view-title').textContent=({dashboard:'Dashboard de itens',items:'Itens a comprar',maps:'Mapas ativos',completed:'Mapas concluídos',suppliers:'Fornecedores',history:'Histórico de cotações',settings:'Configurações',map:'Mapa de compra'})[view];
+ if(view==='dashboard'||view==='items')await renderItems();if(view==='maps'||view==='completed')await renderMaps();if(view==='suppliers')await renderSuppliers();if(view==='history')await renderHistory();if(view==='settings')await renderSettings();
 }
 document.querySelectorAll('.nav-item').forEach(b=>on(b,'click',()=>navigate(b.dataset.view)));
 on($('#import-button'),'click',async()=>{
@@ -175,7 +177,7 @@ async function renderMaps() {
  on($('#new-from-items'),'click',()=>navigate('items'));
  drawMapLibrary(maps);
 }
-async function openMap(id) {stopWhatsAppPanel();currentView='map';const d=await api('GET','/map?id='+encodeURIComponent(id));activeMap=d.map;dirty=false;$('#view-title').textContent=activeMap.name;document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view==='maps'));renderMap(d);}
+async function openMap(id) {stopWhatsAppPanel();currentView='map';const d=await api('GET','/map?id='+encodeURIComponent(id));activeMap=d.map;dirty=false;$('#view-title').textContent=activeMap.name;document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===(activeMap.archived?'completed':'maps')));renderMap(d);}
 function markDirty() {dirty=true;document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');$('#save-note').textContent='Alterações não salvas. Salve para recalcular o resultado.';$('#result-wrap').innerHTML='<div class="notice">Salve os preços e descontos para atualizar os vencedores.</div>';}
 function captureMap() {
  activeMap.name=$('#edit-name').value;
