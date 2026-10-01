@@ -11,6 +11,43 @@ function moduleSwitchError(message) {
   }
 }
 
+function initializeOperationalSidebar() {
+  const sidebar = document.querySelector('.sidebar');
+  const navigation = document.getElementById('navigation');
+  if (!sidebar || !navigation || sidebar.querySelector('.sidebar-toggle')) return;
+
+  const collapsedByDefault = !document.body.classList.contains('home-view');
+  document.body.classList.toggle('sidebar-collapsed', collapsedByDefault);
+
+  const toggle = document.createElement('button');
+  toggle.type = 'button';
+  toggle.className = 'sidebar-toggle';
+  toggle.setAttribute('aria-expanded', String(!collapsedByDefault));
+  toggle.innerHTML = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5 8 12l7 7"/><path d="M20 4v16"/></svg><span>Recolher menu</span>';
+  navigation.before(toggle);
+
+  const sync = () => {
+    const collapsed = document.body.classList.contains('sidebar-collapsed');
+    toggle.setAttribute('aria-expanded', String(!collapsed));
+    toggle.title = collapsed ? 'Expandir menu' : 'Recolher menu';
+    const label = toggle.querySelector('span');
+    if (label) label.textContent = collapsed ? 'Expandir menu' : 'Recolher menu';
+  };
+
+  for (const button of sidebar.querySelectorAll('.nav-item, #logout-account, #check-updates')) {
+    const label = button.querySelector('span')?.textContent?.trim();
+    if (label) button.title = label;
+  }
+
+  toggle.addEventListener('click', () => {
+    document.body.classList.toggle('sidebar-collapsed');
+    sync();
+  });
+  sync();
+}
+
+initializeOperationalSidebar();
+
 let moduleNavigationBusy = false;
 
 function setModuleNavigationDisabled(disabled) {
