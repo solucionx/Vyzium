@@ -28,7 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.0')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.1')
 DB_SCHEMA_VERSION = 1
 
 def norm(value):
@@ -113,6 +113,34 @@ def iso(value):
         except ValueError:
             pass
     return ''
+
+
+def normalize_map_due_date(value):
+    """Validate the optional map deadline without touching SCI approval deadlines."""
+    raw = text(value)
+    if not raw:
+        return ''
+    if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', raw):
+        raise ValueError('Prazo do mapa inválido. Informe uma data válida.')
+    try:
+        return date.fromisoformat(raw).isoformat()
+    except ValueError as exc:
+        raise ValueError('Prazo do mapa inválido. Informe uma data válida.') from exc
+
+
+def map_due_status(data, today_value=None):
+    """Return a visual deadline state; concluded maps never become overdue."""
+    due = normalize_map_due_date(data.get('due_date'))
+    if not due:
+        return 'none'
+    if data.get('archived'):
+        return 'completed'
+    reference = today_value or date.today().isoformat()
+    if due < reference:
+        return 'overdue'
+    if due == reference:
+        return 'today'
+    return 'future'
 
 
 def now():
@@ -498,6 +526,8 @@ class Store:
         today_value = date.today().isoformat()
         active_maps = [m for m in self.all('maps') if not m.get('archived')]
         scis = {(text(i.get('company')), text(i.get('sci'))) for i in items if text(i.get('sci'))}
+        overdue_maps = sum(map_due_status(m, today_value) == 'overdue' for m in active_maps)
+        due_today_maps = sum(map_due_status(m, today_value) == 'today' for m in active_maps)
         overdue = 0
         for item in items:
             needed = text(item.get('needed'))
@@ -509,6 +539,8 @@ class Store:
             'overdue_items': overdue,
             'mapped_items': sum(1 for i in items if i.get('maps')),
             'active_maps': len(active_maps),
+            'overdue_maps': overdue_maps,
+            'due_today_maps': due_today_maps,
             'last_import': catalog.get('import'),
         }
 
@@ -524,6 +556,7 @@ class Store:
             if any(catalog[i]['maps'] for i in ids):
                 raise ValueError('Há item em outro mapa ativo. Conclua o mapa anterior antes de reutilizá-lo.')
             data = {'id': uuid.uuid4().hex, 'name': name, 'created': now(), 'revision': 1,
+                    'due_date': normalize_map_due_date(body.get('due_date')),
                     'items': [{**catalog[i], 'note': catalog[i].get('note', ''), 'purchase_type': catalog[i].get('purchase_type', '')} for i in ids],
                     'suppliers': [], 'quotes': {}, 'choices': {}, 'awards': {}, 'saving_target': '5', 'archived': False}
             self.put('maps', data['id'], data)
@@ -540,6 +573,8 @@ class Store:
                 'created': data.get('created', ''),
                 'updated': data.get('updated', ''),
                 'completed_at': data.get('completed_at', ''),
+                'due_date': data.get('due_date', ''),
+                'due_status': map_due_status(data),
                 'count': len(items),
                 # Keep the historical `archived` flag for backwards compatibility; in the UI it means concluded.
                 'archived': bool(data.get('archived')),
@@ -621,6 +656,9 @@ class Store:
             data['name'] = text(body.get('name', data['name']))[:160]
             if not data['name']:
                 raise ValueError('Nome do mapa obrigatório.')
+            # Optional and additive: old maps without this key remain valid.
+            if 'due_date' in body:
+                data['due_date'] = normalize_map_due_date(body.get('due_date'))
 
             target = number(body.get('saving_target', data.get('saving_target', '5')) or '5')
             if target > Decimal('99.99'):
