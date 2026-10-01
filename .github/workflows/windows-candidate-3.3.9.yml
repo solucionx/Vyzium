@@ -54,7 +54,8 @@ jobs:
             "renderer/styles.css",
             "renderer/version.js",
             "tests/operational-ui.cjs",
-            "tests/project-config.cjs"
+            "tests/project-config.cjs",
+            "tests/supplier-contacts.cjs"
           )
           $unexpected = @($changed | Where-Object { $_ -notin $allowed })
           if ($unexpected.Count -gt 0) {
