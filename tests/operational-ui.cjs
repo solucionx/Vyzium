@@ -67,3 +67,32 @@ test('3.4 backup restore stack remains packaged and referenced', () => {
   assert.match(main, /BackupRestoreCoordinator/);
   assert.match(main, /backup-sync-engine\.exe/);
 });
+
+
+test('approved desktop visual language is applied to followup and compras without replacing their logic', () => {
+  const visual = read('renderer/operational-ui.css');
+  const followup = read('renderer/acompanhamento.html');
+  const compras = read('renderer/compras.html');
+  assert.match(followup, /class="module-followup"/);
+  assert.match(compras, /class="module-compras"/);
+  assert.match(followup, /href="operational-ui\.css"/);
+  assert.match(compras, /href="operational-ui\.css"/);
+  assert.match(visual, /operational-workspace/);
+  assert.match(visual, /operational-full/);
+  assert.match(visual, /cards\.operational-cards/);
+  assert.match(visual, /items-catalog-panel/);
+  assert.match(visual, /map-library-toolbar/);
+  assert.match(visual, /map-workspace/);
+  assert.match(visual, /supplier-directory/);
+  assert.match(visual, /settings-stack/);
+  assert.doesNotMatch(visual, /url\(https?:/i);
+});
+
+test('3.4.2 visual layer does not introduce WhatsApp code paths', () => {
+  const visual = read('renderer/operational-ui.css');
+  const followup = read('renderer/app.js');
+  const compras = read('renderer/compras-app.js');
+  assert.doesNotMatch(visual, /session-vyzium|LocalAuth|browserWSEndpoint|whatsapp-web\.js/i);
+  assert.match(followup, /whatsappPanel\(\)/);
+  assert.match(compras, /whatsappPanel\(\)/);
+});
