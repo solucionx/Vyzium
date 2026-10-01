@@ -1062,3 +1062,135 @@ body.module-compras .map-library-card > .button {
       "items items items";
   }
 }
+
+
+/* Confirmação de conclusão do mapa: substitui o confirm() nativo do Windows. */
+body.module-compras .complete-map-modal {
+  background: rgba(7, 29, 44, .46);
+  backdrop-filter: blur(2px);
+}
+
+body.module-compras .complete-map-card {
+  width: min(540px, calc(100vw - 34px));
+  max-width: 540px;
+  padding: 24px;
+  text-align: left;
+}
+
+body.module-compras .complete-map-icon {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  margin-bottom: 13px;
+  border-radius: 9px;
+  background: #eaf4f7;
+  color: #1d6582;
+  border: 1px solid #d3e5ec;
+}
+
+body.module-compras .complete-map-icon svg {
+  width: 23px;
+  height: 23px;
+}
+
+body.module-compras .complete-map-kicker {
+  display: block;
+  margin-bottom: 5px;
+  color: #2f758e;
+  font-size: 8px;
+  font-weight: 850;
+  letter-spacing: 1.15px;
+}
+
+body.module-compras .complete-map-card h2 {
+  margin: 0;
+  font-size: 18px;
+}
+
+body.module-compras .complete-map-name {
+  margin: 7px 0 0;
+  color: #405561;
+  font-size: 11px;
+  font-weight: 750;
+}
+
+body.module-compras .complete-map-copy {
+  margin: 15px 0 13px;
+  color: #687983;
+  font-size: 10px;
+  line-height: 1.55;
+}
+
+body.module-compras .complete-map-effects {
+  overflow: hidden;
+  border: 1px solid var(--op-line);
+  border-radius: 7px;
+  background: #fafbfb;
+}
+
+body.module-compras .complete-map-effects > div {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: 9px;
+  align-items: start;
+  padding: 10px 11px;
+  border-bottom: 1px solid #e8edef;
+}
+
+body.module-compras .complete-map-effects > div:last-child {
+  border-bottom: 0;
+}
+
+body.module-compras .complete-map-effect-mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 5px;
+  background: #edf3f6;
+  color: #527387;
+  font-size: 7px;
+  font-weight: 850;
+}
+
+body.module-compras .complete-map-effects p {
+  margin: 0;
+}
+
+body.module-compras .complete-map-effects strong {
+  display: block;
+  margin-bottom: 2px;
+  color: #344a56;
+  font-size: 9px;
+}
+
+body.module-compras .complete-map-effects small {
+  display: block;
+  color: #82909a;
+  font-size: 8px;
+  line-height: 1.45;
+}
+
+body.module-compras .complete-map-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+  margin-top: 17px;
+}
+
+body.module-compras .complete-map-actions .button {
+  min-width: 104px;
+}
+
+@media (max-width: 560px) {
+  body.module-compras .complete-map-card {
+    padding: 19px;
+  }
+  body.module-compras .complete-map-actions {
+    flex-direction: column-reverse;
+  }
+  body.module-compras .complete-map-actions .button {
+    width: 100%;
+  }
+}
