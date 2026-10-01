@@ -58,8 +58,10 @@ jobs:
             "renderer/app.js",
             "renderer/compras-app.js",
             "renderer/compras.html",
+            "renderer/home.css",
             "renderer/index.html",
             "renderer/operational-ui.css",
+            "renderer/styles.css",
             "renderer/version.js",
             "tests/operational-ui.cjs",
             "tests/project-config.cjs"
