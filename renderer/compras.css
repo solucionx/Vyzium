@@ -328,3 +328,133 @@ input:focus,select:focus,textarea:focus {outline:2px solid #00bfa55c;outline-off
 @media(max-width:560px){.negotiation-summary{grid-template-columns:1fr;}.negotiation-preview-head,.negotiation-target-list>div{align-items:flex-start;flex-direction:column;}.negotiation-target-list span{white-space:normal;}}
 
 .supplier-search-results{display:grid;gap:6px;max-height:220px;overflow:auto;margin-bottom:16px}.supplier-search-results button{text-align:left;display:flex;flex-direction:column;align-items:flex-start;gap:3px}.supplier-search-results span{font-size:12px}
+
+
+/* Vyzium 3.4.1 — prazo opcional do mapa, independente do prazo da SCI. */
+.field-help {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 500;
+}
+.map-due-field {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 6px !important;
+  padding: 4px 7px !important;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: #657680 !important;
+  font-size: 9px !important;
+  font-weight: 800 !important;
+}
+.map-due-field input {
+  width: 126px;
+  min-height: 25px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  font-size: 9px;
+  font-weight: 750;
+}
+.map-deadline {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 4px 7px;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+  background: #f4f7f8;
+  color: #60717c;
+  font-size: 9px;
+  font-weight: 800;
+}
+.map-deadline-overdue {
+  color: #a13a46;
+  background: #fdecef;
+  border-color: #f1c8ce;
+}
+.map-deadline-today {
+  color: #8b611f;
+  background: #fff4df;
+  border-color: #ecd9af;
+}
+.map-deadline-future {
+  color: #2f6d83;
+  background: #eaf4f7;
+  border-color: #cfe2e8;
+}
+.map-deadline-completed,
+.map-deadline-none {
+  color: #677781;
+  background: #f1f4f5;
+}
+.map-card-deadline { margin-top: 9px; }
+
+/* Diretório compartilhado de fornecedores — usa a fonte do Acompanhamento. */
+.supplier-directory { padding: 16px 18px; }
+.supplier-directory-toolbar {
+  display: flex;
+  align-items: end;
+  gap: 12px;
+  margin: 14px 0 12px;
+}
+.supplier-directory-search {
+  flex: 1;
+  min-width: 260px;
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: .45px;
+}
+.supplier-directory-search input {
+  height: 36px;
+  border-radius: 7px;
+}
+.supplier-missing-filter {
+  min-height: 36px;
+  display: inline-flex !important;
+  align-items: center;
+  gap: 7px !important;
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+  color: #60717c !important;
+  font-size: 9px !important;
+  font-weight: 750 !important;
+  white-space: nowrap;
+}
+.supplier-missing-filter input {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  padding: 0;
+}
+.supplier-directory-table table { min-width: 820px; }
+.shared-supplier-phone {
+  min-width: 170px;
+  height: 31px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+}
+.supplier-missing-badge {
+  display: inline-flex;
+  margin-left: 7px;
+  padding: 3px 5px;
+  border-radius: 4px;
+  color: #9a6221;
+  background: #fff1db;
+  font-size: 7px;
+  font-weight: 850;
+  vertical-align: middle;
+}
+@media(max-width:780px) {
+  .supplier-directory-toolbar { align-items: stretch; flex-direction: column; }
+  .supplier-missing-filter { align-self: flex-start; }
+}
