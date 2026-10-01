@@ -23,6 +23,9 @@ test('compras exposes shared suppliers without creating a second supplier store'
   const renderer = read('renderer/compras-app.js');
   const main = read('electron/main.js');
   assert.match(html, /data-view="suppliers"/);
+  assert.match(html, /data-view="completed"/);
+  assert.match(html, />Mapas ativos</);
+  assert.match(html, />Concluídos</);
   assert.match(renderer, /renderSuppliers/);
   assert.match(renderer, /POST','\/supplier-contacts'/);
   assert.match(main, /route === '\/supplier-contacts'/);
