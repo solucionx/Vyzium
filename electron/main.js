@@ -506,12 +506,28 @@ async function apiRequest(method, route, body) {
     throw new Error('Operação de backup remoto não permitida.');
   }
   if (route === '/supplier-contacts') {
-    if (method !== 'GET' || activeModule !== 'compras' || !workspaceServicesStarted) {
+    if (activeModule !== 'compras' || !workspaceServicesStarted) {
       throw new Error('Consulta de fornecedores indisponível. Abra Cotação & Mapas na sua conta.');
     }
+    if (method === 'POST') {
+      const saved = await requestEngine('followup', 'POST', '/supplier', body || {});
+      return {supplier:{
+        supplier_key:String(saved.supplier_key || ''),
+        name:String(saved.display_name || ''),
+        phone:String(saved.phone || ''),
+        contact:String(saved.contact_name || ''),
+        active:saved.active !== 0 && saved.active !== false
+      }};
+    }
+    if (method !== 'GET') throw new Error('Operação de fornecedor não permitida.');
     const data = await requestEngine('followup', 'GET', '/suppliers');
     return {suppliers:(data.suppliers || []).filter(s => s.active !== 0 && s.active !== false).map(s => ({
-      name:String(s.display_name || ''), phone:String(s.phone || ''), contact:String(s.contact_name || '')
+      supplier_key:String(s.supplier_key || ''),
+      name:String(s.display_name || ''),
+      phone:String(s.phone || ''),
+      contact:String(s.contact_name || ''),
+      order_items:Number(s.order_items || 0),
+      active:true
     }))};
   }
   if (String(route || '').startsWith('/whatsapp/')) {
