@@ -30,10 +30,23 @@ test('selection without phone clears previous number, typing a name never auto-s
 test('late lookup cannot overwrite manual fields and changed map cannot receive supplier',async()=>{
  let resolve;const s=setup(()=>new Promise(r=>resolve=r));s.node('#supplier-add-name').value='Manual';resolve({suppliers:[]});await s.settle();assert.equal(s.node('#supplier-add-name').value,'Manual');s.c.activeMap={suppliers:[]};s.fire('#supplier-add-form','submit');assert.equal(s.map.suppliers.length,0);
 });
-test('contact endpoint reads followup only, projects contact data and rejects unauthenticated or write calls',async()=>{
+test('contact endpoint reads and writes only through the shared followup supplier source',async()=>{
  const main=fs.readFileSync(path.join(__dirname,'../electron/main.js'),'utf8');const part=main.slice(main.indexOf('async function apiRequest('),main.indexOf("  if (String(route || '').startsWith('/whatsapp/'))"));
- const calls=[];const c={activeModule:'compras',workspaceServicesStarted:true,requestEngine:async(...a)=>{calls.push(a);return {suppliers:[{active:1,display_name:'A',phone:'123',contact_name:'B',secret:'omit'},{active:0,display_name:'Inactive'}]};}};
+ const calls=[];const c={activeModule:'compras',workspaceServicesStarted:true,requestEngine:async(...a)=>{
+  calls.push(a);
+  if(a[1]==='POST')return {supplier_key:'key-a',display_name:'A',phone:'5585999999999',contact_name:'B',active:1};
+  return {suppliers:[{supplier_key:'key-a',active:1,display_name:'A',phone:'123',contact_name:'B',order_items:7,secret:'omit'},{active:0,display_name:'Inactive'}]};
+ }};
  vm.createContext(c);vm.runInContext(part+'throw new Error("Unsupported");}',c);
- const result=await c.apiRequest('GET','/supplier-contacts');assert.equal(result.suppliers.length,1);assert.equal(result.suppliers[0].secret,undefined);assert.deepEqual(calls,[['followup','GET','/suppliers']]);
- await assert.rejects(c.apiRequest('POST','/supplier-contacts'));c.workspaceServicesStarted=false;await assert.rejects(c.apiRequest('GET','/supplier-contacts'));
+ const result=await c.apiRequest('GET','/supplier-contacts');
+ assert.equal(result.suppliers.length,1);assert.equal(result.suppliers[0].supplier_key,'key-a');assert.equal(result.suppliers[0].order_items,7);assert.equal(result.suppliers[0].secret,undefined);
+ assert.deepEqual(calls,[['followup','GET','/suppliers']]);
+ const body={supplier_key:'key-a',display_name:'A',phone:'5585999999999',contact_name:'B',active:true};
+ const saved=await c.apiRequest('POST','/supplier-contacts',body);
+ assert.equal(saved.supplier.supplier_key,'key-a');assert.equal(saved.supplier.phone,'5585999999999');
+ assert.deepEqual(calls[1],['followup','POST','/supplier',body]);
+ await assert.rejects(c.apiRequest('PUT','/supplier-contacts',body));
+ c.workspaceServicesStarted=false;
+ await assert.rejects(c.apiRequest('GET','/supplier-contacts'));
+ await assert.rejects(c.apiRequest('POST','/supplier-contacts',body));
 });
