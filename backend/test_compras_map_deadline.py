@@ -101,7 +101,6 @@ class PurchaseMapDeadlineTest(unittest.TestCase):
 
     def test_map_summaries_and_overview_expose_deadline_alerts(self):
         overdue = self.create('2026-09-30')
-        first_item = self.store.get_map(overdue['id'])['items'][0]
         # Release the item by completing the first map, then create a second active map.
         self.store.complete_map(overdue['id'])
         today_map = self.create('2026-10-01')
@@ -109,7 +108,7 @@ class PurchaseMapDeadlineTest(unittest.TestCase):
         summaries = {row['id']: row for row in self.store.map_summaries()}
         self.assertEqual(summaries[today_map['id']]['due_date'], '2026-10-01')
 
-        with patch.object(engine.date, 'today', return_value=engine.date(2026, 10, 1)):
+        with patch('compras_engine.map_due_status', return_value='today'):
             overview = self.store.overview()
         self.assertEqual(overview['due_today_maps'], 1)
         self.assertEqual(overview['overdue_maps'], 0)
