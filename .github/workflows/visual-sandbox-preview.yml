@@ -1,0 +1,86 @@
+name: Vyzium Visual Sandbox Preview
+
+on:
+  push:
+    branches:
+      - preview/visual-sandbox-v1
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-preview:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout da branch de preview
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Validar isolamento do preview
+        shell: pwsh
+        run: |
+          $main = Get-Content electron/visual-sandbox-main.js -Raw
+          $config = Get-Content electron-builder.visual-sandbox.yml -Raw
+
+          $forbiddenMain = @(
+            "require('./main')",
+            "firebase",
+            "whatsapp",
+            "remote-backup",
+            "security-manager",
+            "backend"
+          )
+
+          foreach ($term in $forbiddenMain) {
+            if ($main.ToLower().Contains($term.ToLower())) {
+              throw "Preview contém referência proibida: $term"
+            }
+          }
+
+          $required = @(
+            "com.vyzium.visualsandbox",
+            "Vyzium-Visual-Sandbox",
+            "target: portable",
+            "electron/visual-sandbox-main.js"
+          )
+
+          foreach ($term in $required) {
+            if (-not ($config + $main).Contains($term)) {
+              throw "Garantia de isolamento ausente: $term"
+            }
+          }
+
+          if ($config -match "dist-engine|backend/|electron/main.js|electron/whatsapp.js|electron/remote-backup.js") {
+            throw "Configuração do pacote inclui código operacional."
+          }
+
+      - name: Gerar executável portátil
+        run: npx electron-builder --config electron-builder.visual-sandbox.yml --win portable --x64 --publish never
+
+      - name: Calcular SHA-256
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist-visual-sandbox -Filter "Vyzium-Visual-Sandbox-Preview.exe" | Select-Object -First 1
+          if (-not $exe) { throw "Executável do sandbox não foi gerado." }
+          $hash = (Get-FileHash $exe.FullName -Algorithm SHA256).Hash
+          "$hash  $($exe.Name)" | Out-File -FilePath dist-visual-sandbox/SHA256.txt -Encoding ascii
+          Write-Host "SHA256: $hash"
+
+      - name: Guardar preview como artefato
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-Visual-Sandbox-Preview
+          path: |
+            dist-visual-sandbox/Vyzium-Visual-Sandbox-Preview.exe
+            dist-visual-sandbox/SHA256.txt
+          if-no-files-found: error
+          retention-days: 14
