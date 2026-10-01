@@ -485,8 +485,8 @@ modal.addEventListener('click', event => { if (event.target === modal) modal.cla
 
 async function renderSuppliers() {
   const data = await api('GET', '/suppliers');
-  content.innerHTML = `<section class="panel">
-    <div class="panel-head"><div><h2>Cadastro de fornecedores</h2><p>Os nomes vêm da planilha. Informe o WhatsApp com DDD.</p></div><span class="badge">${data.suppliers.length} fornecedores</span></div>
+  content.innerHTML = `<section class="panel followup-supplier-directory">
+    <div class="panel-head"><div><p class="section-kicker">CADASTRO COMPARTILHADO</p><h2>Fornecedores</h2><p>Pesquise, consulte e mantenha o WhatsApp usado no Acompanhamento e em Cotação & Mapas.</p></div><span class="badge">${data.suppliers.length} fornecedores</span></div>
     <div class="toolbar"><input id="supplier-search" class="search" placeholder="Buscar fornecedor"><select id="phone-filter"><option value="all">Todos</option><option value="missing">Sem telefone</option><option value="ready">Com telefone</option></select></div>
     <div class="table-wrap"><table><thead><tr><th>Fornecedor</th><th>Contato</th><th>WhatsApp</th><th>Itens</th><th>Ação</th></tr></thead><tbody id="supplier-body"></tbody></table></div>
   </section>`;
@@ -719,7 +719,7 @@ function wireDataSafetyPanel() {
 
 async function renderSettings() {
   const data = await api('GET', '/settings');
-  content.innerHTML = `${whatsappPanel()}${dataSafetyPanelHtml()}<section class="panel narrow">
+  content.innerHTML = `<div class="settings-stack">${whatsappPanel()}${dataSafetyPanelHtml()}<section class="panel narrow settings-panel">
     <div class="panel-head"><div><h2>Regras do motor</h2><p>Os ajustes passam a valer na próxima análise.</p></div></div>
     <form id="settings-form" class="form-grid">
       <div class="field"><label>Dias para alertar antes do vencimento</label><input name="warning_days" type="number" min="0" max="30" value="${data.warning_days}"></div>
@@ -734,7 +734,7 @@ async function renderSettings() {
       <div class="field full"><div class="callout">O envio diário exige modo simulação desligado, aplicativo aberto, computador ligado e com internet, e WhatsApp conectado. Antes do disparo, o motor relê a última planilha importada. Não funciona com o computador suspenso.</div></div>
       <div class="field full"><button class="button primary" type="submit">Salvar configurações</button></div>
     </form>
-  </section><section class="panel"><div class="panel-head"><div><h2>Recomendações de controle</h2><p>Edite o nome, a cor e a regra da próxima ação. Remover oculta a sugestão, sem apagar marcações anteriores.</p></div><button type="button" class="button secondary" id="add-preset">Adicionar recomendação</button></div><div id="preset-editor"></div><button type="button" id="save-presets" class="button primary">Salvar recomendações</button></section>`;
+  </section><section class="panel settings-panel"><div class="panel-head"><div><p class="section-kicker">CONTROLE OPERACIONAL</p><h2>Recomendações de controle</h2><p>Edite o nome, a cor e a regra da próxima ação. Remover oculta a sugestão, sem apagar marcações anteriores.</p></div><button type="button" class="button secondary" id="add-preset">Adicionar recomendação</button></div><div id="preset-editor"></div><button type="button" id="save-presets" class="button primary">Salvar recomendações</button></section></div>`;
   setupPresetEditor(data.control_presets);
   startWhatsAppPanel();
   wireDataSafetyPanel();
