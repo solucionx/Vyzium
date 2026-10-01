@@ -1377,3 +1377,134 @@ th {
   font-weight: 800;
 }
 .multi-filter-clear:hover { background: #eef8fa; }
+
+
+/* ==========================================================================
+   VYZIUM OPERATIONAL UI 3.4.1 — camada visual; sem alteração de engine/estado
+   ========================================================================== */
+.sidebar {
+  background: #0b3a5b !important;
+  border-right-color: #1c5878 !important;
+}
+.nav-item:hover {
+  color: #ffffff !important;
+  background: #104a70 !important;
+}
+.nav-item.active {
+  color: #ffffff !important;
+  background: #13577f !important;
+  border-color: #2a6d91 !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+#check-updates:hover,
+#logout-account:hover {
+  background: #104a70 !important;
+}
+.button.primary {
+  background: #0f6688 !important;
+  border-color: #0f6688 !important;
+  box-shadow: 0 2px 5px rgba(15,102,136,.12) !important;
+}
+.button.primary:hover {
+  background: #0c5876 !important;
+  border-color: #0c5876 !important;
+}
+.card,
+.panel {
+  box-shadow: 0 4px 14px rgba(8,35,56,.055) !important;
+}
+.source-strip {
+  background: #0b3a5b !important;
+  border-color: #1c5878 !important;
+  box-shadow: 0 4px 14px rgba(8,35,56,.10) !important;
+}
+th { background: #0a6178 !important; }
+
+.sidebar,
+main {
+  transition: width .16s ease, margin-left .16s ease;
+}
+.sidebar-toggle {
+  width: 100%;
+  min-height: 34px;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 9px;
+  padding: 7px 10px;
+  border: 1px solid #2b6787;
+  border-radius: 7px;
+  color: #e4eff5;
+  background: #104a70;
+  font-size: 11px;
+  font-weight: 700;
+}
+.sidebar-toggle:hover { background: #13577f; }
+.sidebar-toggle svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+body.sidebar-collapsed .sidebar {
+  width: 68px !important;
+  padding-left: 10px;
+  padding-right: 10px;
+}
+body.sidebar-collapsed main { margin-left: 68px !important; }
+body.sidebar-collapsed .brand {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+body.sidebar-collapsed .brand > div:last-child,
+body.sidebar-collapsed .nav-item > span,
+body.sidebar-collapsed #logout-account > span,
+body.sidebar-collapsed #check-updates > span,
+body.sidebar-collapsed #update-status,
+body.sidebar-collapsed .sidebar-note {
+  display: none !important;
+}
+body.sidebar-collapsed .brand-mark {
+  width: 34px;
+  height: 34px;
+}
+body.sidebar-collapsed .sidebar-toggle {
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+body.sidebar-collapsed .sidebar-toggle > span { display: none; }
+body.sidebar-collapsed .sidebar-toggle svg { transform: rotate(180deg); }
+body.sidebar-collapsed nav#navigation { gap: 5px; }
+body.sidebar-collapsed .nav-item {
+  min-height: 42px;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+body.sidebar-collapsed .nav-item .nav-icon { margin: 0; }
+body.sidebar-collapsed #logout-account,
+body.sidebar-collapsed #check-updates {
+  width: 100%;
+  justify-content: center;
+  padding-left: 0;
+  padding-right: 0;
+}
+body.sidebar-collapsed .topbar {
+  padding-left: 24px;
+  padding-right: 24px;
+}
+body.sidebar-collapsed .content {
+  padding-left: 18px;
+  padding-right: 18px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, main { transition: none; }
+}
