@@ -207,7 +207,7 @@ async function renderMaps() {
  on($('#new-from-items'),'click',()=>navigate('items'));
  drawMapLibrary(maps);
 }
-async function openMap(id) {stopWhatsAppPanel();currentView='map';const d=await api('GET','/map?id='+encodeURIComponent(id));activeMap=d.map;dirty=false;$('#view-title').textContent=activeMap.name;document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view===(activeMap.archived?'completed':'maps')));renderMap(d);}
+async function openMap(id) {stopWhatsAppPanel();currentView='map';const d=await api('GET','/map?id='+encodeURIComponent(id));activeMap=d.map;dirty=false;$('#view-title').textContent=activeMap.name;document.querySelectorAll('.nav-item').forEach(b=>b.classList.toggle('active',b.dataset.view==='maps'));renderMap(d);}
 function markDirty() {dirty=true;document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');$('#save-note').textContent='Alterações não salvas. Salve para recalcular o resultado.';$('#result-wrap').innerHTML='<div class="notice">Salve os preços e descontos para atualizar os vencedores.</div>';}
 function captureMap() {
  activeMap.name=$('#edit-name').value;
