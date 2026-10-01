@@ -107,8 +107,8 @@ jobs:
         run: |
           $version = (Get-Content package.json | ConvertFrom-Json).version
           if ($version -ne $env:EXPECTED_VERSION) { throw "Versão inesperada: $version" }
-          $lock = Get-Content package-lock.json | ConvertFrom-Json
-          if ($lock.version -ne $version -or $lock.packages.''.version -ne $version) {
+          $lock = Get-Content package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+          if ($lock['version'] -ne $version -or $lock['packages']['']['version'] -ne $version) {
             throw "package-lock.json não está alinhado."
           }
           "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
