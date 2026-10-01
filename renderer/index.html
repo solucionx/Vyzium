@@ -8,16 +8,24 @@
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="home.css">
 </head>
-<body class="home-view home-screenshot-style">
+<body class="home-view">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.3.7</span></div>
+      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.4.1</span></div>
     </div>
     <nav id="navigation">
-      <button class="nav-item active" type="button">
-        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 11.2 12 4l8.5 7.2"/><path d="M5.5 10v9h13v-9M9.5 19v-5h5v5"/></svg>
+      <button class="nav-item active" type="button" title="Visão geral">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg>
         <span>Visão geral</span>
+      </button>
+      <button class="nav-item" type="button" data-switch-module="followup">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="5" y="4" width="14" height="17" rx="2"/><path d="M9 3.5h6a1 1 0 0 1 1 1V6H8V4.5a1 1 0 0 1 1-1Z"/><path d="M8.5 12h7M8.5 15.5h7M8.5 8.5h3"/></svg>
+        <span>Acompanhamento</span>
+      </button>
+      <button class="nav-item" type="button" data-switch-module="compras">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 19 7 12 11 5 7 12 3Z"/><path d="M5 7v8l7 4 7-4V7"/><path d="M12 11v8"/></svg>
+        <span>Cotação &amp; Mapas</span>
       </button>
     </nav>
     <button id="logout-account" class="button secondary" type="button" title="Sair da conta Vyzium">
@@ -33,55 +41,58 @@
   </aside>
 
   <main>
-    <header class="topbar home-topbar clean-home-topbar">
-      <div class="hero-copy">
-        <p class="eyebrow">VYZIUM · EXPERIÊNCIA EXECUTIVA</p>
+    <header class="topbar home-topbar">
+      <div>
+        <p class="eyebrow">VYZIUM / OPERAÇÃO</p>
         <h1>Visão geral</h1>
       </div>
-      <div class="top-actions home-module-actions">
-        <span class="mode-badge" data-app-version data-app-version-prefix="Versão ">Versão 3.3.7</span>
+      <div class="top-actions">
+        <span class="mode-badge" data-app-version data-app-version-prefix="Versão ">Versão 3.4.1</span>
       </div>
     </header>
 
-    <section class="content home-content screenshot-home-content">
-      <section class="hero-highlight-strip">
-        <div class="hero-highlight-left">
-          <div class="hero-logo-card">
-            <img src="assets/vyzium-mark-white.svg" alt="Vyzium">
-          </div>
-          <div class="hero-highlight-copy">
-            <h2>Transforme planilhas em uma operação guiada, visual e confiável</h2>
-            <p>O Vyzium reduz ruído operacional, organiza o acompanhamento com fornecedores e dá mais contexto às decisões de compra.</p>
-          </div>
+    <section class="content home-content">
+      <div class="home-heading">
+        <div>
+          <p class="section-kicker">OPERAÇÃO ATUAL</p>
+          <h2>Resumo do Vyzium</h2>
+          <p>Informação operacional primeiro. Abra um módulo para trabalhar com os dados completos.</p>
         </div>
-        <div class="hero-system-badge"><span></span>Sistema operacional</div>
+        <span class="home-health"><i></i>Sistema disponível</span>
+      </div>
+
+      <section class="home-metrics" aria-label="Indicadores operacionais">
+        <article class="home-metric"><span>Pedidos em aberto</span><strong id="metric-open-orders">—</strong><small>Acompanhamento</small></article>
+        <article class="home-metric"><span>Mensagens prontas</span><strong id="metric-ready-messages">—</strong><small>Follow-up</small></article>
+        <article class="home-metric"><span>SCIs em aberto</span><strong id="metric-open-scis">—</strong><small>Compras</small></article>
+        <article class="home-metric"><span>Mapas ativos</span><strong id="metric-active-maps">—</strong><small id="metric-map-alert">Cotação &amp; Mapas</small></article>
       </section>
 
-      <section class="module-selection-head">
-        <p class="section-kicker">MÓDULOS</p>
-        <h2>Escolha para onde ir</h2>
-        <p>Selecione um módulo para continuar a operação.</p>
-      </section>
-
-      <section class="module-selection-grid">
-        <article class="module-select-card">
-          <div class="module-icon-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="6" y="4" width="12" height="16" rx="2"/><path d="M9 8h6M9 12h6M9 16h4"/></svg>
+      <section class="home-workspaces">
+        <article class="home-workspace">
+          <div class="home-workspace-line followup"></div>
+          <div class="home-workspace-body">
+            <div class="home-workspace-head">
+              <div><p class="section-kicker">ACOMPANHAMENTO</p><h3>Pedidos e fornecedores</h3></div>
+              <button class="button secondary" type="button" data-switch-module="followup">Abrir módulo</button>
+            </div>
+            <p class="home-workspace-copy">Controle operacional, pedidos, fornecedores, números de WhatsApp e follow-up permanecem no mesmo fluxo estável.</p>
+            <div class="home-workspace-links"><span>Pedidos</span><span>Fornecedores</span><span>Mensagens</span><span>Histórico</span></div>
+            <div class="home-base"><span>Última base</span><strong id="followup-base">Carregando…</strong></div>
           </div>
-          <h3>Acompanhamento</h3>
-          <p>Controle operacional de pedidos, fornecedores e mensagens de follow-up.</p>
-          <div id="followup-status" class="module-summary-box">Carregando resumo do módulo…</div>
-          <button class="button primary module-open-button" type="button" data-switch-module="followup">Abrir Acompanhamento</button>
         </article>
 
-        <article class="module-select-card">
-          <div class="module-icon-box">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3 19 7 12 11 5 7 12 3Z"/><path d="M5 7v8l7 4 7-4V7"/><path d="M12 11v8"/></svg>
+        <article class="home-workspace">
+          <div class="home-workspace-line compras"></div>
+          <div class="home-workspace-body">
+            <div class="home-workspace-head">
+              <div><p class="section-kicker">COTAÇÃO &amp; MAPAS</p><h3>Itens, mapas e fornecedores</h3></div>
+              <button class="button secondary" type="button" data-switch-module="compras">Abrir módulo</button>
+            </div>
+            <p class="home-workspace-copy">Itens a comprar e mapas ficam em destaque; o cadastro de números usa a mesma fonte do Acompanhamento.</p>
+            <div class="home-workspace-links"><span>Itens a comprar</span><span>Mapas ativos</span><span>Fornecedores</span><span>Concluídos</span></div>
+            <div class="home-base"><span>Última BASE SCI</span><strong id="compras-base">Carregando…</strong></div>
           </div>
-          <h3>Cotação &amp; Mapas</h3>
-          <p>Cotações, mapas comparativos e decisões de compra em um só lugar.</p>
-          <div id="compras-status" class="module-summary-box">Carregando resumo do módulo…</div>
-          <button class="button primary module-open-button" type="button" data-switch-module="compras">Abrir Cotação &amp; Mapas</button>
         </article>
       </section>
     </section>
