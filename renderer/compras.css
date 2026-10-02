@@ -458,3 +458,11 @@ input:focus,select:focus,textarea:focus {outline:2px solid #00bfa55c;outline-off
   .supplier-directory-toolbar { align-items: stretch; flex-direction: column; }
   .supplier-missing-filter { align-self: flex-start; }
 }
+
+.item-reference { display:flex; flex-direction:column; gap:6px; margin:8px 0; }
+.reference-thumbnail { width:88px; height:70px; object-fit:contain; border:1px solid #d8e0e8; border-radius:6px; background:#fff; }
+.reference-picker { font-size:inherit; cursor:pointer; }
+.reference-picker input { max-width:100%; font-size:inherit; }
+.quote-reference-list { display:flex; flex-wrap:wrap; gap:12px; }
+.quote-reference-list figure { margin:0; max-width:160px; }
+.quote-reference-list figcaption { font-size:inherit; overflow-wrap:anywhere; }

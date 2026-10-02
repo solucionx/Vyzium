@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.4",
-  "description": "Vyzium 3.4.4: mantém a base estável 3.4.3 e adiciona progresso percentual nos mapas ativos.",
+  "version": "3.4.5",
+  "description": "Vyzium 3.4.5: imagens de referência por item no envio de cotações pelo WhatsApp.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {

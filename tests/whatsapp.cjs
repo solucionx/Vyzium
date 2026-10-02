@@ -908,3 +908,27 @@ test('headed first-connect storage failure quarantines only pending profile and 
  assert.match(s.diagnostics().text,/self-heal\.profile-repair-restart/);
  await s.shutdown();
 });
+
+test('quote references send after text with caption and keep the send lock for the full batch', async t=>{
+ const s=setup(t);s.deps.library.MessageMedia=class {constructor(mime,data,name){Object.assign(this,{mime,data,name});}};
+ s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
+ const sent=[];
+ s.client.sendMessage=async(number,content,options)=>{assert.equal(s.busy,true);sent.push({content,options});return {id:{_serialized:'m'+sent.length}};};
+ const data=Buffer.from([255,216,255,1,255,217]).toString('base64');
+ const result=await s.send('5585999999999','Texto',[{mime:'image/jpeg',data,caption:'1. Lâmpada — Hotel'}]);
+ assert.equal(result.status,'sent');assert.equal(sent.length,2);assert.equal(sent[0].content,'Texto');assert.equal(sent[1].content.mime,'image/jpeg');assert.equal(sent[1].options.caption,'1. Lâmpada — Hotel');assert.equal(s.busy,false);
+});
+
+test('failed image after successful text is uncertain and never retried automatically', async t=>{
+ const s=setup(t);s.deps.library.MessageMedia=class {};
+ s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
+ let calls=0;s.client.sendMessage=async()=>{if(++calls===2)throw new Error('media failed');return {id:{_serialized:'text-id'}};};
+ const result=await s.send('5585999999999','Texto',[{mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'}]);
+ assert.equal(result.status,'uncertain');assert.equal(result.message_id,'text-id');assert.equal(calls,2);assert.equal(s.busy,false);
+});
+
+test('invalid reference rejects the batch before sending any text', async t=>{
+ const s=setup(t);s.client=new s.deps.library.Client({});s.state.status='ready';
+ const result=await s.send('5585999999999','Texto',[{mime:'text/html',data:'bad',caption:'Item'}]);
+ assert.equal(result.status,'failed');assert.equal(s.client.sent,0);
+});
