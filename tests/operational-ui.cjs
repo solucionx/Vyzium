@@ -133,3 +133,18 @@ test('all operational screens use one typography scale and readable status conta
   assert.match(styles, /#check-updates\.button\.secondary/);
   assert.match(styles, /background: transparent !important/);
 });
+
+
+test('active map library shows the existing defined-item progress before open map', () => {
+  const renderer = read('renderer/compras-app.js');
+  const visual = read('renderer/operational-ui.css');
+  const backend = read('backend/compras_engine.py');
+  assert.match(backend, /defined_count/);
+  assert.match(backend, /completion_percent/);
+  assert.match(renderer, /class="map-card-progress"/);
+  assert.match(renderer, /% dos itens definidos/);
+  assert.match(renderer, /map-card-action-area/);
+  assert.match(visual, /map-card-action-area/);
+  assert.match(visual, /map-card-progress/);
+  assert.match(visual, /conic-gradient/);
+});
