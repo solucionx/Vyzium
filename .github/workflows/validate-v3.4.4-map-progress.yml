@@ -1,0 +1,302 @@
+name: Validate Vyzium 3.4.4 Map Progress
+
+on:
+  push:
+    branches:
+      - release/v3.4.4-map-progress
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vyzium-3.4.4-map-progress
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      VYZIUM_APP_VERSION: "3.4.4"
+      EXPECTED_VERSION: "3.4.4"
+      BASE_343_SHA: "c523ce2d27a927be516be805d5ea55bd1cd317d8"
+      RELEASE_REPO: "solucionx/Vyzium-Releases"
+
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Confirm exact published 3.4.3 baseline and closed scope
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          git cat-file -e "$($env:BASE_343_SHA)^{commit}"
+          if ($LASTEXITCODE -ne 0) { throw "Commit base 3.4.3 não encontrado." }
+
+          $mergeBase = (git merge-base $env:BASE_343_SHA HEAD).Trim()
+          if ($mergeBase -ne $env:BASE_343_SHA) {
+            throw "A candidata não deriva exatamente da 3.4.3 publicada."
+          }
+
+          $changed = @(git diff --name-only $env:BASE_343_SHA HEAD)
+          $allowed = @(
+            ".github/workflows/validate-v3.4.4-map-progress.yml",
+            "backend/compras_engine.py",
+            "backend/crypto_migration.py",
+            "backend/engine.py",
+            "backend/test_compras_map_progress.py",
+            "docs/VALIDACAO_3.4.4_MAP_PROGRESS.md",
+            "package-lock.json",
+            "package.json",
+            "renderer/acompanhamento.html",
+            "renderer/compras-app.js",
+            "renderer/compras.html",
+            "renderer/index.html",
+            "renderer/operational-ui.css",
+            "renderer/version.js",
+            "tests/operational-ui.cjs",
+            "tests/project-config.cjs"
+          )
+
+          $unexpected = @($changed | Where-Object { $_ -notin $allowed })
+          if ($unexpected.Count -gt 0) {
+            $unexpected | ForEach-Object { Write-Host "Fora do escopo: $_" }
+            throw "A candidata alterou arquivos fora do escopo aprovado."
+          }
+
+          $protected = @(
+            "electron/main.js",
+            "electron/preload.js",
+            "electron/whatsapp.js",
+            "electron/whatsapp-hidden-browser.ps1",
+            "electron/backup-restore.js",
+            "electron/backup-state.js",
+            "electron/remote-backup.js",
+            "electron/restore-transaction.js",
+            "electron/firebase-client.js",
+            "electron/firebase-config.js",
+            "electron/auth-manager.js",
+            "electron/security-core.js",
+            "electron/security-manager.js",
+            "electron/updates.js",
+            "backend/backup_sync.py",
+            "backend/data_safety.py",
+            "backend/secure_sqlite.py",
+            "renderer/module-switch.js",
+            "firebase/firestore.rules",
+            "firebase/firestore.indexes.json"
+          )
+
+          foreach ($path in $protected) {
+            $diff = @(git diff --name-only $env:BASE_343_SHA HEAD -- $path)
+            if ($diff.Count -gt 0) { throw "Arquivo protegido alterado: $path" }
+          }
+
+          Write-Host "Base 3.4.3 publicada confirmada: $($env:BASE_343_SHA)"
+          $changed | ForEach-Object { Write-Host " - $_" }
+
+      - name: Repository safety
+        shell: pwsh
+        run: ./scripts/verify-repository-safety.ps1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Validate production identity and version
+        shell: pwsh
+        run: |
+          $pkg = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($pkg.version -ne $env:EXPECTED_VERSION) { throw "Versão inesperada: $($pkg.version)" }
+          if ($pkg.build.appId -ne 'com.vyzium.gestaooperacional') { throw "appId estável foi alterado." }
+          if ($pkg.build.productName -ne 'Vyzium') { throw "productName estável foi alterado." }
+          if ($pkg.build.publish[0].releaseType -ne 'draft') { throw "Canal de release deixou de ser Draft." }
+
+          $lock = Get-Content package-lock.json -Raw | ConvertFrom-Json -AsHashtable
+          if ($lock['version'] -ne $pkg.version -or $lock['packages']['']['version'] -ne $pkg.version) {
+            throw "package-lock.json não está alinhado."
+          }
+
+          "APP_VERSION=$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "RELEASE_TAG=v$($pkg.version)" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Install Node dependencies
+        run: npm ci
+
+      - name: Verify JavaScript syntax
+        shell: pwsh
+        run: |
+          $files = @(
+            "renderer/app.js",
+            "renderer/compras-app.js",
+            "renderer/home.js",
+            "renderer/module-switch.js",
+            "electron/main.js"
+          )
+          foreach ($file in $files) {
+            node --check $file
+            if ($LASTEXITCODE -ne 0) { throw "Falha de sintaxe em $file" }
+          }
+
+      - name: Verify validated WhatsApp baseline
+        run: npm run verify:whatsapp-patch
+
+      - name: Install Python dependencies
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Check Python syntax
+        run: python -m compileall -q backend
+
+      - name: Run full regression suite
+        run: npm test
+
+      - name: Build followup engine
+        run: >
+          python -m PyInstaller
+          --noconfirm --clean --onefile
+          --name followup-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-followup
+          backend/engine.py
+
+      - name: Build compras engine
+        run: >
+          python -m PyInstaller
+          --noconfirm --clean --onefile
+          --name compras-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --hidden-import xlrd
+          --hidden-import xlwt
+          --distpath dist-engine
+          --workpath build/pyinstaller-compras
+          backend/compras_engine.py
+
+      - name: Build backup restore merge engine
+        run: >
+          python -m PyInstaller
+          --noconfirm --clean --onefile
+          --name backup-sync-engine
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-backup-sync
+          backend/backup_sync.py
+
+      - name: Verify all three engines
+        shell: pwsh
+        run: ./scripts/verify-engines.ps1
+
+      - name: Build Windows installer
+        run: npm run build
+
+      - name: Verify packaged engines
+        shell: pwsh
+        run: ./scripts/verify-packaged-engines.ps1
+
+      - name: Create portable and source archives
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist\win-unpacked\*" -DestinationPath "dist\Vyzium-3.4.4-Portable.zip" -CompressionLevel Optimal
+          git archive --format=zip --output=dist/Vyzium-3.4.4-Source.zip HEAD
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao arquivar o código validado." }
+
+      - name: Calculate checksums
+        shell: pwsh
+        run: |
+          $files = @(
+            "dist/Vyzium-Setup.exe",
+            "dist/Vyzium-Setup.exe.blockmap",
+            "dist/latest.yml",
+            "dist/Vyzium-3.4.4-Portable.zip",
+            "dist/Vyzium-3.4.4-Source.zip"
+          )
+          foreach ($file in $files) {
+            if (-not (Test-Path -LiteralPath $file)) { throw "Artefato obrigatório ausente: $file" }
+          }
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content -Encoding utf8 dist/SHA256SUMS.txt
+          Get-Content dist/SHA256SUMS.txt
+
+      - name: Upload validated candidate artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-3.4.4-Map-Progress-Candidate
+          path: |
+            dist/Vyzium-Setup.exe
+            dist/Vyzium-Setup.exe.blockmap
+            dist/latest.yml
+            dist/Vyzium-3.4.4-Portable.zip
+            dist/Vyzium-3.4.4-Source.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Validate Releases repository access
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) { throw "VYZIUM_RELEASE_TOKEN ausente." }
+          gh repo view $env:RELEASE_REPO --json nameWithOwner,visibility | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw "Não foi possível acessar o repositório de Releases." }
+
+      - name: Prepare Draft v3.4.4
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $remoteLine = git ls-remote origin refs/heads/release/v3.4.4-map-progress
+          if ($LASTEXITCODE -ne 0 -or -not $remoteLine) { throw "Não foi possível confirmar o HEAD da candidata." }
+          $currentHead = ($remoteLine -split '\s+')[0].Trim()
+          if ($currentHead -ne $env:GITHUB_SHA) {
+            throw "Build obsoleto: $($env:GITHUB_SHA) não é mais o HEAD da candidata ($currentHead)."
+          }
+
+          $tag = "v3.4.4"
+          $releaseRepo = $env:RELEASE_REPO
+
+          gh release view $tag --repo $releaseRepo --json isDraft *> $null
+          if ($LASTEXITCODE -eq 0) {
+            $existing = gh release view $tag --repo $releaseRepo --json isDraft | ConvertFrom-Json
+            if (-not $existing.isDraft) { throw "A versão $tag já está publicada." }
+          } else {
+            gh release create $tag --repo $releaseRepo --target main --draft --title "Vyzium $tag — Progresso dos mapas ativos" --notes-file docs/VALIDACAO_3.4.4_MAP_PROGRESS.md
+            if ($LASTEXITCODE -ne 0) { throw "Falha ao criar Draft $tag." }
+          }
+
+          $assets = @(
+            'dist/Vyzium-Setup.exe',
+            'dist/Vyzium-Setup.exe.blockmap',
+            'dist/latest.yml',
+            'dist/Vyzium-3.4.4-Portable.zip',
+            'dist/Vyzium-3.4.4-Source.zip',
+            'dist/SHA256SUMS.txt'
+          )
+          gh release upload $tag @assets --repo $releaseRepo --clobber
+          if ($LASTEXITCODE -ne 0) { throw "Falha ao anexar arquivos ao Draft $tag." }
+
+          $release = gh release view $tag --repo $releaseRepo --json isDraft,isPrerelease,url | ConvertFrom-Json
+          if (-not $release.isDraft -or $release.isPrerelease) {
+            throw "A candidata deve permanecer Draft e não pode ser prerelease."
+          }
+          Write-Host "Draft confirmada: $($release.url)"
