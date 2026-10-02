@@ -1520,3 +1520,60 @@ body.module-compras .button.danger {
   background: #fff !important;
   border-color: #e5bbc2 !important;
 }
+
+
+/* Vyzium 3.4.4 — progresso do mapa ativo, sem alterar o layout funcional. */
+body.module-compras .map-library-card .map-card-action-area {
+  grid-area: action;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  white-space: nowrap;
+}
+
+body.module-compras .map-library-card .map-card-action-area > .button {
+  flex: 0 0 auto;
+}
+
+body.module-compras .map-card-progress {
+  --progress: 0;
+  width: 54px;
+  height: 54px;
+  flex: 0 0 54px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at center, #ffffff 59%, transparent 60%),
+    conic-gradient(#2f758e calc(var(--progress) * 1%), #e5ecef 0);
+  box-shadow: inset 0 0 0 1px #edf1f3;
+}
+
+body.module-compras .map-card-progress strong {
+  color: #082f4a;
+  font-family: "Segoe UI", Inter, Arial, sans-serif !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  line-height: 1;
+}
+
+body.module-compras .map-card-progress span {
+  margin-top: 2px;
+  color: #7b8992;
+  font-size: 7.5px !important;
+  font-weight: 650;
+  line-height: 1;
+}
+
+@media (max-width: 1050px) {
+  body.module-compras .map-library-card .map-card-action-area {
+    gap: 8px;
+  }
+  body.module-compras .map-card-progress {
+    width: 48px;
+    height: 48px;
+    flex-basis: 48px;
+  }
+}
