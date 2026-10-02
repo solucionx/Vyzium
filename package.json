@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.3",
-  "description": "Vyzium 3.4.3: refina a interface 3.4.2 com tipografia unificada, navegação de mapas simplificada e melhor legibilidade operacional.",
+  "version": "3.4.4",
+  "description": "Vyzium 3.4.4: mantém a base estável 3.4.3 e adiciona progresso percentual nos mapas ativos.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
