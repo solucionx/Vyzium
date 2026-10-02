@@ -567,6 +567,13 @@ class Store:
         summaries = []
         for data in self.all('maps'):
             items = data.get('items', [])
+            archived = bool(data.get('archived'))
+            defined_count = 0
+            completion_percent = 0
+            if items and not archived:
+                result = evaluate(data)
+                defined_count = max(0, len(items) - int(result.get('unquoted', 0)) - int(result.get('ties', 0)))
+                completion_percent = int((defined_count * 100 + (len(items) // 2)) // len(items))
             summaries.append({
                 'id': data.get('id', ''),
                 'name': data.get('name', ''),
@@ -576,8 +583,10 @@ class Store:
                 'due_date': data.get('due_date', ''),
                 'due_status': map_due_status(data),
                 'count': len(items),
+                'defined_count': defined_count,
+                'completion_percent': completion_percent,
                 # Keep the historical `archived` flag for backwards compatibility; in the UI it means concluded.
-                'archived': bool(data.get('archived')),
+                'archived': archived,
                 'scis': sorted({text(item.get('sci')) for item in items if text(item.get('sci'))}),
                 'items': [text(item.get('description')) for item in items if text(item.get('description'))],
                 'articles': [text(item.get('article')) for item in items if text(item.get('article'))],
