@@ -2,6 +2,7 @@
 const assert = require('node:assert/strict');
 const crypto = require('node:crypto');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const asar = require('@electron/asar');
 const {KNOWN_GOOD_CLIENT_SHA256} = require('./verify-whatsapp-patch');
@@ -9,35 +10,24 @@ const {patchMediaSource, verifyMediaPatch} = require('./patch-whatsapp-media');
 
 const archive = process.argv[2] || 'dist/win-unpacked/resources/app.asar';
 const sha = data=>crypto.createHash('sha256').update(data).digest('hex');
-const normalize = value=>String(value || '').replace(/\\/g, '/').replace(/^\/+/, '');
+const extractedRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'vyzium-whatsapp-package-'));
 
-function readPackaged(relativePath) {
-  const wanted = normalize(relativePath);
-  const entries = asar.listPackage(archive).map(raw=>({raw, normalized:normalize(raw)}));
-  const matches = entries.filter(entry=>entry.normalized === wanted || entry.normalized.endsWith('/' + wanted));
-  if (matches.length > 1) {
-    throw new Error(`Arquivo duplicado no app.asar: ${wanted} (${matches.map(entry=>entry.raw).join(', ')})`);
-  }
-  if (matches.length === 1) {
-    return {data:asar.extractFile(archive, matches[0].raw), location:`app.asar:${matches[0].raw}`};
-  }
+try {
+  asar.extractAll(archive, extractedRoot);
 
-  const unpackedRoot = archive.replace(/\.asar$/i, '.asar.unpacked');
-  const unpackedPath = path.join(unpackedRoot, ...wanted.split('/'));
-  if (fs.existsSync(unpackedPath) && fs.statSync(unpackedPath).isFile()) {
-    return {data:fs.readFileSync(unpackedPath), location:unpackedPath};
-  }
+  const clientPath = path.join(extractedRoot, 'node_modules', 'whatsapp-web.js', 'src', 'Client.js');
+  const mediaPath = path.join(extractedRoot, 'node_modules', 'whatsapp-web.js', 'src', 'util', 'Injected', 'Utils.js');
+  assert.ok(fs.existsSync(clientPath), 'Client.js do WhatsApp não existe no app.asar extraído.');
+  assert.ok(fs.existsSync(mediaPath), 'Utils.js de mídia do WhatsApp não existe no app.asar extraído.');
 
-  throw new Error(`Arquivo empacotado não encontrado: ${wanted}. Verificados app.asar e app.asar.unpacked.`);
+  const client = fs.readFileSync(clientPath);
+  const media = fs.readFileSync(mediaPath);
+
+  assert.equal(sha(client),KNOWN_GOOD_CLIENT_SHA256,'O bootstrap do WhatsApp empacotado mudou.');
+  assert.equal(patchMediaSource(media.toString('utf8')).changed,false,'O pacote contém mídia sem correção.');
+  assert.equal(sha(media),verifyMediaPatch().sha256,'A mídia empacotada difere da dependência validada.');
+
+  console.log('Pacote Windows: bootstrap original e correção de mídia confirmados por SHA-256.');
+} finally {
+  fs.rmSync(extractedRoot, {recursive:true, force:true});
 }
-
-const client = readPackaged('node_modules/whatsapp-web.js/src/Client.js');
-const media = readPackaged('node_modules/whatsapp-web.js/src/util/Injected/Utils.js');
-
-assert.equal(sha(client.data),KNOWN_GOOD_CLIENT_SHA256,'O bootstrap do WhatsApp empacotado mudou.');
-assert.equal(patchMediaSource(media.data.toString('utf8')).changed,false,'O pacote contém mídia sem correção.');
-assert.equal(sha(media.data),verifyMediaPatch().sha256,'A mídia empacotada difere da dependência validada.');
-
-console.log('Pacote Windows: bootstrap original e correção de mídia confirmados por SHA-256.');
-console.log(`Bootstrap: ${client.location}`);
-console.log(`Mídia: ${media.location}`);
