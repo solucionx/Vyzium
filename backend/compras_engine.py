@@ -418,6 +418,19 @@ def evaluate(data):
             'ties': sum(x['state'] == 'tie' for x in lines)}
 
 
+def whatsapp_timeout(route, body=None):
+    if route == '/wait':
+        return 135
+    if route != '/send':
+        return 85
+    images = body.get('images', []) if isinstance(body, dict) else []
+    count = len(images) if isinstance(images, list) else 0
+    # The bridge sends text + photos sequentially and bounds each individual
+    # WhatsApp call. Keep the local HTTP request alive long enough for up to 20
+    # photos without giving any single stalled photo an unlimited wait.
+    return max(85, min(1100, 90 + count * 50))
+
+
 def whatsapp_request(route, body=None):
     base = os.environ.get('FOLLOWUP_WHATSAPP_URL', '')
     if not re.fullmatch(r'http://127\.0\.0\.1:\d+', base):
@@ -425,7 +438,7 @@ def whatsapp_request(route, body=None):
     req = Request(base + route, data=json.dumps(body or {}).encode(),
                   headers={'Content-Type': 'application/json', 'X-FollowUp-Token': os.environ.get('FOLLOWUP_API_TOKEN', '')})
     try:
-        with urlopen(req, timeout=135 if route == '/wait' else 85) as response:
+        with urlopen(req, timeout=whatsapp_timeout(route, body)) as response:
             return json.load(response)
     except HTTPError as exc:
         try:
