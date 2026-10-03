@@ -917,6 +917,7 @@ test('quote references send after text with caption and keep the send lock for t
  const data=Buffer.from([255,216,255,1,255,217]).toString('base64');
  const result=await s.send('5585999999999','Texto',[{mime:'image/jpeg',data,caption:'1. Lâmpada — Hotel'}]);
  assert.equal(result.status,'sent');assert.equal(sent.length,2);assert.equal(sent[0].content,'Texto');assert.equal(sent[1].content.mime,'image/jpeg');assert.equal(sent[1].options.caption,'1. Lâmpada — Hotel');assert.equal(s.busy,false);
+ assert.deepEqual(result.delivery,{text:'sent',images_total:1,images_sent:1});
 });
 
 test('failed image after successful text is uncertain and never retried automatically', async t=>{
@@ -925,6 +926,39 @@ test('failed image after successful text is uncertain and never retried automati
  let calls=0;s.client.sendMessage=async()=>{if(++calls===2)throw new Error('media failed');return {id:{_serialized:'text-id'}};};
  const result=await s.send('5585999999999','Texto',[{mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'}]);
  assert.equal(result.status,'uncertain');assert.equal(result.message_id,'text-id');assert.equal(calls,2);assert.equal(s.busy,false);
+ assert.deepEqual(result.delivery,{text:'sent',images_total:1,images_sent:0});
+ assert.match(result.error,/Texto enviado.*0 de 1/);
+});
+
+test('partial photo sequence preserves exact progress and stops before the remaining photo',async t=>{
+ const s=setup(t);s.deps.library.MessageMedia=class {};
+ s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
+ let calls=0;s.client.sendMessage=async()=>{if(++calls===3)throw Error('image upload interrupted');return {id:{_serialized:'m'+calls}};};
+ const ref={mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'};
+ const result=await s.send('5585999999999','Texto',[ref,ref,ref]);
+ assert.equal(result.status,'uncertain');assert.equal(calls,3);
+ assert.deepEqual(result.delivery,{text:'sent',images_total:3,images_sent:1});
+ assert.match(result.error,/Texto enviado.*1 de 3/);
+ assert.equal(s.status().status,'ready');assert.equal(s.busy,false);
+});
+
+test('missing photo result never becomes a successful complete quote',async t=>{
+ const s=setup(t);s.deps.library.MessageMedia=class {};
+ s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
+ let calls=0;s.client.sendMessage=async()=>++calls===1?{id:{_serialized:'text-id'}}:undefined;
+ const result=await s.send('5585999999999','Texto',[{mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'}]);
+ assert.equal(result.status,'uncertain');assert.equal(result.delivery.images_sent,0);
+ assert.match(result.error,/não retornou o resultado/);assert.equal(calls,2);
+});
+
+test('text timeout leaves photos unattempted and does not report text as sent',async t=>{
+ const s=setup(t);s.deps.library.MessageMedia=class {};
+ s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
+ let calls=0;s.client.sendMessage=async()=>{calls++;return new Promise(()=>{});};
+ const result=await s.send('5585999999999','Texto',[{mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'}]);
+ assert.equal(result.status,'uncertain');assert.equal(calls,1);
+ assert.deepEqual(result.delivery,{text:'uncertain',images_total:1,images_sent:0});
+ assert.doesNotMatch(result.error,/Texto enviado/);assert.equal(s.busy,false);
 });
 
 test('invalid reference rejects the batch before sending any text', async t=>{

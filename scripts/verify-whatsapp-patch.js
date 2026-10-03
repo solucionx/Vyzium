@@ -46,6 +46,8 @@ function verifyUpstreamBootstrap(projectRoot = path.resolve(__dirname, '..')) {
 if (require.main === module) {
   try {
     verifyUpstreamBootstrap();
+    const media = require('./patch-whatsapp-media').verifyMediaPatch();
+    console.log('Vyzium: media ID correction verified.', media);
   } catch (error) {
     console.error(`Vyzium: compatibility bootstrap verification failed: ${error?.message || error}`);
     process.exitCode = 1;

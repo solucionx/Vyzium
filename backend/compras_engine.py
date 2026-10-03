@@ -29,7 +29,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.6')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.7')
 DB_SCHEMA_VERSION = 1
 
 MAX_REFERENCE_BYTES = 120000
@@ -983,6 +983,8 @@ class Store:
                 payload['images'] = references
             response = whatsapp_request('/send', payload)
             record.update(status=response.get('status', 'uncertain'), error=response.get('error', ''), message_id=response.get('message_id'))
+            if isinstance(response.get('delivery'), dict):
+                record['delivery'] = response['delivery']
             if record['status'] not in ('sent', 'failed', 'uncertain'):
                 record['status'] = 'uncertain'
         except Exception as exc:

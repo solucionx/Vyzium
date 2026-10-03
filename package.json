@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.6",
-  "description": "Vyzium 3.4.6: busca na Visão Geral, urgência dos mapas e limpeza de fotos ao concluir.",
+  "version": "3.4.7",
+  "description": "Vyzium 3.4.7: correção do envio de fotos e indicação do resultado de texto e imagens.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -10,10 +10,12 @@
     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
-    "test:node": "node --test tests/global-search.cjs tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/remote-backup.cjs tests/backup-restore.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs tests/operational-ui.cjs && node tests/sort.cjs",
+    "test:node": "node --test tests/global-search.cjs tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/whatsapp-media.cjs tests/remote-backup.cjs tests/backup-restore.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs tests/operational-ui.cjs && node tests/sort.cjs",
     "test": "npm run test:syntax && npm run test:backend && npm run test:node",
     "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs",
-    "test:syntax": "node --check electron/main.js && node --check electron/remote-backup.js && node --check electron/backup-restore.js && node --check electron/backup-state.js && node --check renderer/auth.js && node --check electron/search-navigation.js && node --check renderer/home.js && node --check renderer/app.js && node --check renderer/compras-app.js"
+    "test:syntax": "node --check electron/main.js && node --check electron/remote-backup.js && node --check electron/backup-restore.js && node --check electron/backup-state.js && node --check renderer/auth.js && node --check electron/search-navigation.js && node --check renderer/home.js && node --check renderer/app.js && node --check renderer/compras-app.js",
+    "postinstall": "node scripts/patch-whatsapp-media.js",
+    "prebuild": "npm run verify:whatsapp-patch"
   },
   "dependencies": {
     "whatsapp-web.js": "1.34.7",

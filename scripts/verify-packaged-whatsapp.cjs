@@ -1,0 +1,14 @@
+'use strict';
+const assert = require('node:assert/strict');
+const crypto = require('node:crypto');
+const asar = require('@electron/asar');
+const {KNOWN_GOOD_CLIENT_SHA256} = require('./verify-whatsapp-patch');
+const {patchMediaSource, verifyMediaPatch} = require('./patch-whatsapp-media');
+const archive = process.argv[2] || 'dist/win-unpacked/resources/app.asar';
+const sha = data=>crypto.createHash('sha256').update(data).digest('hex');
+const client = asar.extractFile(archive, 'node_modules/whatsapp-web.js/src/Client.js');
+const media = asar.extractFile(archive, 'node_modules/whatsapp-web.js/src/util/Injected/Utils.js');
+assert.equal(sha(client),KNOWN_GOOD_CLIENT_SHA256,'O bootstrap do WhatsApp empacotado mudou.');
+assert.equal(patchMediaSource(media.toString('utf8')).changed,false,'O pacote contém mídia sem correção.');
+assert.equal(sha(media),verifyMediaPatch().sha256,'A mídia empacotada difere da dependência validada.');
+console.log('Pacote Windows: bootstrap original e correção de mídia confirmados por SHA-256.');

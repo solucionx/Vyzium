@@ -52,3 +52,29 @@ class ReferenceImagesTest(PurchasesTest):
         with patch.object(engine, 'whatsapp_request', return_value={'status':'sent'}) as send:
             self.s.send({'map_id':self.m['id'], 'supplier_id':'s1', **p})
             self.assertEqual(set(send.call_args.args[1]), {'phone','message'})
+
+    def test_partial_delivery_persists_and_remains_blocked_after_reopen(self):
+        self.attach()
+        p = self.s.preview(self.m['id'], 's1')
+        delivery = {'text': 'sent', 'images_total': 1, 'images_sent': 0}
+        response = {'status': 'uncertain', 'message_id': 'text-id', 'delivery': delivery,
+                    'error': 'Texto enviado. Envio das imagens concluído: 0 de 1.'}
+        with patch.object(engine, 'whatsapp_request', return_value=response):
+            record = self.s.send({'map_id': self.m['id'], 'supplier_id': 's1', **p})
+        self.assertEqual(record['delivery'], delivery)
+        reopened = engine.Store(self.tmp.name)
+        stored = next(r for r in reopened.all('messages') if r['id'] == record['id'])
+        self.assertEqual(stored['delivery'], delivery)
+        with patch.object(engine, 'whatsapp_request') as send:
+            with self.assertRaises(ValueError):
+                reopened.send({'map_id': self.m['id'], 'supplier_id': 's1', **p})
+            send.assert_not_called()
+
+    def test_successful_photo_delivery_keeps_history_progress(self):
+        self.attach()
+        p = self.s.preview(self.m['id'], 's1')
+        delivery = {'text': 'sent', 'images_total': 1, 'images_sent': 1}
+        with patch.object(engine, 'whatsapp_request', return_value={'status': 'sent', 'delivery': delivery}):
+            record = self.s.send({'map_id': self.m['id'], 'supplier_id': 's1', **p})
+        self.assertEqual(record['status'], 'sent')
+        self.assertEqual(self.s.all('messages')[0]['delivery'], delivery)

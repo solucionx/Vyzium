@@ -1955,6 +1955,7 @@ class WhatsAppSession {
     this.busy = true;
     let submitted = false;
     let messageId = null;
+    const delivery = {text:'not_sent', images_total:media.length, images_sent:0};
     let reconnectAfterSend = false;
     const client = this.client;
 
@@ -1990,6 +1991,8 @@ class WhatsAppSession {
       }
 
       submitted = true;
+      delivery.text = 'uncertain';
+      this._audit('send.start', {images:media.length});
       const result = await bounded(
         client.sendMessage(number._serialized, message, {waitUntilMsgSent:true}),
         Math.max(1, Math.min(this.sendTimeoutMs, batchDeadline - Date.now())),
@@ -1997,17 +2000,23 @@ class WhatsAppSession {
       );
 
       messageId = messageIdentity(result);
+      delivery.text = 'sent';
+      this._audit('send.text-complete', {hasMessageId:Boolean(messageId), images:media.length});
       for (const image of media) {
         const remaining = batchDeadline - Date.now();
         if (remaining <= 0 || this.state.status !== 'ready' || this.client !== client) throw new Error('Envio das referências interrompido; confira texto e fotos na conversa.');
-        await bounded(client.sendMessage(number._serialized, image.content, {caption:image.caption, waitUntilMsgSent:true}), Math.min(this.sendTimeoutMs, remaining), 'Tempo limite no envio da imagem de referência.');
+        const imageResult = await bounded(client.sendMessage(number._serialized, image.content, {caption:image.caption, waitUntilMsgSent:true}), Math.min(this.sendTimeoutMs, remaining), 'Tempo limite no envio da imagem de referência.');
+        if (!imageResult) throw new Error('O WhatsApp não retornou o resultado do envio da imagem de referência.');
+        delivery.images_sent++;
+        this._audit('send.image-complete', {index:delivery.images_sent, total:media.length, hasMessageId:Boolean(messageIdentity(imageResult))});
       }
 
       // For the current WhatsApp Web integration, a completed sendMessage() call
       // is treated as a successful send. Some WA Web builds do not expose a
       // reliable ACK/message id even though the message was actually sent.
-      return {status:'sent', message_id:messageId, resolved_phone:resolvedPhone};
+      return {status:'sent', message_id:messageId, resolved_phone:resolvedPhone, ...(media.length ? {delivery} : {})};
     } catch (error) {
+      this._audit('send.incomplete', {submitted, ...delivery, error});
       if (submitted) {
         // An ACK timeout means the delivery is uncertain, not that the whole
         // WhatsApp session is broken. Destroying a healthy client here caused
@@ -2035,7 +2044,10 @@ class WhatsAppSession {
         ? {
             status:'uncertain',
             message_id:messageId,
-            error:`Envio não confirmado pelo servidor do WhatsApp${messageId ? ` (${messageId})` : ''}. Confira a conversa antes de liberar um novo envio. Detalhe: ${error?.message || 'sem confirmação.'}`
+            ...(media.length ? {delivery} : {}),
+            error:delivery.text === 'sent' && media.length
+              ? `Texto enviado. Envio das imagens concluído: ${delivery.images_sent} de ${media.length}. Confira as fotos na conversa antes de liberar outra tentativa. Detalhe: ${error?.message || 'envio das imagens não concluído.'}`
+              : `Envio não confirmado pelo WhatsApp${messageId ? ` (${messageId})` : ''}. Confira a conversa antes de liberar um novo envio. Detalhe: ${error?.message || 'sem confirmação.'}`
           }
         : {status:'failed', error:error?.message || 'Falha ao verificar o contato. Nenhuma mensagem enviada.'};
     } finally {

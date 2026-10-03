@@ -106,6 +106,23 @@ async function openResult(kind,title){navigation=null;await page.locator('.home-
    await page.locator(`[data-open-map="${setup.map_id}"]`).waitFor();
    const after=(await actualApi('GET','/map?id='+setup.map_id)).map;assert.equal(after.archived,true);assert.ok(after.items.every(i=>!i.reference_image));assert.deepEqual(after.quotes,before.quotes);assert.deepEqual(after.suppliers,before.suppliers);
  });
+ await check('history receives photo progress from the real backend and preserves manual review',async()=>{
+   await page.locator('[data-view="history"]').click();
+   const partial=page.locator('.history-row').filter({hasText:'Resultado parcial'});
+   await partial.waitFor();
+   assert.match(await partial.innerText(),/Texto enviado · fotos pendentes/);
+   assert.match(await partial.innerText(),/1 de 2/);
+   assert.match(await partial.innerText(),/Erro simulado <teste>/);
+   assert.equal(await partial.locator('teste').count(),0);
+   assert.match(await page.locator('.history-row').filter({hasText:'Resultado anterior'}).innerText(),/Texto enviado · fotos pendentes/);
+   assert.match(await page.locator('.history-row').filter({hasText:'Texto sem resultado'}).locator('.badge').innerText(),/^Envio incerto$/);
+   await screenshot('quote-partial-history');
+   await partial.locator('[data-outcome="received"]').click();
+   await partial.getByText('Recebimento do texto e das fotos conferido manualmente.').waitFor();
+   const reviewed=(await actualApi('GET','/history')).find(r=>r.id==='partial-photo');
+   assert.equal(reviewed.status,'sent');assert.ok(reviewed.reviewed_at);
+   assert.deepEqual(reviewed.delivery,{text:'sent',images_total:2,images_sent:1});
+ });
  await check('rapid edits and empty input cannot leave stale results',async()=>{
    await goHome();await page.locator('#global-search').fill('lampada');await page.locator('#global-search').fill('zzzz-absent');await page.waitForFunction(()=>document.querySelector('#global-search-status').textContent.includes('Nenhum'));assert.equal(await page.locator('.home-search-result').count(),0);
    await page.locator('#global-search').fill('');assert.equal(await page.locator('.home-search-result').count(),0);

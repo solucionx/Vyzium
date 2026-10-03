@@ -24,6 +24,15 @@ with tempfile.TemporaryDirectory() as directory:
     extra={**data['items'][0],'id':'search-item','sci':'SCI-777','description':'Peça <especial> & teste','buyer':'Outro comprador'}
     extra.pop('reference_image',None);store.put('items',extra['id'],extra)
     store.put('settings','ui',{'id':'ui','filters':{'buyer':'Teste','search':'Cabo'}})
+    for mid, name, delivery, reference_count, message_id in [
+        ('partial-photo', 'Resultado parcial', {'text':'sent','images_total':2,'images_sent':1}, 2, 'synthetic-text-id'),
+        ('legacy-photo', 'Resultado anterior', None, 1, 'synthetic-legacy-id'),
+        ('unknown-text', 'Texto sem resultado', {'text':'uncertain','images_total':1,'images_sent':0}, 1, None),
+    ]:
+        store.put('messages', mid, {'id':mid,'map_id':data['id'],'kind':'quote','status':'uncertain',
+            'supplier':{'name':name,'phone':'5500000000000'},'at':'2026-10-03T12:00:00',
+            'message':'Mensagem sintética','fingerprint':mid,'error':'Erro simulado <teste>',
+            'reference_count':reference_count,'message_id':message_id,'delivery':delivery})
     follow=engine.Store(root/'followup.db')
     book=Workbook();sheet=book.active
     sheet.append(['OC','EMPRESA','RAZAOSOCIALFORNECEDOR','DESCRICAOARTIGO','SCI','DATAPREVISTAENTREGAOC'])
