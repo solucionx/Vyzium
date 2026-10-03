@@ -2006,7 +2006,9 @@ class WhatsAppSession {
         const remaining = batchDeadline - Date.now();
         if (remaining <= 0 || this.state.status !== 'ready' || this.client !== client) throw new Error('Envio das referências interrompido; confira texto e fotos na conversa.');
         const imageResult = await bounded(client.sendMessage(number._serialized, image.content, {caption:image.caption, waitUntilMsgSent:true}), Math.min(this.sendTimeoutMs, remaining), 'Tempo limite no envio da imagem de referência.');
-        if (!imageResult) throw new Error('O WhatsApp não retornou o resultado do envio da imagem de referência.');
+        // As with text, some WhatsApp Web builds resolve a successful media send
+        // without returning a message object. A resolved sendMessage() call is the
+        // completion signal; only a rejection/timeout means this photo is uncertain.
         delivery.images_sent++;
         this._audit('send.image-complete', {index:delivery.images_sent, total:media.length, hasMessageId:Boolean(messageIdentity(imageResult))});
       }
