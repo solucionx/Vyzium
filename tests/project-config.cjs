@@ -163,6 +163,22 @@ test('3.4 line keeps the exact upstream WhatsApp bootstrap validated on a clean 
   assert.match(main, /com\.vyzium\.gestaooperacional/);
 });
 
+test('3.4.9 keeps quotation sending text-only while preserving overview search and urgent maps', () => {
+  const whatsapp = read('electron/whatsapp.js');
+  const compras = read('backend/compras_engine.py');
+  const comprasUi = read('renderer/compras-app.js');
+  const main = read('electron/main.js');
+  const home = read('renderer/home.js');
+  assert.match(whatsapp, /async send\(phone, message\)/);
+  assert.doesNotMatch(whatsapp, /MessageMedia|data\.images|images\s*=\s*\[\]/);
+  assert.doesNotMatch(compras, /quote_references|validate_reference|reference_count|reference_image|payload\[['"]images['"]\]/);
+  assert.doesNotMatch(comprasUi, /reference_image|data-reference|FileReader|image\/jpeg|quote-reference/);
+  assert.match(compras, /search_compras/);
+  assert.match(main, /global-search/);
+  assert.match(home, /global-search/);
+  assert.match(comprasUi, /map-urgent/);
+});
+
 test('3.4 line preserves manual/on-close backup policy while adding safe restore', () => {
   const main = read('electron/main.js');
   const remote = read('electron/remote-backup.js');
