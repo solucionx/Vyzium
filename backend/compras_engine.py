@@ -1,4 +1,5 @@
 from __future__ import annotations
+from global_search import search_compras
 
 import argparse
 import base64
@@ -28,11 +29,17 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.5')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.6')
 DB_SCHEMA_VERSION = 1
 
 MAX_REFERENCE_BYTES = 120000
 MAX_REFERENCE_IMAGES = 20
+
+
+def map_urgent(value):
+    if not isinstance(value, bool):
+        raise ValueError('Marcação de urgência inválida.')
+    return value
 
 
 def validate_reference(value):
@@ -586,6 +593,7 @@ class Store:
             if any(catalog[i]['maps'] for i in ids):
                 raise ValueError('Há item em outro mapa ativo. Conclua o mapa anterior antes de reutilizá-lo.')
             data = {'id': uuid.uuid4().hex, 'name': name, 'created': now(), 'revision': 1,
+                    'urgent': map_urgent(body.get('urgent', False)),
                     'due_date': normalize_map_due_date(body.get('due_date')),
                     'items': [{**catalog[i], 'note': catalog[i].get('note', ''), 'purchase_type': catalog[i].get('purchase_type', '')} for i in ids],
                     'suppliers': [], 'quotes': {}, 'choices': {}, 'awards': {}, 'saving_target': '5', 'archived': False}
@@ -612,6 +620,7 @@ class Store:
                 'completed_at': data.get('completed_at', ''),
                 'due_date': data.get('due_date', ''),
                 'due_status': map_due_status(data),
+                'urgent': bool(data.get('urgent', False)),
                 'count': len(items),
                 'defined_count': defined_count,
                 'completion_percent': completion_percent,
@@ -621,13 +630,17 @@ class Store:
                 'items': [text(item.get('description')) for item in items if text(item.get('description'))],
                 'articles': [text(item.get('article')) for item in items if text(item.get('article'))],
             })
-        summaries.sort(key=lambda m: (m.get('completed_at') or m.get('updated') or m.get('created') or '', m.get('created') or ''), reverse=True)
+        summaries.sort(key=lambda m: (bool(m.get('urgent')) and not m.get('archived'), m.get('completed_at') or m.get('updated') or m.get('created') or '', m.get('created') or ''), reverse=True)
         return summaries
 
     def complete_map(self, mid):
         with self.lock:
+            if self.send_lock.locked():
+                raise ValueError('Aguarde o envio terminar antes de concluir o mapa.')
             data = self.get_map(mid)
             if not data.get('archived'):
+                for item in data.get('items', []):
+                    item.pop('reference_image', None)
                 stamp = now()
                 data.update(archived=True, completed_at=stamp, updated=stamp, revision=data.get('revision', 0) + 1)
                 self.put('maps', data['id'], data)
@@ -652,6 +665,8 @@ class Store:
             data = self.get_map(body.get('id'))
             if data['archived']:
                 raise ValueError('Mapa concluído: somente consulta e exportação estão disponíveis.')
+            if 'urgent' in body:
+                data['urgent'] = map_urgent(body['urgent'])
             if body.get('revision') != data['revision']:
                 raise ValueError('O mapa foi alterado em outra tela. Abra novamente antes de salvar.')
             # Removal is explicit: a partial/older payload must never delete items by omission.
@@ -1048,6 +1063,8 @@ class Handler(BaseHTTPRequestHandler):
             if self.command == 'GET':
                 if parsed.path == '/health':
                     return self.reply(200, {'ok': True})
+                if parsed.path == '/search':
+                    return self.reply(200, search_compras(s, query.get('q', '')))
                 if parsed.path == '/overview':
                     return self.reply(200, s.overview())
                 if parsed.path == '/items':

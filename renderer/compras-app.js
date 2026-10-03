@@ -55,7 +55,8 @@ function completeMapDialog(map) {
     <div class="complete-map-effects">
       <div><span class="complete-map-effect-mark">01</span><p><strong>Mapa preservado</strong><small>Cotações, valores e decisões continuam disponíveis para consulta.</small></p></div>
       <div><span class="complete-map-effect-mark">02</span><p><strong>Itens liberados</strong><small>Os itens poderão ser utilizados novamente em novos mapas de compra.</small></p></div>
-      ${dirty?'<div><span class="complete-map-effect-mark">03</span><p><strong>Alterações pendentes</strong><small>O Vyzium salvará as alterações atuais antes de concluir o mapa.</small></p></div>':''}
+      ${dirty?'<div><span class="complete-map-effect-mark">•</span><p><strong>Alterações pendentes</strong><small>O Vyzium salvará as alterações atuais antes de concluir o mapa.</small></p></div>':''}
+      ${map.items.some(i=>i.reference_image)?`<div><span class="complete-map-effect-mark">03</span><p><strong>Fotos de referência removidas</strong><small>As cópias das fotos no Vyzium serão apagadas ao concluir. Fotos já enviadas e arquivos originais continuam disponíveis.</small></p></div>`:''}
     </div>
     <div class="complete-map-actions">
       <button type="button" class="button secondary" data-complete-action="cancel">Cancelar</button>
@@ -194,7 +195,7 @@ function mapCardHtml(m) {
  const action=m.archived
   ?`<button class="button secondary" data-open-map="${m.id}">Abrir mapa</button>`
   :`<div class="map-card-action-area"><div class="map-card-progress" style="--progress:${completion}" role="img" aria-label="${completion}% dos itens definidos"><strong>${completion}%</strong><span>definido</span></div><button class="button secondary" data-open-map="${m.id}">Abrir mapa</button></div>`;
- return `<article class="map-card map-library-card"><div class="map-card-top"><span class="badge ${m.archived?'action-neutral':'action-normal'}">${m.archived?'Concluído':'Em cotação'}</span><span class="map-card-date">${referenceDate?dateLabel(referenceDate.slice(0,10)):''}</span></div><div class="map-card-deadline">${mapDueBadgeHtml(m)}</div><h3>${esc(m.name)}</h3><p class="map-card-count">${m.count} ${m.count===1?'item':'itens'}</p>${scis.length?`<div class="map-card-reference"><small>SCI</small><span>${scis.map(esc).join(' · ')}${moreScis>0?` · +${moreScis}`:''}</span></div>`:''}${items.length?`<div class="map-card-items">${items.map(item=>`<span>${esc(item)}</span>`).join('')}${moreItems>0?`<small>+ ${moreItems} ${moreItems===1?'item':'itens'}</small>`:''}</div>`:''}${action}</article>`;
+ return `<article class="map-card map-library-card"><div class="map-card-top"><span class="badge ${m.archived?'action-neutral':'action-normal'}">${m.archived?'Concluído':'Em cotação'}</span><span class="map-card-date">${referenceDate?dateLabel(referenceDate.slice(0,10)):''}</span></div><div class="map-card-deadline">${m.urgent?'<span class="map-urgent-badge">Urgente</span>':''}${mapDueBadgeHtml(m)}</div><h3>${esc(m.name)}</h3><p class="map-card-count">${m.count} ${m.count===1?'item':'itens'}</p>${scis.length?`<div class="map-card-reference"><small>SCI</small><span>${scis.map(esc).join(' · ')}${moreScis>0?` · +${moreScis}`:''}</span></div>`:''}${items.length?`<div class="map-card-items">${items.map(item=>`<span>${esc(item)}</span>`).join('')}${moreItems>0?`<small>+ ${moreItems} ${moreItems===1?'item':'itens'}</small>`:''}</div>`:''}${action}</article>`;
 }
 function drawMapLibrary(maps) {
  const activeCount=maps.filter(m=>!m.archived).length,completedCount=maps.length-activeCount;
@@ -218,6 +219,7 @@ function markDirty() {dirty=true;document.querySelectorAll('.quote-total').forEa
 function captureMap() {
  activeMap.name=$('#edit-name').value;
  activeMap.due_date=$('#map-due-date')?.value||'';
+ activeMap.urgent=Boolean($('#map-urgent')?.checked);
  activeMap.saving_target=$('#saving-target')?.value||activeMap.saving_target||'5';
  activeMap.awards??={};
  document.querySelectorAll('[data-supplier-name]').forEach(el=>{const s=activeMap.suppliers.find(s=>s.id===el.dataset.supplierName);s.name=el.value;s.phone=document.querySelector(`[data-supplier-phone="${s.id}"]`).value;});
@@ -377,7 +379,7 @@ function renderMap(detail) {
          <span>${m.items.length} ${m.items.length===1?'item':'itens'}</span>
          <span>${m.suppliers.length} ${m.suppliers.length===1?'fornecedor':'fornecedores'}</span>
          <span>${defined} ${defined===1?'item definido':'itens definidos'}</span>
-         <label class="map-due-field">Prazo do mapa <input id="map-due-date" type="date" value="${esc(m.due_date)}"></label>
+         <label class="map-urgent-control"><input id="map-urgent" type="checkbox" ${m.urgent?'checked':''}> Mapa urgente</label><label class="map-due-field">Prazo do mapa <input id="map-due-date" type="date" value="${esc(m.due_date)}"></label>
          <span class="map-deadline map-deadline-${due.state}">${esc(due.label)}</span>
          <label class="saving-target-inline">Meta de saving <span><input id="saving-target" inputmode="decimal" value="${esc(m.saving_target)}" maxlength="6">%</span></label>
        </div>
@@ -403,12 +405,12 @@ function renderMap(detail) {
  </section>
  <div id="result-wrap">${resultHtml(r,m)}</div>
  </div>`;
- document.querySelectorAll('#edit-name,#map-due-date,#saving-target,[data-supplier-name],[data-supplier-phone],[data-note],[data-type],[data-price],[data-negotiated],[data-delivery]').forEach(el=>on(el,'input',()=>{markDirty();document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');refreshDiscounts();}));
+ document.querySelectorAll('#edit-name,#map-urgent,#map-due-date,#saving-target,[data-supplier-name],[data-supplier-phone],[data-note],[data-type],[data-price],[data-negotiated],[data-delivery]').forEach(el=>on(el,'input',()=>{markDirty();document.querySelectorAll('.quote-total').forEach(x=>x.textContent='Recalcular ao salvar');document.querySelectorAll('.winner-cell').forEach(x=>x.textContent='Recalcular ao salvar');refreshDiscounts();}));
  bindReferences(m);
  on($('#save-map'),'click',saveMap);
  if($('#add-map-items'))on($('#add-map-items'),'click',addMapItemsDialog);
  on($('#export-map'),'click',async()=>{if(dirty)await saveMap();if(await window.followup.exportMap(m.id))toast('Mapa exportado.');});
- if($('#complete-map'))on($('#complete-map'),'click',async()=>{if(!(await completeMapDialog(m)))return;if(dirty)await saveMap();await api('POST','/maps/complete',{id:m.id});dirty=false;activeMap=null;mapListScope='completed';toast('Mapa concluído e movido para Concluídos.');await navigate('maps');});
+ if($('#complete-map'))on($('#complete-map'),'click',async()=>{if(!(await completeMapDialog(m)))return;if(dirty)await saveMap();await api('POST','/maps/complete',{id:m.id});dirty=false;activeMap=null;toast('Mapa concluído e movido para Concluídos.');await navigate('completed');});
  on($('#delete-map'),'click',async()=>{if(!confirm('Excluir definitivamente este mapa e todas as cotações registradas nele? Mensagens já enviadas permanecem no Histórico. Esta ação não pode ser desfeita pela tela.'))return;await api('POST','/maps/delete',{id:m.id});dirty=false;activeMap=null;toast('Mapa e cotações excluídos.');await navigate('maps');});
  on($('#add-supplier'),'click',()=>addSupplierDialog(detail));
  document.querySelectorAll('[data-remove-supplier]').forEach(el=>on(el,'click',()=>{if(!confirm('Remover este fornecedor e os preços dele deste mapa?'))return;captureMap();m.suppliers=m.suppliers.filter(s=>s.id!==el.dataset.removeSupplier);for(const [itemId,award] of Object.entries(m.awards||{})){if(award.supplier_id===el.dataset.removeSupplier)delete m.awards[itemId];}renderMap({...detail,result:r});markDirty();}));
@@ -562,11 +564,21 @@ async function renderHistory() {
  document.querySelectorAll('[data-review]').forEach(el=>on(el,'click',async()=>{if(!confirm('Você conferiu esta mensagem na conversa do fornecedor?'))return;await api('POST','/review',{id:el.dataset.review,outcome:el.dataset.outcome});await renderHistory();}));
 }
 async function renderSettings() {
- $('#content').innerHTML=`<div class="settings-stack">${whatsappPanel()}<section class="panel settings-panel"><span class="section-kicker">BACKUP &amp; SEGURANÇA</span><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div id="compras-remote-backup" class="notice" style="margin-top:10px">Backup online: verificando servidor…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar e enviar backup</button></div></section><section class="panel settings-panel"><span class="section-kicker">INTERFACE</span><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.4.4')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section></div>`;
+ $('#content').innerHTML=`<div class="settings-stack">${whatsappPanel()}<section class="panel settings-panel"><span class="section-kicker">BACKUP &amp; SEGURANÇA</span><h2>Segurança dos dados</h2><p>O banco local deste módulo é criptografado e verificado quanto à integridade.</p><div id="compras-data-safety" class="notice">Verificando banco de dados…</div><div id="compras-remote-backup" class="notice" style="margin-top:10px">Backup online: verificando servidor…</div><div class="toolbar"><button id="compras-backup-now" class="button primary">Criar e enviar backup</button></div></section><section class="panel settings-panel"><span class="section-kicker">INTERFACE</span><h2>Vyzium · Cotação &amp; Mapas · v${esc(window.vyziumAppVersion||'3.4.6')}</h2><p>Dados, mapas e filtros deste módulo continuam salvos separadamente neste computador.</p><p class="muted">A conexão do WhatsApp pertence ao Vyzium e é reutilizada pelos dois módulos. As bases operacionais de Acompanhamento e Cotação &amp; Mapas continuam independentes.</p><p class="muted">A integração usa WhatsApp Web, sem API oficial. Alterações no serviço podem exigir reconexão.</p><label>Zoom<select id="zoom">${[75,85,89,100,110].map(v=>`<option value="${v}" ${(ui.zoom||85)===v?'selected':''}>${v}%</option>`).join('')}</select></label></section></div>`;
  startWhatsAppPanel();
  on($('#zoom'),'change',async()=>{ui.zoom=Number($('#zoom').value);await window.followup.setZoom(ui.zoom);await persist();});
  const loadSafety=async()=>{try{const state=await api('GET','/data-safety');const protection=state.encrypted?'🔒 Criptografado com SQLCipher':'Banco legado sem criptografia';$('#compras-data-safety').innerHTML=`<strong>${state.integrity?.ok?'✓ Banco íntegro':'⚠ Verificação requer atenção'}</strong> · ${esc(protection)}<br>Schema ${esc(state.schema_version??'—')}`;}catch(e){$('#compras-data-safety').textContent='Não foi possível verificar a segurança do banco.';}api('GET','/remote-backup/status').then(state=>{$('#compras-remote-backup').textContent=state.authorized?'Backup online: Servidor conectado e usuário autorizado. Envio manual ou ao fechar o Vyzium.':`Backup online: acesso ${state.state||'pendente'} no servidor.`;}).catch(e=>{$('#compras-remote-backup').textContent=`Backup online indisponível: ${e.message||e}`;});};
  on($('#compras-backup-now'),'click',async e=>{const b=e.currentTarget;b.disabled=true;const old=b.textContent;b.textContent='Criando e enviando…';try{const r=await api('POST','/remote-backup/create',{});const divergent=r.uploaded&&r.promoted===false;toast(divergent?(r.reason||'Backup preservado como divergente; compare os dados antes de promovê-lo.'):(r.uploaded?`Backup online confirmado como principal: ${String(r.id||'').slice(0,12)}…`:(r.reason||'Backup não enviado.')));await loadSafety();}catch(error){toast(`Falha no backup online: ${error.message||error}`);}finally{b.disabled=false;b.textContent=old;}});
  await loadSafety();
 }
-(async()=>{ui=await api('GET','/settings');ui.filters??={};if(ui.zoom)await window.followup.setZoom(ui.zoom);await navigate('dashboard');})().catch(()=>{$('#content').innerHTML='<div class="notice">Não foi possível carregar o aplicativo. Reinicie e confira o motor Python.</div>';});
+(async()=>{
+ ui=await api('GET','/settings');ui.filters??={};if(ui.zoom)await window.followup.setZoom(ui.zoom);
+ const entry=new URLSearchParams(window.location?.search||'');
+ if(entry.has('open_map')){
+  await navigate('maps');try{await openMap(entry.get('open_map'));}catch(error){toast(error.message||'Mapa não encontrado.');}
+ }else if(entry.has('open_item')){
+  await navigate('items');const item=catalog.find(i=>i.id===entry.get('open_item'));
+  if(item)modal(`<h2>${esc(item.description)}</h2><p><strong>SCI ${esc(item.sci)}</strong> · ${esc(item.company)}</p><p>${qty(item.quantity)} ${esc(item.unit)} · Artigo ${esc(item.article||'—')}</p><p>Comprador: ${esc(item.buyer||'—')}</p><p>Mapas ativos: ${esc((item.maps||[]).join(', ')||'Sem mapa ativo')}</p><p class="muted">Resultado da busca geral. Os filtros da lista foram preservados.</p>`);
+  else toast('O item não está mais na base de compras. Faça uma nova busca.');
+ }else await navigate('dashboard');
+})().catch(()=>{$('#content').innerHTML='<div class="notice">Não foi possível carregar o aplicativo. Reinicie e confira o motor Python.</div>';});

@@ -1,4 +1,5 @@
 from __future__ import annotations
+from global_search import search_followup
 
 import argparse
 import hashlib
@@ -60,7 +61,7 @@ def whatsapp_request(route, body=None):
         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
 
 APP_NAME = "Vyzium"
-APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.4.5")
+APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.4.6")
 DB_SCHEMA_VERSION = 1
 DEFAULT_CONTROL_PRESETS = [
     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
@@ -2419,6 +2420,8 @@ class ApiHandler(BaseHTTPRequestHandler):
         try:
             if parsed.path == "/health":
                 return self._json(200, {"ok": True, "app": APP_NAME})
+            if parsed.path == "/search":
+                return self._json(200, search_followup(self.service.store, parse_qs(parsed.query).get("q", [""])[0]))
             if parsed.path == "/overview":
                 dashboard = self.service.dashboard("")
                 return self._json(200, {

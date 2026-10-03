@@ -786,5 +786,13 @@ document.getElementById('import-button').addEventListener('click', async event =
   settings = await api('GET', '/settings');
   syncControlOptions();
   setMode();
-  await navigate(currentView);
+  const entry=new URLSearchParams(window.location?.search||'');
+  if(entry.has('open_oc')){
+    await navigate('orders');try{await showOrder(entry.get('open_oc'),entry.get('open_supplier')||'');}catch(error){showToast(error.message||'Pedido não encontrado.',true);}
+  }else if(entry.has('open_contact')){
+    await navigate('suppliers');
+    const row=[...document.querySelectorAll('#supplier-body tr[data-key]')].find(r=>r.dataset.key===entry.get('open_contact'));
+    if(row){row.classList.add('search-destination');row.scrollIntoView({block:'center'});row.querySelector('input')?.focus();}
+    else showToast('Fornecedor não encontrado. Faça uma nova busca.',true);
+  }else await navigate(currentView);
 })();

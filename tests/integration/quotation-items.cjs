@@ -195,8 +195,8 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     const saved=await actualApi('GET','/map?id='+setup.map_id);
     assert.equal(saved.result.lines.find(l=>l.id==='a1').chosen.net,'30.00');
     await page.locator('#request-quote').click();await page.locator('#quote-supplier').selectOption('s1');
-    await page.locator('.message-preview').waitFor();
-    assert.ok((await page.locator('.message-preview').textContent()).includes('Peça a1'));
+    await page.locator('#quote-message').waitFor();
+    assert.ok((await page.locator('#quote-message').inputValue()).includes('Peça a1'));
     await page.locator('#modal-close').click();await page.locator('#order-modal').waitFor({state:'hidden'});
     await page.locator('#export-map').click();
     await page.waitForFunction(()=>document.querySelector('#toast').textContent==='Mapa exportado.');

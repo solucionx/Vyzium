@@ -234,3 +234,16 @@
   font-size: 25px;
   font-weight: 650;
 }
+
+.home-search { margin-bottom:24px; padding:16px 18px; border:1px solid var(--line); border-radius:8px; background:#fff; }
+.home-search label { display:block; margin-bottom:8px; color:#18384e; font-size:12px; font-weight:650; }
+.home-search input { width:100%; font:inherit; min-height:38px; }
+.home-search p { margin:8px 0 0; color:var(--muted); font-size:10px; }
+.home-search-results { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; max-height:380px; overflow-y:auto; }
+.home-search-results:not(:empty) { margin-top:12px; }
+.home-search-result { display:flex; flex-direction:column; align-items:flex-start; gap:4px; padding:10px 12px; text-align:left; color:#18384e; border:1px solid var(--line); border-radius:6px; background:#fafcfd; cursor:pointer; font:inherit; overflow-wrap:anywhere; }
+.home-search-result:hover, .home-search-result:focus-visible { background:#eef4f8; outline:2px solid #436b89; outline-offset:-2px; }
+.home-search-result small { font-size:9px; color:var(--muted); }
+.home-search-result strong { font-size:11px; }
+.home-search-result span { font-size:10px; }
+@media(max-width:800px) { .home-search-results { grid-template-columns:1fr; } }

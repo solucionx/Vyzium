@@ -5,6 +5,7 @@ const { spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const { searchNavigation } = require('./search-navigation');
 const { WhatsAppSession, startBridge } = require('./whatsapp');
 const { createUpdater } = require('./updates');
 const { FirebaseClient } = require('./firebase-client');
@@ -291,11 +292,11 @@ async function stopAllEngines() {
 
 const ROUTES = {
   followup: {
-    GET: new Set(['/health', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
+    GET: new Set(['/health', '/search', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
     POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed', '/data-safety/backup'])
   },
   compras: {
-    GET: new Set(['/health', '/overview', '/items', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),
+    GET: new Set(['/health', '/search', '/overview', '/items', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),
     POST: new Set(['/import', '/maps/create', '/maps/save', '/maps/complete', '/maps/archive', '/maps/delete', '/settings', '/send', '/send-negotiation', '/review', '/data-safety/backup'])
   }
 };
@@ -911,10 +912,12 @@ ipcMain.handle('api', async (_event, { method, route, body }) => {
   }
 });
 
-ipcMain.handle('switch-module', async (_event, target) => {
+ipcMain.handle('switch-module', async (_event, target, destination) => {
   if (!workspaceServicesStarted) throw new Error('Entre na sua conta Vyzium.');
   if (updating) throw new Error('Atualização em instalação. Aguarde a reabertura do Vyzium.');
   if (!['followup', 'compras'].includes(target)) throw new Error('Módulo inválido.');
+  if (destination != null && activeModule !== 'home') throw new Error('Abra a busca na Visão Geral.');
+  const searchTarget = searchNavigation(target, destination);
   if (activeRequests) throw new Error('Aguarde a operação atual terminar antes de trocar de módulo.');
   if (navigationBusy) throw new Error('Aguarde a troca de tela terminar.');
   navigationBusy = true;
@@ -925,7 +928,7 @@ ipcMain.handle('switch-module', async (_event, target) => {
     activeModule = target;
     const page = target === 'compras' ? 'compras.html' : 'acompanhamento.html';
     try {
-      await window.loadFile(path.join(__dirname, '..', 'renderer', page));
+      await window.loadFile(path.join(__dirname, '..', 'renderer', page), searchTarget ? {query:searchTarget} : undefined);
     } catch (error) {
       activeModule = previousModule;
       throw error;
@@ -981,6 +984,20 @@ ipcMain.handle('renderer-error', (_event, payload = {}) => {
   return true;
 });
 ipcMain.handle('get-overview', () => getOverview());
+ipcMain.handle('global-search', async (_event, query) => {
+  if (!workspaceServicesStarted || activeModule !== 'home') throw new Error('Abra a busca na Visão Geral.');
+  if (updating || navigationBusy) throw new Error('Aguarde a operação atual terminar.');
+  if (typeof query !== 'string' || query.length > 100) throw new Error('A busca deve ter até 100 caracteres.');
+  if (query.trim().length < 2) return {results:[],has_more:false,errors:[]};
+  activeRequests++;
+  try {
+    const modules=['followup','compras'];
+    const responses=await Promise.allSettled(modules.map(m=>requestEngine(m,'GET','/search?q='+encodeURIComponent(query.trim()))));
+    const results=[],errors=[];let has_more=false;
+    responses.forEach((r,i)=>{if(r.status==='fulfilled'){results.push(...r.value.results);has_more ||= r.value.has_more;}else errors.push(modules[i]==='followup'?'Acompanhamento indisponível':'Compras indisponível');});
+    return {results,has_more,errors};
+  } finally { activeRequests--; }
+});
 ipcMain.handle('copy-text', (_event, value) => { clipboard.writeText(String(value || '')); return true; });
 ipcMain.handle('check-updates', () => updater.check());
 ipcMain.handle('set-zoom', (_event, percent) => {
