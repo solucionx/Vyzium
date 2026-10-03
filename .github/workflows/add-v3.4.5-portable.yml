@@ -1,0 +1,117 @@
+name: Add portable ZIP to Vyzium 3.4.5 Draft
+
+on:
+  push:
+    branches:
+      - release/v3.4.5-portable-only
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: vyzium-3.4.5-portable-only
+  cancel-in-progress: false
+
+jobs:
+  portable:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    env:
+      RELEASE_REPO: solucionx/Vyzium-Releases
+      RELEASE_ID: "402187881"
+      RELEASE_TAG: v3.4.5
+      PORTABLE_NAME: Vyzium-3.4.5-Portable.zip
+      INSTALLER_SHA256: 43d64d8770d6f3734f4508a07661d7ba88fbced64cb93829681399f889131e8b
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download the existing installer from the Draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $raw = gh api "repos/$env:RELEASE_REPO/releases/$env:RELEASE_ID"
+          if ($LASTEXITCODE -ne 0) { throw 'Não foi possível consultar a Draft.' }
+          $release = $raw | ConvertFrom-Json
+          if (-not $release.draft -or $release.tag_name -ne $env:RELEASE_TAG) { throw 'A release deve continuar como Draft v3.4.5.' }
+          if (@($release.assets | Where-Object name -eq $env:PORTABLE_NAME).Count) { throw 'O ZIP já existe; nenhum arquivo será sobrescrito.' }
+          $installer = @($release.assets | Where-Object name -eq 'Vyzium-Setup.exe')
+          if ($installer.Count -ne 1 -or $installer[0].digest -ne "sha256:$env:INSTALLER_SHA256") { throw 'O instalador da Draft mudou.' }
+          New-Item -ItemType Directory -Path incoming -Force | Out-Null
+          $release.assets | ConvertTo-Json -Depth 10 | Set-Content incoming/assets-before.json
+          gh release download $env:RELEASE_TAG --repo $env:RELEASE_REPO --pattern Vyzium-Setup.exe --dir incoming
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao baixar o instalador já validado.' }
+          $actual = (Get-FileHash incoming/Vyzium-Setup.exe -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($actual -ne $env:INSTALLER_SHA256) { throw 'Hash do instalador diferente do original.' }
+          Write-Host "Instalador original confirmado: $actual"
+
+      - name: Extract the exact application already inside the installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          & 7z x incoming/Vyzium-Setup.exe '-oincoming/nsis' -y
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair o instalador NSIS.' }
+          $payload = @(Get-ChildItem incoming/nsis -Recurse -File -Filter app-64.7z)
+          if ($payload.Count -ne 1) { throw 'Pacote x64 do aplicativo não encontrado de forma única.' }
+          & 7z x $payload[0].FullName '-odist/win-unpacked' -y
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao extrair o aplicativo original.' }
+          if (-not (Test-Path dist/win-unpacked/Vyzium.exe)) { throw 'Executável Vyzium ausente.' }
+          if (-not (Test-Path dist/win-unpacked/resources/app.asar)) { throw 'Código empacotado ausente.' }
+          $version = (Get-Item dist/win-unpacked/Vyzium.exe).VersionInfo.ProductVersion
+          if ($version -notmatch '^3\.4\.5(?:\.|$)') { throw "Versão inesperada: $version" }
+          Write-Host "Aplicativo extraído do instalador: $version"
+
+      - name: Verify packaged engines and SQLCipher
+        shell: pwsh
+        run: ./scripts/verify-packaged-engines.ps1
+
+      - name: Create and verify the portable ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Compress-Archive -Path 'dist/win-unpacked/*' -DestinationPath "dist/$env:PORTABLE_NAME" -CompressionLevel Optimal
+          Expand-Archive -Path "dist/$env:PORTABLE_NAME" -DestinationPath incoming/portable-verified
+          $sourceRoot = (Resolve-Path dist/win-unpacked).Path
+          $verifiedRoot = (Resolve-Path incoming/portable-verified).Path
+          $sourceFiles = @(Get-ChildItem $sourceRoot -Recurse -File)
+          $verifiedFiles = @(Get-ChildItem $verifiedRoot -Recurse -File)
+          if ($sourceFiles.Count -ne $verifiedFiles.Count) { throw 'Quantidade de arquivos diferente após compactar.' }
+          foreach ($file in $sourceFiles) {
+            $relative = [IO.Path]::GetRelativePath($sourceRoot, $file.FullName)
+            $copy = Join-Path $verifiedRoot $relative
+            if (-not (Test-Path -LiteralPath $copy)) { throw "Arquivo ausente no ZIP: $relative" }
+            if ((Get-FileHash -LiteralPath $file.FullName).Hash -ne (Get-FileHash -LiteralPath $copy).Hash) { throw "Arquivo alterado no ZIP: $relative" }
+          }
+          Write-Host "ZIP verificado: $($sourceFiles.Count) arquivos idênticos aos do instalador original."
+          Get-FileHash "dist/$env:PORTABLE_NAME" -Algorithm SHA256
+
+      - name: Add only the portable ZIP to the existing Draft
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $before = @(Get-Content incoming/assets-before.json -Raw | ConvertFrom-Json)
+          function Get-Draft {
+            $raw = gh api "repos/$env:RELEASE_REPO/releases/$env:RELEASE_ID"
+            if ($LASTEXITCODE -ne 0) { throw 'Falha ao consultar a Draft.' }
+            $release = $raw | ConvertFrom-Json
+            if (-not $release.draft -or $release.tag_name -ne $env:RELEASE_TAG) { throw 'A release deve continuar como Draft v3.4.5.' }
+            foreach ($asset in $before) {
+              $current = @($release.assets | Where-Object id -eq $asset.id)
+              if ($current.Count -ne 1 -or $current[0].name -ne $asset.name -or $current[0].size -ne $asset.size -or $current[0].digest -ne $asset.digest) { throw "Anexo original alterado: $($asset.name)" }
+            }
+            return $release
+          }
+          $release = Get-Draft
+          if (@($release.assets | Where-Object name -eq $env:PORTABLE_NAME).Count) { throw 'O ZIP já existe; nenhum arquivo será sobrescrito.' }
+          gh release upload $env:RELEASE_TAG "dist/$env:PORTABLE_NAME" --repo $env:RELEASE_REPO
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao anexar o ZIP à Draft.' }
+          $after = Get-Draft
+          $zip = @($after.assets | Where-Object name -eq $env:PORTABLE_NAME)
+          $hash = (Get-FileHash "dist/$env:PORTABLE_NAME" -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($zip.Count -ne 1 -or $zip[0].state -ne 'uploaded' -or $zip[0].digest -ne "sha256:$hash") { throw 'ZIP enviado não corresponde ao arquivo validado.' }
+          if ($after.assets.Count -ne $before.Count + 1) { throw 'Quantidade de anexos mudou além do ZIP portátil.' }
+          Write-Host 'Somente o ZIP portátil foi adicionado. Os anexos anteriores foram preservados e a release continua Draft.'
