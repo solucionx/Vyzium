@@ -930,10 +930,10 @@ test('failed image after successful text is uncertain and never retried automati
  assert.match(result.error,/Texto enviado.*0 de 1/);
 });
 
-test('partial photo sequence preserves exact progress and stops before the remaining photo',async t=>{
+test('partial photo sequence counts a resolved empty media result and stops only on the real failure',async t=>{
  const s=setup(t);s.deps.library.MessageMedia=class {};
  s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
- let calls=0;s.client.sendMessage=async()=>{if(++calls===3)throw Error('image upload interrupted');return {id:{_serialized:'m'+calls}};};
+ let calls=0;s.client.sendMessage=async()=>{calls++;if(calls===3)throw Error('image upload interrupted');if(calls===1)return {id:{_serialized:'text-id'}};return undefined;};
  const ref={mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'};
  const result=await s.send('5585999999999','Texto',[ref,ref,ref]);
  assert.equal(result.status,'uncertain');assert.equal(calls,3);
