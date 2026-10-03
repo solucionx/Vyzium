@@ -53,6 +53,14 @@ class ReferenceImagesTest(PurchasesTest):
             self.s.send({'map_id':self.m['id'], 'supplier_id':'s1', **p})
             self.assertEqual(set(send.call_args.args[1]), {'phone','message'})
 
+
+    def test_whatsapp_timeout_scales_for_ten_and_twenty_reference_photos(self):
+        self.assertEqual(engine.whatsapp_timeout('/wait'), 135)
+        self.assertEqual(engine.whatsapp_timeout('/send', {'phone':'1','message':'x'}), 90)
+        self.assertEqual(engine.whatsapp_timeout('/send', {'images':[{}] * 10}), 590)
+        self.assertEqual(engine.whatsapp_timeout('/send', {'images':[{}] * 20}), 1090)
+        self.assertEqual(engine.whatsapp_timeout('/other'), 85)
+
     def test_partial_delivery_persists_and_remains_blocked_after_reopen(self):
         self.attach()
         p = self.s.preview(self.m['id'], 's1')
