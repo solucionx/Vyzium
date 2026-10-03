@@ -1932,25 +1932,12 @@ class WhatsAppSession {
     return {ready:true};
   }
 
-  async send(phone, message, images = []) {
+  async send(phone, message) {
     if (this.busy) return {status:'failed', error:'Já existe um envio em andamento.'};
     if (this.state.status !== 'ready' || !this.client) return {status:'failed', error:'WhatsApp não conectado.'};
     if (!/^\+?[1-9]\d{7,14}$/.test(phone || '') || typeof message !== 'string' || !message.trim() || message.length > 60000) {
       return {status:'failed', error:'Número ou mensagem inválidos.'};
     }
-
-    let media = [];
-    try {
-      if (!Array.isArray(images) || images.length > 20) throw new Error('Referências inválidas.');
-      media = images.map(image => {
-        if (image?.mime !== 'image/jpeg' || typeof image.data !== 'string' || image.data.length > 160004 || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data)) throw new Error('Imagem de referência inválida.');
-        const raw = Buffer.from(image.data, 'base64');
-        if (raw.length > 120000 || raw[0] !== 255 || raw[1] !== 216 || raw[2] !== 255 || raw.at(-2) !== 255 || raw.at(-1) !== 217) throw new Error('Imagem de referência inválida.');
-        if (typeof image.caption !== 'string' || image.caption.length > 2000) throw new Error('Legenda inválida.');
-        const {MessageMedia} = this.deps.library || require('whatsapp-web.js');
-        return {content: new MessageMedia('image/jpeg', image.data, 'referencia.jpg'), caption: image.caption};
-      });
-    } catch (error) { return {status:'failed', error:error.message}; }
 
     this.busy = true;
     let submitted = false;
@@ -1964,7 +1951,6 @@ class WhatsAppSession {
         return {status:'failed', error:'Conexão do WhatsApp indisponível antes do envio.'};
       }
 
-      const batchDeadline = media.length ? Date.now() + 70000 : Infinity;
       const candidates = phoneCandidates(phone);
       let number = null;
       let resolvedPhone = null;
@@ -1992,16 +1978,11 @@ class WhatsAppSession {
       submitted = true;
       const result = await bounded(
         client.sendMessage(number._serialized, message, {waitUntilMsgSent:true}),
-        Math.max(1, Math.min(this.sendTimeoutMs, batchDeadline - Date.now())),
+        this.sendTimeoutMs,
         'O WhatsApp não concluiu a chamada de envio dentro do prazo.'
       );
 
       messageId = messageIdentity(result);
-      for (const image of media) {
-        const remaining = batchDeadline - Date.now();
-        if (remaining <= 0 || this.state.status !== 'ready' || this.client !== client) throw new Error('Envio das referências interrompido; confira texto e fotos na conversa.');
-        await bounded(client.sendMessage(number._serialized, image.content, {caption:image.caption, waitUntilMsgSent:true}), Math.min(this.sendTimeoutMs, remaining), 'Tempo limite no envio da imagem de referência.');
-      }
 
       // For the current WhatsApp Web integration, a completed sendMessage() call
       // is treated as a successful send. Some WA Web builds do not expose a
@@ -2112,13 +2093,13 @@ async function startBridge(session, token) {
       let body = '';
       for await (const chunk of req) {
         body += chunk;
-        if (body.length > 3800000) {
+        if (body.length > 300000) {
           reply(413,{error:'Mensagem muito grande.'});
           return;
         }
       }
       const data = JSON.parse(body);
-      reply(200, await session.send(data.phone, data.message, data.images));
+      reply(200, await session.send(data.phone, data.message));
     } catch (error) {
       reply(400,{error:error.message});
     }
