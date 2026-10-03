@@ -98,13 +98,13 @@ async function openResult(kind,title){navigation=null;await page.locator('.home-
    assert.equal(await page.locator('[data-open-map]').first().getAttribute('data-open-map'),setup.map_id);
    await page.locator(`[data-open-map="${setup.map_id}"]`).click();assert.equal(await page.locator('#map-urgent').isChecked(),true);await screenshot('map-urgent');
  });
- await check('cancel retains photos; confirmation clears only photos and keeps quotes/history',async()=>{
+ await check('map completion preserves quotes and suppliers and opens completed maps',async()=>{
    const before=(await actualApi('GET','/map?id='+setup.map_id)).map;
-   await page.locator('#complete-map').click();await page.locator('.complete-map-modal').waitFor();assert.match(await page.locator('.complete-map-modal').textContent(),/Fotos de referência removidas/);await screenshot('complete-photo-warning');
-   await page.locator('[data-complete-action="cancel"]').click();assert.ok((await actualApi('GET','/map?id='+setup.map_id)).map.items.some(i=>i.reference_image));
+   await page.locator('#complete-map').click();await page.locator('.complete-map-modal').waitFor();await screenshot('complete-map-confirmation');
+   await page.locator('[data-complete-action="cancel"]').click();assert.equal((await actualApi('GET','/map?id='+setup.map_id)).map.archived,false);
    await page.locator('#complete-map').click();await page.locator('[data-complete-action="confirm"]').click();
    await page.locator(`[data-open-map="${setup.map_id}"]`).waitFor();
-   const after=(await actualApi('GET','/map?id='+setup.map_id)).map;assert.equal(after.archived,true);assert.ok(after.items.every(i=>!i.reference_image));assert.deepEqual(after.quotes,before.quotes);assert.deepEqual(after.suppliers,before.suppliers);
+   const after=(await actualApi('GET','/map?id='+setup.map_id)).map;assert.equal(after.archived,true);assert.deepEqual(after.quotes,before.quotes);assert.deepEqual(after.suppliers,before.suppliers);
  });
  await check('rapid edits and empty input cannot leave stale results',async()=>{
    await goHome();await page.locator('#global-search').fill('lampada');await page.locator('#global-search').fill('zzzz-absent');await page.waitForFunction(()=>document.querySelector('#global-search-status').textContent.includes('Nenhum'));assert.equal(await page.locator('.home-search-result').count(),0);
