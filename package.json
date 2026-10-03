@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.7",
-  "description": "Vyzium 3.4.7: correção do envio de fotos e indicação do resultado de texto e imagens.",
+  "version": "3.4.8",
+  "description": "Vyzium 3.4.8: correção do envio sequencial de várias fotos de referência pelo WhatsApp.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
