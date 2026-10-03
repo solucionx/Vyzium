@@ -47,6 +47,7 @@ function setup(t) {
     browser:'/test/browser',
     ackTimeoutMs:25,
     sendTimeoutMs:100,
+    mediaPaceMs:0,
     numberTimeoutMs:100,
     staleReadyMs:60_000
   });
@@ -951,6 +952,23 @@ test('resolved media send without message object still completes every photo in 
  assert.equal(result.status,'sent');assert.equal(calls,4);
  assert.deepEqual(result.delivery,{text:'sent',images_total:3,images_sent:3});
  assert.equal(result.message_id,'text-id');assert.equal(s.busy,false);
+});
+
+test('ten reference photos are sent sequentially without a shared batch deadline',async t=>{
+ const s=setup(t);s.deps.library.MessageMedia=class {};
+ s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
+ let calls=0,inflight=0,maxInflight=0;
+ s.client.sendMessage=async()=>{
+  calls++;inflight++;maxInflight=Math.max(maxInflight,inflight);
+  await new Promise(resolve=>setImmediate(resolve));
+  inflight--;
+  return calls===1?{id:{_serialized:'text-id'}}:undefined;
+ };
+ const ref={mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'};
+ const result=await s.send('5585999999999','Texto',Array.from({length:10},(_,index)=>({...ref,caption:`Item ${index+1}`})));
+ assert.equal(result.status,'sent');assert.equal(calls,11);assert.equal(maxInflight,1);
+ assert.deepEqual(result.delivery,{text:'sent',images_total:10,images_sent:10});
+ assert.equal(s.busy,false);
 });
 
 test('text timeout leaves photos unattempted and does not report text as sent',async t=>{
