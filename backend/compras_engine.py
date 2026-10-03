@@ -29,43 +29,13 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.6')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.9')
 DB_SCHEMA_VERSION = 1
-
-MAX_REFERENCE_BYTES = 120000
-MAX_REFERENCE_IMAGES = 20
-
 
 def map_urgent(value):
     if not isinstance(value, bool):
         raise ValueError('Marcação de urgência inválida.')
     return value
-
-
-def validate_reference(value):
-    if value is None:
-        return None
-    if not isinstance(value, dict) or value.get('mime') != 'image/jpeg':
-        raise ValueError('A referência deve ser uma imagem JPEG preparada pelo aplicativo.')
-    encoded = value.get('data')
-    if not isinstance(encoded, str) or len(encoded) > MAX_REFERENCE_BYTES * 4 // 3 + 4:
-        raise ValueError('Imagem de referência muito grande.')
-    try:
-        raw = base64.b64decode(encoded, validate=True)
-    except Exception as exc:
-        raise ValueError('Imagem de referência inválida.') from exc
-    if not raw.startswith(b'\xff\xd8\xff') or not raw.endswith(b'\xff\xd9') or len(raw) > MAX_REFERENCE_BYTES:
-        raise ValueError('Imagem de referência inválida.')
-    return {'mime': 'image/jpeg', 'data': encoded}
-
-
-def quote_references(items, message):
-    # Match a complete numbered item line; removing that line also removes its photo.
-    lines = set(message.splitlines())
-    return [{'item_id': item['id'], 'caption': f"{n}. {item['description']} — {item['company']}",
-             **validate_reference(item['reference_image'])}
-            for n, item in enumerate(items, 1)
-            if item.get('reference_image') and f"{n}. {item['description']}" in lines]
 
 
 def norm(value):
@@ -593,8 +563,8 @@ class Store:
             if any(catalog[i]['maps'] for i in ids):
                 raise ValueError('Há item em outro mapa ativo. Conclua o mapa anterior antes de reutilizá-lo.')
             data = {'id': uuid.uuid4().hex, 'name': name, 'created': now(), 'revision': 1,
-                    'urgent': map_urgent(body.get('urgent', False)),
                     'due_date': normalize_map_due_date(body.get('due_date')),
+                    'urgent': map_urgent(body.get('urgent', False)),
                     'items': [{**catalog[i], 'note': catalog[i].get('note', ''), 'purchase_type': catalog[i].get('purchase_type', '')} for i in ids],
                     'suppliers': [], 'quotes': {}, 'choices': {}, 'awards': {}, 'saving_target': '5', 'archived': False}
             self.put('maps', data['id'], data)
@@ -635,12 +605,8 @@ class Store:
 
     def complete_map(self, mid):
         with self.lock:
-            if self.send_lock.locked():
-                raise ValueError('Aguarde o envio terminar antes de concluir o mapa.')
             data = self.get_map(mid)
             if not data.get('archived'):
-                for item in data.get('items', []):
-                    item.pop('reference_image', None)
                 stamp = now()
                 data.update(archived=True, completed_at=stamp, updated=stamp, revision=data.get('revision', 0) + 1)
                 self.put('maps', data['id'], data)
@@ -739,10 +705,6 @@ class Store:
                 if i['id'] in notes:
                     i['note'] = text(notes[i['id']].get('note'))[:2000]
                     i['purchase_type'] = text(notes[i['id']].get('purchase_type'))[:100]
-                    if 'reference_image' in notes[i['id']]:
-                        i['reference_image'] = validate_reference(notes[i['id']]['reference_image'])
-            if sum(bool(i.get('reference_image')) for i in data['items']) > MAX_REFERENCE_IMAGES:
-                raise ValueError('Use no máximo 20 imagens por mapa.')
 
             raw_quotes = body.get('quotes', {})
             data['quotes'] = {i['id']: {s['id']: raw_quotes.get(i['id'], {}).get(s['id'], {}) for s in suppliers} for i in data['items']}
@@ -847,10 +809,8 @@ class Store:
         message = '\n'.join(lines)
         if len(message) > 60000:
             raise ValueError('Mapa muito grande para uma mensagem. Divida os itens em mapas menores.')
-        references = quote_references(data['items'], message)
-        reference_digest = json.dumps(references, sort_keys=True) if references else ''
-        digest = hashlib.sha256((mid + '|' + supplier['phone'] + '|' + message + reference_digest).encode()).hexdigest()
-        return {'supplier': supplier, 'message': message, 'fingerprint': digest, 'revision': data['revision'], 'reference_count': len(references)}
+        digest = hashlib.sha256((mid + '|' + supplier['phone'] + '|' + message).encode()).hexdigest()
+        return {'supplier': supplier, 'message': message, 'fingerprint': digest, 'revision': data['revision']}
 
     def negotiation_preview(self, mid, sid):
         detail = self.detail(mid)
@@ -972,16 +932,12 @@ class Store:
                     raise ValueError('Mensagem muito grande para o WhatsApp.')
                 # Keep the original preview fingerprint: editing the text must
                 # not bypass protection for an already sent/uncertain request.
-                references = quote_references(self.detail(body['map_id'])['map']['items'], message) if p.get('reference_count', 0) else []
-                p = {**p, 'message': message, 'reference_count': len(references)}
+                p = {**p, 'message': message}
                 record = {'id': uuid.uuid4().hex, 'at': now(), 'map_id': body['map_id'], 'kind': 'quote', **p, 'status': 'sending'}
                 self.put('messages', record['id'], record)
             whatsapp_request('/wait')
             submitted = True
-            payload = {'phone': p['supplier']['phone'], 'message': p['message']}
-            if references:
-                payload['images'] = references
-            response = whatsapp_request('/send', payload)
+            response = whatsapp_request('/send', {'phone': p['supplier']['phone'], 'message': p['message']})
             record.update(status=response.get('status', 'uncertain'), error=response.get('error', ''), message_id=response.get('message_id'))
             if record['status'] not in ('sent', 'failed', 'uncertain'):
                 record['status'] = 'uncertain'
