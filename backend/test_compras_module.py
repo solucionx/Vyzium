@@ -176,6 +176,19 @@ class PurchasesTest(unittest.TestCase):
                 self.s.send(self.send_body())
             self.assertEqual(bridge.call_count, 2)
 
+    def test_legacy_reference_image_is_ignored_and_quote_remains_text_only(self):
+        data = self.s.get_map(self.m['id'])
+        data['items'][0]['reference_image'] = {'mime': 'image/jpeg', 'data': 'legacy-bytes'}
+        self.s.put('maps', data['id'], data)
+        preview = self.s.preview(self.m['id'], 's1')
+        self.assertNotIn('reference_count', preview)
+        with patch('compras_engine.whatsapp_request', side_effect=[{'ready': True}, {'status': 'sent'}]) as bridge:
+            result = self.s.send({'map_id': self.m['id'], 'supplier_id': 's1', **preview})
+        self.assertEqual(result['status'], 'sent')
+        send_payload = bridge.call_args.args[1]
+        self.assertEqual(set(send_payload), {'phone', 'message'})
+        self.assertNotIn('legacy-bytes', str(send_payload))
+
     def test_quote_edited_text_is_sent_and_stored_without_changing_map(self):
         before = self.s.get_map(self.m['id'])
         body = {**self.send_body(), 'message': 'Olá!\nCote somente este item, sem observação.'}
