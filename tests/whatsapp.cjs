@@ -942,13 +942,15 @@ test('partial photo sequence preserves exact progress and stops before the remai
  assert.equal(s.status().status,'ready');assert.equal(s.busy,false);
 });
 
-test('missing photo result never becomes a successful complete quote',async t=>{
+test('resolved media send without message object still completes every photo in the batch',async t=>{
  const s=setup(t);s.deps.library.MessageMedia=class {};
  s.client=new s.deps.library.Client({});s.state.status='ready';s.connectionHealthy=async()=>true;
  let calls=0;s.client.sendMessage=async()=>++calls===1?{id:{_serialized:'text-id'}}:undefined;
- const result=await s.send('5585999999999','Texto',[{mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'}]);
- assert.equal(result.status,'uncertain');assert.equal(result.delivery.images_sent,0);
- assert.match(result.error,/não retornou o resultado/);assert.equal(calls,2);
+ const ref={mime:'image/jpeg',data:Buffer.from([255,216,255,1,255,217]).toString('base64'),caption:'Item'};
+ const result=await s.send('5585999999999','Texto',[ref,ref,ref]);
+ assert.equal(result.status,'sent');assert.equal(calls,4);
+ assert.deepEqual(result.delivery,{text:'sent',images_total:3,images_sent:3});
+ assert.equal(result.message_id,'text-id');assert.equal(s.busy,false);
 });
 
 test('text timeout leaves photos unattempted and does not report text as sent',async t=>{
