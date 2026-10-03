@@ -1,9 +1,9 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),vm=require('node:vm'),fs=require('node:fs'),path=require('node:path');
 const source=fs.readFileSync(path.join(__dirname,'../renderer/compras-app.js'),'utf8');
-function setup(fault=false,result={status:'sent'}){
+function setup(fault=false,result={status:'sent'},supplierCount=null){
  const nodes={},calls=[];let inflight=0,max=0;
  const node=s=>nodes[s]??={value:'',disabled:false,textContent:'',handlers:{},innerHTML:''};
- const map={id:'m',suppliers:[{id:'a',name:'A',phone:'111'},{id:'b',name:'B',phone:'222'},{id:'c',name:'C',phone:''}]};
+ const map={id:'m',suppliers:supplierCount?Array.from({length:supplierCount},(_,i)=>({id:'s'+(i+1),name:'Fornecedor '+(i+1),phone:String(1000+i)})):[{id:'a',name:'A',phone:'111'},{id:'b',name:'B',phone:'222'},{id:'c',name:'C',phone:''}]};
  const c={activeMap:map,sending:false,$:s=>s==='#quote-message'?(nodes[s]||null):node(s),esc:s=>String(s??''),modal:()=>{},whatsappPanel:()=>'',startWhatsAppPanel:()=>{},on:(el,e,f)=>el.handlers[e]=f,api:async(method,route,body)=>{
   if(method==='GET'){const sid=new URL('http://local'+route).searchParams.get('supplier');return {supplier:map.suppliers.find(s=>s.id===sid),message:'Original '+sid,fingerprint:'fp'+sid,revision:1};}
   calls.push(body);inflight++;max=Math.max(max,inflight);await new Promise(r=>setImmediate(r));inflight--;if(fault)throw Error('IPC timeout');return result;
@@ -23,6 +23,14 @@ test('empty edited message aborts batch before any send',async()=>{
 });
 test('double click does not create concurrent batches; transport error stops remaining recipients',async()=>{
  const s=setup(true);await Promise.all([s.send(),s.send()]);assert.equal(s.calls.length,1);assert.match(s.node('#quote-progress').textContent,/interrompido/);assert.equal(s.c.sending,false);
+});
+
+test('batch of ten suppliers stays strictly sequential',async()=>{
+ const s=setup(false,{status:'sent'},10);
+ await s.send();
+ assert.equal(s.calls.length,10);assert.equal(s.max(),1);
+ assert.deepEqual(s.calls.map(x=>x.supplier_id),Array.from({length:10},(_,i)=>'s'+(i+1)));
+ assert.match(s.node('#quote-progress').textContent,/finalizado/i);
 });
 
 test('quote result distinguishes completed text from incomplete images and still blocks a second click',async()=>{
