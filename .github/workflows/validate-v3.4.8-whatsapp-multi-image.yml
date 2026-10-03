@@ -1,0 +1,269 @@
+name: Vyzium 3.4.8 WhatsApp Multi Image Draft
+
+on:
+  push:
+    branches:
+      - fix/v3.4.8-whatsapp-multi-image
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag da versão (opcional)"
+        required: false
+        type: string
+
+concurrency:
+  group: vyzium-3.4.8-whatsapp-multi-image
+  cancel-in-progress: true
+
+# O workflow apenas lê o repositório de código. A permissão para publicar
+# em Vyzium-Releases vem exclusivamente do secret VYZIUM_RELEASE_TOKEN.
+permissions:
+  contents: read
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 35
+
+    env:
+      PUPPETEER_SKIP_DOWNLOAD: "true"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+      RELEASE_REPO: "solucionx/Vyzium-Releases"
+
+    steps:
+      - name: Baixar código
+        uses: actions/checkout@v4
+
+      - name: Verificar que o repositório não contém bancos ou credenciais privadas
+        shell: pwsh
+        run: ./scripts/verify-repository-safety.ps1
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Configurar Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Resolver versão e tag
+        shell: pwsh
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          $version = (Get-Content package.json | ConvertFrom-Json).version
+          if ($env:INPUT_TAG) {
+            $tag = $env:INPUT_TAG.Trim()
+          } else {
+            $tag = "v$version"
+          }
+
+          if ($tag -ne "v$version") {
+            throw "A tag '$tag' não corresponde à versão '$version' do package.json. Use v$version."
+          }
+
+          "RELEASE_TAG=$tag" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          "VYZIUM_APP_VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "Versão: $version"
+          Write-Host "Destino da Release: $env:RELEASE_REPO"
+          Write-Host "Release: $tag"
+
+      - name: Validar configuração do canal de Release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          if (-not $env:GH_TOKEN) {
+            throw "Secret VYZIUM_RELEASE_TOKEN não configurado no repositório de código."
+          }
+          if ($env:RELEASE_REPO -ne "solucionx/Vyzium-Releases") {
+            throw "Destino de Release inesperado: $env:RELEASE_REPO"
+          }
+          gh repo view $env:RELEASE_REPO --json nameWithOwner,visibility | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "Não foi possível acessar $env:RELEASE_REPO com VYZIUM_RELEASE_TOKEN."
+          }
+
+      - name: Instalar dependências Node
+        run: npm ci
+
+      - name: Verificar correção do whatsapp-web.js
+        run: npm run verify:whatsapp-patch
+
+      - name: Instalar dependências Python
+        run: python -m pip install -r backend/requirements.txt
+
+      - name: Executar testes
+        run: npm test
+
+      - name: Instalar navegador apenas no ambiente de QA
+        shell: pwsh
+        run: |
+          npm install --prefix .qa --no-package-lock --ignore-scripts playwright@1.55.0
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar ferramentas de QA.' }
+          node .qa/node_modules/playwright/cli.js install chromium --only-shell
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao instalar navegador de QA.' }
+
+      - name: Validar interface e regressão de inclusão de itens
+        shell: pwsh
+        run: |
+          $env:NODE_PATH = (Resolve-Path .qa/node_modules).Path
+          $env:VYZIUM_TEST_OUTPUT_DIR = Join-Path $env:RUNNER_TEMP 'vyzium-ui-validation'
+          node tests/integration/home-search.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Falha na integração de busca, urgência ou conclusão.' }
+          node tests/integration/quotation-items.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Regressão na inclusão de itens.' }
+
+      - name: Guardar evidências da interface
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-UI-${{ env.APP_VERSION }}
+          path: ${{ runner.temp }}/vyzium-ui-validation
+          if-no-files-found: warn
+
+      - name: Compilar motor de Acompanhamento
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name followup-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-followup
+          backend/engine.py
+
+      - name: Compilar motor de Cotação & Mapas
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name compras-engine
+          --collect-all openpyxl
+          --collect-all sqlcipher3
+          --hidden-import xlrd
+          --hidden-import xlwt
+          --distpath dist-engine
+          --workpath build/pyinstaller-compras
+          backend/compras_engine.py
+
+      - name: Compilar motor de restauração e merge
+        run: >
+          python -m PyInstaller
+          --noconfirm
+          --clean
+          --onefile
+          --name backup-sync-engine
+          --collect-all sqlcipher3
+          --distpath dist-engine
+          --workpath build/pyinstaller-backup-sync
+          backend/backup_sync.py
+
+      - name: Verificar motores antes do empacotamento
+        shell: pwsh
+        run: ./scripts/verify-engines.ps1
+
+      - name: Gerar instalador Windows
+        run: npm run build
+
+      - name: Verificar motores dentro do pacote Windows
+        shell: pwsh
+        run: |
+          ./scripts/verify-packaged-engines.ps1
+          node scripts/verify-packaged-whatsapp.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Correção de mídia ausente ou bootstrap alterado no pacote.' }
+          & dist/win-unpacked/resources/backend/compras-engine.exe --help
+          if ($LASTEXITCODE -ne 0) { throw 'O motor de compras empacotado não iniciou.' }
+
+      - name: Gerar portátil e verificar todos os arquivos do ZIP
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $portable = "dist/Vyzium-$env:APP_VERSION-Portable.zip"
+          Compress-Archive -Path 'dist/win-unpacked/*' -DestinationPath $portable -CompressionLevel Optimal
+          $verifiedRoot = Join-Path $env:RUNNER_TEMP 'vyzium-portable-verified'
+          Expand-Archive -Path $portable -DestinationPath $verifiedRoot
+          $sourceRoot = (Resolve-Path dist/win-unpacked).Path
+          $sourceFiles = @(Get-ChildItem $sourceRoot -Recurse -File)
+          $verifiedFiles = @(Get-ChildItem $verifiedRoot -Recurse -File)
+          if ($sourceFiles.Count -ne $verifiedFiles.Count) { throw 'Quantidade de arquivos diferente no portátil.' }
+          foreach ($file in $sourceFiles) {
+            $relative = [IO.Path]::GetRelativePath($sourceRoot, $file.FullName)
+            $copy = Join-Path $verifiedRoot $relative
+            if (-not (Test-Path -LiteralPath $copy)) { throw "Arquivo ausente no ZIP: $relative" }
+            if ((Get-FileHash -LiteralPath $file.FullName).Hash -ne (Get-FileHash -LiteralPath $copy).Hash) { throw "Arquivo alterado no ZIP: $relative" }
+          }
+          Write-Host "Portátil verificado: $($sourceFiles.Count) arquivos idênticos ao aplicativo empacotado."
+
+      - name: Gerar código-fonte e checksums
+        shell: pwsh
+        run: |
+          git archive --format=zip --output="dist/Vyzium-$env:APP_VERSION-Source.zip" HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao gerar arquivo de código-fonte.' }
+          $files = @('dist/Vyzium-Setup.exe', 'dist/Vyzium-Setup.exe.blockmap', 'dist/latest.yml', "dist/Vyzium-$env:APP_VERSION-Portable.zip", "dist/Vyzium-$env:APP_VERSION-Source.zip")
+          $lines = foreach ($file in $files) {
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            "$hash  $([IO.Path]::GetFileName($file))"
+          }
+          $lines | Set-Content dist/SHA256SUMS.txt -Encoding utf8
+
+      - name: Guardar distribuição como artefato do Actions
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-Windows-${{ env.APP_VERSION }}
+          path: |
+            dist/Vyzium-Setup.exe
+            dist/Vyzium-Setup.exe.blockmap
+            dist/latest.yml
+            dist/*-Portable.zip
+            dist/*-Source.zip
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+
+      - name: Criar Draft somente após todas as validações
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tag = $env:RELEASE_TAG
+          $releaseRepo = $env:RELEASE_REPO
+          $notes = 'docs/RELEASE_3.4.8.md'
+          gh release view $tag --repo $releaseRepo *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --repo $releaseRepo --target main --draft --title "Vyzium $tag" --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw 'Falha ao criar a Draft.' }
+          } else {
+            $raw = gh release view $tag --repo $releaseRepo --json isDraft
+            if ($LASTEXITCODE -ne 0) { throw 'Falha ao consultar o estado da release.' }
+            if (-not ($raw | ConvertFrom-Json).isDraft) { throw 'A release já foi publicada. Gere outra versão.' }
+            gh release edit $tag --repo $releaseRepo --notes-file $notes
+            if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar as notas da Draft.' }
+          }
+          $files = @('dist/Vyzium-Setup.exe', 'dist/Vyzium-Setup.exe.blockmap', 'dist/latest.yml', "dist/Vyzium-$env:APP_VERSION-Portable.zip", "dist/Vyzium-$env:APP_VERSION-Source.zip", 'dist/SHA256SUMS.txt')
+          # Revalidar Draft imediatamente antes do upload; nunca sobrescrever versão publicada.
+          $raw = gh release view $tag --repo $releaseRepo --json isDraft
+          if ($LASTEXITCODE -ne 0 -or -not ($raw | ConvertFrom-Json).isDraft) { throw 'Upload bloqueado: a release deve continuar Draft.' }
+          gh release upload $tag @files --repo $releaseRepo --clobber
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao anexar a distribuição.' }
+          $raw = gh api "repos/$releaseRepo/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao verificar os anexos enviados.' }
+          $release = @($raw | ConvertFrom-Json | Where-Object tag_name -eq $tag)
+          if ($release.Count -ne 1 -or -not $release[0].draft) { throw 'Estado final da Draft inesperado.' }
+          if ($release[0].assets.Count -ne $files.Count) { throw 'Quantidade de anexos inesperada.' }
+          foreach ($file in $files) {
+            $name = [IO.Path]::GetFileName($file)
+            $asset = @($release[0].assets | Where-Object name -eq $name)
+            $hash = (Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($asset.Count -ne 1 -or $asset[0].state -ne 'uploaded' -or $asset[0].digest -ne "sha256:$hash") { throw "Anexo inválido: $name" }
+          }
+          Write-Host 'Draft validada com instalador, portátil, fonte, metadados e checksums. Publicação exclusivamente manual.'
