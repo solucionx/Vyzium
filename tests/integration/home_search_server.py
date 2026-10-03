@@ -19,10 +19,9 @@ engine.whatsapp_request=no_send
 with tempfile.TemporaryDirectory() as directory:
     root=Path(directory)
     store=compras.Store(str(root/'compras'));data=fixtures.MapItemsTest.seed(store)
-    data['items'][0]['reference_image']={'mime':'image/jpeg','data':'/9j/2Q=='}
     store.put('maps',data['id'],data)
     extra={**data['items'][0],'id':'search-item','sci':'SCI-777','description':'Peça <especial> & teste','buyer':'Outro comprador'}
-    extra.pop('reference_image',None);store.put('items',extra['id'],extra)
+    store.put('items',extra['id'],extra)
     store.put('settings','ui',{'id':'ui','filters':{'buyer':'Teste','search':'Cabo'}})
     follow=engine.Store(root/'followup.db')
     book=Workbook();sheet=book.active
