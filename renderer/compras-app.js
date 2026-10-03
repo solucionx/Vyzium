@@ -341,7 +341,7 @@ function renderMap(detail) {
          <span>${m.items.length} ${m.items.length===1?'item':'itens'}</span>
          <span>${m.suppliers.length} ${m.suppliers.length===1?'fornecedor':'fornecedores'}</span>
          <span>${defined} ${defined===1?'item definido':'itens definidos'}</span>
-         <label class="map-due-field">Prazo do mapa <input id="map-due-date" type="date" value="${esc(m.due_date)}"></label>
+         <label class="map-urgent-control"><input id="map-urgent" type="checkbox" ${m.urgent?'checked':''}> Mapa urgente</label><label class="map-due-field">Prazo do mapa <input id="map-due-date" type="date" value="${esc(m.due_date)}"></label>
          <span class="map-deadline map-deadline-${due.state}">${esc(due.label)}</span>
          <label class="saving-target-inline">Meta de saving <span><input id="saving-target" inputmode="decimal" value="${esc(m.saving_target)}" maxlength="6">%</span></label>
        </div>
