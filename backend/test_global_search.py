@@ -78,7 +78,7 @@ class MapPriorityAndCompletionTest(unittest.TestCase):
 
     def test_urgent_active_first_completed_keep_their_order(self):
         data=copy.deepcopy(self.map);data['urgent']=True;data['created']='2020-01-01';self.store.put('maps',data['id'],data)
-        normal=copy.deepcopy(data);normal.update(id='normal',urgent=False,created='2030-01-01');self.store.put('maps','normal',normal)
+        normal=copy.deepcopy(data);normal.update(id='normal',urgent=False,created='2030-01-01',updated='2030-01-01');self.store.put('maps','normal',normal)
         self.assertEqual(self.store.map_summaries()[0]['id'],data['id'])
         self.store.complete_map(data['id']);self.assertFalse(self.store.map_summaries()[0]['archived'])
 
