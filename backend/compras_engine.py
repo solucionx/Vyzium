@@ -29,7 +29,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.7')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.8')
 DB_SCHEMA_VERSION = 1
 
 MAX_REFERENCE_BYTES = 120000
