@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.6",
-  "description": "Vyzium 3.4.6: busca na Visão Geral, urgência dos mapas e limpeza de fotos ao concluir.",
+  "version": "3.4.9",
+  "description": "Vyzium 3.4.9: base estável 3.4.6 sem envio de imagens, com busca na Visão Geral e mapas urgentes.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
