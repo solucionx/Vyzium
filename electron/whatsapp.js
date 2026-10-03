@@ -363,6 +363,7 @@ class WhatsAppSession {
     this.busy = false;
     this.generation = 0;
     this.sendTimeoutMs = Number(deps.sendTimeoutMs || 45000);
+    this.mediaPaceMs = Math.max(0, Math.min(2000, Number(deps.mediaPaceMs ?? 500) || 0));
     this.numberTimeoutMs = Number(deps.numberTimeoutMs || 15000);
     this.healthTimeoutMs = Number(deps.healthTimeoutMs || 5000);
     this.healthIntervalMs = Number(deps.healthIntervalMs || 15000);
@@ -1965,7 +1966,6 @@ class WhatsAppSession {
         return {status:'failed', error:'Conexão do WhatsApp indisponível antes do envio.'};
       }
 
-      const batchDeadline = media.length ? Date.now() + 70000 : Infinity;
       const candidates = phoneCandidates(phone);
       let number = null;
       let resolvedPhone = null;
@@ -1995,22 +1995,23 @@ class WhatsAppSession {
       this._audit('send.start', {images:media.length});
       const result = await bounded(
         client.sendMessage(number._serialized, message, {waitUntilMsgSent:true}),
-        Math.max(1, Math.min(this.sendTimeoutMs, batchDeadline - Date.now())),
+        this.sendTimeoutMs,
         'O WhatsApp não concluiu a chamada de envio dentro do prazo.'
       );
 
       messageId = messageIdentity(result);
       delivery.text = 'sent';
       this._audit('send.text-complete', {hasMessageId:Boolean(messageId), images:media.length});
-      for (const image of media) {
-        const remaining = batchDeadline - Date.now();
-        if (remaining <= 0 || this.state.status !== 'ready' || this.client !== client) throw new Error('Envio das referências interrompido; confira texto e fotos na conversa.');
-        const imageResult = await bounded(client.sendMessage(number._serialized, image.content, {caption:image.caption, waitUntilMsgSent:true}), Math.min(this.sendTimeoutMs, remaining), 'Tempo limite no envio da imagem de referência.');
+      for (let index = 0; index < media.length; index++) {
+        const image = media[index];
+        if (this.state.status !== 'ready' || this.client !== client) throw new Error('Envio das referências interrompido; confira texto e fotos na conversa.');
+        const imageResult = await bounded(client.sendMessage(number._serialized, image.content, {caption:image.caption, waitUntilMsgSent:true}), this.sendTimeoutMs, 'Tempo limite no envio da imagem de referência.');
         // As with text, some WhatsApp Web builds resolve a successful media send
         // without returning a message object. A resolved sendMessage() call is the
         // completion signal; only a rejection/timeout means this photo is uncertain.
         delivery.images_sent++;
         this._audit('send.image-complete', {index:delivery.images_sent, total:media.length, hasMessageId:Boolean(messageIdentity(imageResult))});
+        if (index + 1 < media.length && this.mediaPaceMs) await delay(this.mediaPaceMs);
       }
 
       // For the current WhatsApp Web integration, a completed sendMessage() call
