@@ -13,13 +13,13 @@ const normalize = value=>String(value || '').replace(/\\/g, '/').replace(/^\/+/,
 
 function readPackaged(relativePath) {
   const wanted = normalize(relativePath);
-  const entries = asar.listPackage(archive).map(normalize);
-  const matches = entries.filter(entry=>entry === wanted || entry.endsWith('/' + wanted));
+  const entries = asar.listPackage(archive).map(raw=>({raw, normalized:normalize(raw)}));
+  const matches = entries.filter(entry=>entry.normalized === wanted || entry.normalized.endsWith('/' + wanted));
   if (matches.length > 1) {
-    throw new Error(`Arquivo duplicado no app.asar: ${wanted} (${matches.join(', ')})`);
+    throw new Error(`Arquivo duplicado no app.asar: ${wanted} (${matches.map(entry=>entry.raw).join(', ')})`);
   }
   if (matches.length === 1) {
-    return {data:asar.extractFile(archive, matches[0]), location:`app.asar:${matches[0]}`};
+    return {data:asar.extractFile(archive, matches[0].raw), location:`app.asar:${matches[0].raw}`};
   }
 
   const unpackedRoot = archive.replace(/\.asar$/i, '.asar.unpacked');
