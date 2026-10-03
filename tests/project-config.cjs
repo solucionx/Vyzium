@@ -8,9 +8,9 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('3.4.6 production candidate keeps the stable Vyzium identity and Draft release channel', () => {
+test('3.4.9 production candidate keeps the stable Vyzium identity and Draft release channel', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.version, '3.4.6');
+  assert.equal(pkg.version, '3.4.9');
   assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
   assert.equal(pkg.build?.productName, 'Vyzium');
   assert.equal(pkg.build?.artifactName, "Vyzium-Setup.${ext}");
@@ -134,7 +134,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.4.6');
+  assert.equal(pkg.version, '3.4.9');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
