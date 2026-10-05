@@ -29,7 +29,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.9')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.10')
 DB_SCHEMA_VERSION = 1
 
 def map_urgent(value):
