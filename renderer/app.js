@@ -243,7 +243,7 @@ async function renderOrders() {
   content.innerHTML = `<section class="panel orders-panel">
     <div class="panel-head"><div><p class="section-kicker">ACOMPANHAMENTO SCI</p><h2>Controle de ordens de compra</h2><p>Clique em qualquer linha para mostrar os itens da ordem.</p></div></div>
     <div class="toolbar">
-      <input id="order-search" class="search" placeholder="Buscar OC, fornecedor ou item">
+      <input id="order-search" class="search" placeholder="Buscar OC, SCI, fornecedor ou item">
       <select id="buyer-filter"><option value="">Todos os compradores</option>${filters.buyers.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>
       <select id="company-filter"><option value="">Todas as empresas</option>${filters.companies.map(value => `<option value="${escapeHtml(value)}">${escapeHtml(value)}</option>`).join('')}</select>
       <details id="attendance-filter" class="multi-filter">
@@ -326,7 +326,7 @@ async function renderOrders() {
         const receipts = item.receipts.length
           ? item.receipts.map(receipt => `NF ${escapeHtml(receipt.invoice || 's/n')} · ${formatDate(receipt.receipt_date)}`).join('<br>')
           : '<span class="muted">Sem entrada</span>';
-        return `<tr><td><strong>${escapeHtml(item.article_code || '')}</strong><br>${escapeHtml(item.description)}</td><td>${Number(item.quantity || 0).toLocaleString('pt-BR')} ${escapeHtml(item.unit || '')}</td><td>${Number(item.received_qty || 0).toLocaleString('pt-BR')}</td><td>${Number(item.remaining_qty || 0).toLocaleString('pt-BR')}</td><td>${escapeHtml(item.order_status || 'Pendente')}</td><td>${formatDate(item.due_date)}</td><td>${receipts}</td></tr>`;
+        return `<tr><td><strong>${escapeHtml(item.article_code || '')}</strong><br>${escapeHtml(item.description)}<small class="muted">SCI ${escapeHtml(item.sci || '—')}</small></td><td>${Number(item.quantity || 0).toLocaleString('pt-BR')} ${escapeHtml(item.unit || '')}</td><td>${Number(item.received_qty || 0).toLocaleString('pt-BR')}</td><td>${Number(item.remaining_qty || 0).toLocaleString('pt-BR')}</td><td>${escapeHtml(item.order_status || 'Pendente')}</td><td>${formatDate(item.due_date)}</td><td>${receipts}</td></tr>`;
       }).join('')}</tbody></table></div>
     </div>`;
   };
@@ -446,7 +446,7 @@ async function showOrder(oc, supplierKey) {
         const progress = ordered > 0 ? Math.min(100, Math.round(received / ordered * 100)) : 0;
         const receiptText = item.receipts.length ? item.receipts.map(receipt => `NF ${escapeHtml(receipt.invoice || 's/n')} — ${formatDate(receipt.receipt_date)} — ${Number(receipt.quantity || 0).toLocaleString('pt-BR')} ${escapeHtml(receipt.unit || item.unit || '')}`).join('<br>') : 'Nenhuma entrada registrada';
         const warning = item.data_warning ? `<div class="data-warning">⚠ ${escapeHtml(item.data_warning)}</div>` : '';
-        return `<tr><td><strong>${escapeHtml(item.article_code || '')}</strong><br>${escapeHtml(item.description)}${warning}<div class="receipts">${receiptText}</div></td>
+        return `<tr><td><strong>${escapeHtml(item.article_code || '')}</strong><br>${escapeHtml(item.description)}<small class="muted">SCI ${escapeHtml(item.sci || '—')}</small>${warning}<div class="receipts">${receiptText}</div></td>
           <td><span class="badge status-${escapeHtml(item.urgency)}">${escapeHtml(item.order_status)}</span></td>
           <td>${ordered.toLocaleString('pt-BR')} ${escapeHtml(item.unit || '')}</td><td>${received.toLocaleString('pt-BR')}</td><td>${Number(item.remaining_qty || 0).toLocaleString('pt-BR')}</td>
           <td>${formatDate(item.due_date)}</td><td class="money">${formatCurrency(item.value_total)}<progress class="progress" max="100" value="${progress}"></progress></td></tr>`;
