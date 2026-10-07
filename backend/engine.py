@@ -162,7 +162,6 @@ TARGET_FIELDS = {
     "received_qty": ["QUANTIDADERECEBIDA", "QUANTIDADE RECEBIDA"],
     "invoice": ["ANNUMERODANOTAFISCAL", "NUMERO DA NOTA FISCAL"],
     "receipt_unit": ["UNIDADEMEDIDARECEBIDA", "UNIDADE MEDIDA RECEBIDA"],
-    "receipt_id": ["IDITEMDAENTRADA", "IDITEMENTRADAMERCADORIA", "IDENTRADAMERCADORIA"],
     "urgent": ["URGENTE"],
 }
 REQUIRED_FIELDS = {"oc", "company", "description", "due_date", "supplier_name"}
@@ -1417,39 +1416,12 @@ class WorkbookImporter:
                 if received_qty is not None:
                     invoice = text_value(get("invoice"))
                     receipt_unit = text_value(get("receipt_unit"))
-                    receipt_source_id = text_value(get("receipt_id"))
-                    # Prefer the ERP entry-item identifier. When it is absent,
-                    # deliberately exclude the unit from the fallback identity so
-                    # contradictory units for the same NF/date/quantity cannot be
-                    # counted twice as separate receipts.
-                    receipt_identity = "|".join(
-                        [item_key, "ID", receipt_source_id]
-                        if receipt_source_id
-                        else [item_key, "FALLBACK", received_date or "", invoice, str(received_qty)]
-                    )
+                    receipt_identity = "|".join([item_key, received_date or "", invoice, str(received_qty), receipt_unit])
                     receipt_key = hashlib.sha256(receipt_identity.encode("utf-8")).hexdigest()[:24]
-                    incoming_receipt = {
+                    row["_receipts"][receipt_key] = {
                         "receipt_key": receipt_key, "item_key": item_key, "receipt_date": received_date,
                         "invoice": invoice, "quantity": received_qty, "unit": receipt_unit,
                     }
-                    existing_receipt = row["_receipts"].get(receipt_key)
-                    if existing_receipt is None:
-                        row["_receipts"][receipt_key] = incoming_receipt
-                    else:
-                        for field in ("receipt_date", "invoice", "quantity", "unit"):
-                            incoming = incoming_receipt[field]
-                            current = existing_receipt[field]
-                            if incoming in (None, ""):
-                                continue
-                            if current in (None, ""):
-                                existing_receipt[field] = incoming
-                                continue
-                            if incoming != current:
-                                reference = receipt_source_id or invoice or receipt_key
-                                raise ValueError(
-                                    f"Recebimento ambíguo ({reference}): dados divergentes para a mesma entrada. "
-                                    "A base anterior foi preservada."
-                                )
             rows = []
             receipts = []
             for row in groups.values():
