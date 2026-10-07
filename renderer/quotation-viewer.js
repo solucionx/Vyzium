@@ -66,7 +66,7 @@
           <td class="qv-col-total"><strong>${item.line.chosen?money(item.line.chosen.net):'—'}</strong>${item.line.chosen?`<small>Economia ${money(item.line.chosen.saving)}</small>`:''}</td>
         </tr>`).join('')}</tbody>
         <tfoot><tr>
-          <td class="qv-sticky qv-sheet-total" colspan="3"><strong>Total das propostas preenchidas</strong><small>Somatório apenas dos itens cotados em cada fornecedor.</small></td>
+          <td class="qv-sticky qv-sheet-total" colspan="3"><strong>Totais do mapa completo</strong><small>Não mudam com os filtros · somatório apenas dos itens cotados em cada fornecedor.</small></td>
           <td></td>
           ${suppliers.map(supplier=>`<td><strong>${money(supplier.offerTotal)}</strong><small>${supplier.coverage}/${model.items.length} itens</small></td>`).join('')}
           <td><strong>${model.defined}/${model.items.length} definidos</strong></td>
@@ -95,7 +95,7 @@
       const filter = () => {
         const query = searchText(dialog.querySelector('#qv-search').value), hotel = dialog.querySelector('#qv-hotel').value, state = dialog.querySelector('#qv-state').value;
         const rows = items.filter(item => (!hotel || item.company === hotel) && (!state || item.line.state === state) && (!query || searchText([item.description,item.sci,item.article,item.buyer,item.company,...item.line.quotes.map(quote=>quote.supplier)].join(' ')).includes(query)));
-        dialog.querySelector('#qv-count').textContent = `${rows.length} de ${items.length} itens exibidos · ${model.suppliers.length} fornecedores`;
+        dialog.querySelector('#qv-count').textContent = `${rows.length} de ${items.length} itens exibidos · ${model.suppliers.length} fornecedores · Totais do rodapé = mapa completo`;
         dialog.querySelector('#qv-sheet-host').innerHTML = matrixHtml(model,rows);
       };
       dialog.querySelector('#qv-search').addEventListener('input',filter);
