@@ -65,7 +65,7 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
       if(settled)return;settled=true;clearTimeout(timer);lines.close();
       reject(new Error(message+(serverStderr.trim()?('\n'+serverStderr.trim()):'')));
     };
-    const timer=setTimeout(()=>finishError('Purchase-history backend did not become ready within 15 seconds.'),15000);
+    const timer=setTimeout(()=>finishError('Purchase-history backend did not become ready within 45 seconds.'),45000);
     lines.once('line',line=>{if(settled)return;settled=true;clearTimeout(timer);lines.close();resolve(line);});
     server.once('error',error=>finishError('Purchase-history backend failed to start: '+error.message));
     server.once('exit',(code,signal)=>finishError('Purchase-history backend exited before readiness (code '+code+', signal '+signal+').'));
