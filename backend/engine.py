@@ -28,6 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env, row_factory, ensure_cipher_runtime
 from crypto_migration import migrate_plain_database, validate_encrypted_database, MigrationError
 from workbook_formats import normalize_header
+from followup_purchase_history import FollowupPurchaseHistory
 
 
 class WhatsAppUnavailable(RuntimeError):
@@ -61,7 +62,7 @@ def whatsapp_request(route, body=None):
         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
 
 APP_NAME = "Vyzium"
-APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.4.12")
+APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.4.13")
 DB_SCHEMA_VERSION = 1
 DEFAULT_CONTROL_PRESETS = [
     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
@@ -359,6 +360,7 @@ class Store:
         self.connection = secure_connect(path, key_hex=self.db_key_hex, timeout=10, check_same_thread=False)
         self.connection.row_factory = row_factory(self.db_key_hex)
         self.lock = threading.RLock()
+        self.purchase_history = FollowupPurchaseHistory(path, self.db_key_hex)
         with self.lock:
             self.connection.execute("PRAGMA busy_timeout=10000")
             self.connection.execute("PRAGMA foreign_keys=ON")
@@ -2018,7 +2020,11 @@ class FollowUpService:
                     continue
             preset = presets.get(current_control, {})
             row = self._summary_row(oc, supplier_key, items, control, preset, state=state, attendance=attendance)
-            if search_key and search_key not in row["_haystack"]:
+            # Keep the existing free-text behavior, but treat SCI as an identifier:
+            # an SCI matches only when the normalized number is exact. This avoids
+            # SCI 123 accidentally returning SCI 1234 while preserving OC/item text search.
+            sci_match = any(search_key == normalize(item.get("sci", "")) for item in items) if search_key else False
+            if search_key and search_key not in row["_haystack"] and not sci_match:
                 continue
             row.pop("_haystack", None)
             summaries.append(row)
@@ -2422,6 +2428,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True, "app": APP_NAME})
             if parsed.path == "/search":
                 return self._json(200, search_followup(self.service.store, parse_qs(parsed.query).get("q", [""])[0]))
+            if parsed.path == "/purchase-history":
+                query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+                return self._json(200, self.store.purchase_history.query(query))
             if parsed.path == "/overview":
                 dashboard = self.service.dashboard("")
                 return self._json(200, {
