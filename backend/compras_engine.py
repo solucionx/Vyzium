@@ -542,7 +542,8 @@ class Store:
             raise ValueError('Escolha um arquivo XLS, XLSX ou XLSM.')
         history = {}
         items, report = load_items(path, history)
-        if int(report.get('rows', 0) or 0) <= 0:
+        source_rows = report.get('rows', report.get('source_rows', 0))
+        if int(source_rows or 0) <= 0:
             raise ValueError('A planilha não possui linhas de dados válidas. A base anterior foi preservada.')
         with self.lock, self.db() as con:
             self.safety.backup(reason='pre-import', source_connection=con, automatic=True)
