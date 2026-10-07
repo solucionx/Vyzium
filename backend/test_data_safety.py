@@ -282,7 +282,7 @@ class ImportTransactionSafetyTests(unittest.TestCase):
                 con.execute("CREATE TRIGGER abort_new_items BEFORE INSERT ON items BEGIN SELECT RAISE(ABORT, 'forced failure'); END")
 
             original_loader = compras_engine.load_items
-            compras_engine.load_items = lambda _path: ([{'id': 'new-item', 'company': 'Hotel', 'sci': 'SCI-2'}], {'source_rows': 1})
+            compras_engine.load_items = lambda _path, _history=None: ([{'id': 'new-item', 'company': 'Hotel', 'sci': 'SCI-2'}], {'source_rows': 1})
             try:
                 with self.assertRaises(sqlite3.DatabaseError):
                     store.import_file(root / 'fake.xlsx')

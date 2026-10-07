@@ -27,9 +27,10 @@ from openpyxl import load_workbook
 from workbook_formats import open_book, REPORT_REQUIRED, adapt_report, approval_deadline, normalize_header
 from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
+from purchase_history import HistoryBuilder, search as search_purchases, detail as purchase_detail
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.10')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.11')
 DB_SCHEMA_VERSION = 1
 
 def map_urgent(value):
@@ -162,7 +163,7 @@ def has_active_order(row):
     return re.fullmatch(r'3(?:\.0+)?(?:\s*[-–—]\s*cancelado)?', status, re.IGNORECASE) is None
 
 
-def load_items(path):
+def load_items(path, history=None):
     """Read the raw SCI export, never treating receipt rows as new demand."""
     book = open_book(path, load_workbook)
     groups = {}
@@ -196,6 +197,7 @@ def load_items(path):
             break
         if source is None:
             raise ValueError('Cabeçalhos não reconhecidos nas primeiras 30 linhas. Use o relatório com Número da SCI, Comprador SCI, Status da SCI e Status BPM SCI, ou a BASE SCI original.')
+        history_builder = HistoryBuilder(headers) if history is not None else None
         for row in source:
             if not any(v is not None for v in row):
                 continue
@@ -211,6 +213,8 @@ def load_items(path):
                 if r is None:
                     continue
                 r['NMSTATUSITEMDAORDEMDECOMPRA'] = order_item_status
+            if history_builder is not None:
+                history_builder.add(row)
             rows_seen += 1
             key = '|'.join(text(r.get(k)) for k in ('FKEMPRESA', 'IDSCI', 'IDITEMDASCI'))
             if not text(r.get('IDITEMDASCI')) or not text(r.get('IDSCI')):
@@ -258,6 +262,8 @@ def load_items(path):
                        'urgent': norm(r.get('URGENTE')) in ('TRUE', '1', 'SIM', 'URGENTE'),
                        'status': 'pending' if text(r.get('NMSTATUSDOITEMDASCI')) == '0' else 'quoting',
                        'approval': 'approved' if text(r.get('NMSTATUSBPMSCI')) == '3' else 'waiting'})
+    if history is not None:
+        history.update(history_builder.finish())
     return result, {'rows': rows_seen, 'unique_items': len(groups), 'eligible': len(result), 'excluded': excluded,
                     'format': 'approval_report' if report_format else 'raw_sci', 'deadline_conflicts': deadline_conflicts,
                     'missing_deadline': sum(not i['needed'] for i in result)}
@@ -495,18 +501,36 @@ class Store:
         return json.loads(row[0])
 
     def settings(self):
-        values = self.all('settings')
-        return next((v for v in values if v.get('id') == 'ui'), {'id': 'ui', 'filters': {}})
+        return self.get_setting('ui') or {'id': 'ui', 'filters': {}}
+
+    def get_setting(self, sid):
+        with self.db() as con:
+            row = con.execute('SELECT data FROM settings WHERE id=?', (sid,)).fetchone()
+        return json.loads(row[0]) if row else None
+
+    def purchase_history(self, query):
+        # Single snapshot read while import is locked. Existing schema/backup
+        # encryption applies to this read-only reference data too.
+        with self.lock:
+            snapshot = self.get_setting('purchase-history') or {'lines': [], 'columns': {}}
+        result = purchase_detail(snapshot, query) if query.get('id') else search_purchases(snapshot, query)
+        result['source'] = {k: snapshot.get(k) for k in ('at', 'filename', 'orders', 'items', 'source_rows', 'columns')}
+        result['source']['available'] = snapshot.get('id') == 'purchase-history'
+        return result
 
     def import_file(self, path):
         if Path(path).suffix.lower() not in ('.xls', '.xlsx', '.xlsm'):
             raise ValueError('Escolha um arquivo XLS, XLSX ou XLSM.')
-        items, report = load_items(path)
+        history = {}
+        items, report = load_items(path, history)
         with self.lock, self.db() as con:
             self.safety.backup(reason='pre-import', source_connection=con, automatic=True)
             con.execute('DELETE FROM items')
             con.executemany('INSERT INTO items VALUES (?,?)', [(i['id'], json.dumps(i, ensure_ascii=False)) for i in items])
             report.update(id='import', at=now(), filename=Path(path).name)
+            history.update(at=report['at'], filename=report['filename'])
+            report.update(purchase_orders=history.get('orders', 0), purchase_items=history.get('items', 0))
+            con.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('purchase-history', json.dumps(history, ensure_ascii=False)))
             con.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('import', json.dumps(report)))
             check = [str(row[0]) for row in con.execute('PRAGMA quick_check').fetchall()]
             if check != ['ok']:
@@ -525,7 +549,7 @@ class Store:
             i['maps'] = assigned.get(i['id'], [])
             if i.get('deadline_rule') != 'approval_12_days':
                 i['needed'] = ''  # Old stored necessity dates must never masquerade as approval deadlines.
-        return {'items': items, 'import': next((v for v in self.all('settings') if v.get('id') == 'import'), None)}
+        return {'items': items, 'import': self.get_setting('import')}
 
     def overview(self):
         catalog = self.catalog()
@@ -1025,6 +1049,8 @@ class Handler(BaseHTTPRequestHandler):
                     return self.reply(200, s.overview())
                 if parsed.path == '/items':
                     return self.reply(200, s.catalog())
+                if parsed.path == '/purchase-history':
+                    return self.reply(200, s.purchase_history(query))
                 if parsed.path == '/maps':
                     return self.reply(200, s.map_summaries())
                 if parsed.path == '/map':

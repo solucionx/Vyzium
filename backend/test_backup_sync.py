@@ -59,6 +59,49 @@ def add_compras_source(path: Path, stamp: str, item: dict):
         con.close()
 
 
+class PurchaseHistoryBackupTests(unittest.TestCase):
+    def test_purchase_history_changes_participate_in_the_import_snapshot_and_follow_its_choice(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            local, remote, base, out = [td / n for n in ('l.db', 'r.db', 'b.db', 'o.db')]
+            for path in (local, remote, base):
+                make_compras(path)
+                add_compras_source(path, '2026-10-01T10:00:00', {'id': 'same', 'description': 'Unchanged eligible item'})
+            def put(path, oc):
+                con = sqlite3.connect(path)
+                con.execute("INSERT INTO settings VALUES('purchase-history',?)", (json.dumps({'id': 'purchase-history', 'lines': [{'oc': oc}], 'columns': {'oc': 'IDORDEMDECOMPRA'}}),))
+                con.commit()
+                con.close()
+            put(base, 1)
+            put(remote, 1)
+            put(local, 2)
+            report = analyze('compras', local, remote, base, None)
+            self.assertFalse(any(c['kind'] == 'source_snapshot' for c in report['conflicts']))
+            apply_merge('compras', local, remote, out, base, None, {})
+            con = sqlite3.connect(out)
+            history = json.loads(con.execute("SELECT data FROM settings WHERE id='purchase-history'").fetchone()[0])
+            con.close()
+            self.assertEqual(history['lines'], [{'oc': 2}])
+
+    def test_older_snapshot_without_history_does_not_keep_unrelated_remote_purchase_prices(self):
+        with tempfile.TemporaryDirectory() as td:
+            td = Path(td)
+            local, remote, base, out = [td / n for n in ('l.db', 'r.db', 'b.db', 'o.db')]
+            for path in (local, remote, base):
+                make_compras(path)
+            add_compras_source(local, '2026-10-05T10:00:00', {'id': 'new', 'description': 'New base'})
+            for path in (base, remote):
+                add_compras_source(path, '2026-10-01T10:00:00', {'id': 'old', 'description': 'Old base'})
+                con = sqlite3.connect(path)
+                con.execute("INSERT INTO settings VALUES('purchase-history',?)", (json.dumps({'lines': [{'oc': 'old'}], 'columns': {}}),))
+                con.commit()
+                con.close()
+            apply_merge('compras', local, remote, out, base, None, {})
+            con = sqlite3.connect(out)
+            self.assertIsNone(con.execute("SELECT data FROM settings WHERE id='purchase-history'").fetchone())
+            con.close()
+
+
 class BackupMergeTests(unittest.TestCase):
     def test_local_new_note_is_preserved_when_remote_is_blank(self):
         with tempfile.TemporaryDirectory() as td:

@@ -9,12 +9,13 @@
   <link rel="stylesheet" href="compras.css">
   <link rel="stylesheet" href="operational-ui.css">
   <link rel="stylesheet" href="quotation-viewer.css">
+  <link rel="stylesheet" href="purchase-history.css">
 </head>
 <body class="module-compras">
   <aside class="sidebar">
     <div class="brand">
       <div class="brand-mark"><img src="assets/vyzium-mark-white.svg" alt=""></div>
-      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.4.10</span></div>
+      <div><strong>Vyzium</strong><span data-app-version data-app-version-prefix="v">v3.4.11</span></div>
     </div>
     <nav id="navigation">
       <button class="nav-item nav-home" type="button" data-go-home>
@@ -32,6 +33,10 @@
       <button class="nav-item" data-view="maps">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="7.5" height="7.5" rx="1.6"/><rect x="13" y="3.5" width="7.5" height="4.5" rx="1.6"/><rect x="13" y="10" width="7.5" height="10.5" rx="1.6"/><rect x="3.5" y="13" width="7.5" height="7.5" rx="1.6"/></svg>
         <span>Mapas ativos</span>
+      </button>
+      <button class="nav-item" data-view="purchases">
+        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 5h16v14H4zM4 9h16M8 13h3M8 16h5"/><path d="M15 13h2M15 16h2"/></svg>
+        <span>Últimas compras</span>
       </button>
       <button class="nav-item" data-view="suppliers">
         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 18V7a2 2 0 0 1 2-2h7v13"/><path d="M13 9h4l3 3v6h-3M4 18h2M13 18h1"/><circle cx="8.5" cy="18" r="1.8"/><circle cx="16.5" cy="18" r="1.8"/></svg>
@@ -109,6 +114,7 @@
   <script src="whatsapp.js"></script>
   <script src="purchase-model.js"></script>
   <script src="quotation-viewer.js"></script>
+  <script src="purchase-history.js"></script>
   <script src="compras-app.js"></script>
   <script src="updates.js"></script>
   <script src="module-switch.js"></script>

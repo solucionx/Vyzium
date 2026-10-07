@@ -321,6 +321,13 @@ def _source_snapshot_info(module: str, path: Path, key_hex: str | None) -> dict[
                 digest.update(_json([str(rid), data]).encode("utf-8"))
                 digest.update(b"\n")
                 count += 1
+            # Purchase references belong to the same imported SCI snapshot.
+            # Ignore import timestamps, just as for the item catalog above.
+            history = con.execute("SELECT data FROM settings WHERE id='purchase-history'").fetchone()
+            if history:
+                data = json.loads(history[0])
+                digest.update(_json({k: data.get(k) for k in ('lines', 'columns')}).encode('utf-8'))
+                count += len(data.get('lines', []))
             return {"signature": digest.hexdigest() if count else "", "import_at": stamp, "count": count}
         return {"signature": "", "import_at": "", "count": 0}
     finally:
@@ -422,9 +429,12 @@ def _apply_newer_local_source_snapshot(module: str, local: Path, out, key_hex: s
         _copy_table_snapshot(local, out, "items", key_hex)
         source_con = secure_connect(local, key_hex=key_hex, readonly=True, timeout=30)
         try:
-            row = source_con.execute("SELECT data FROM settings WHERE id='import'").fetchone()
-            if row:
-                out.execute("INSERT OR REPLACE INTO settings(id,data) VALUES('import',?)", (row[0],))
+            for sid in ('import', 'purchase-history'):
+                row = source_con.execute('SELECT data FROM settings WHERE id=?', (sid,)).fetchone()
+                if row:
+                    out.execute('INSERT OR REPLACE INTO settings(id,data) VALUES(?,?)', (sid, row[0]))
+                else:
+                    out.execute('DELETE FROM settings WHERE id=?', (sid,))
         finally:
             source_con.close()
 
