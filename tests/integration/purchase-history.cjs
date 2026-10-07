@@ -107,8 +107,11 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     await page.locator('[data-ph-page="results"][data-page="1"]').click();await ready();
     assert.equal(await page.locator('[data-ph-item]').count(),20);assert.match(await page.locator('.ph-pagination').textContent(),/Página 2/);
   });
-  await check('accent-insensitive search separates OC units and receipt value from OC price',async()=>{
-    await search('lampada');assert.equal(await page.locator('[data-ph-item]').count(),2);await choose();
+  await check('text search selects article identity before calculating latest OC and count',async()=>{
+    await search('lampada');assert.equal(await page.locator('[data-ph-item]').count(),2);
+    assert.match(await item().textContent(),/3 OCs/);
+    assert.match(await item().textContent(),/15,00/);
+    await choose();
     assert.deepEqual(await getOrders(),['OC 202','OC 201','OC 200']);
     const orders=page.locator('[data-ph-order]');
     assert.match(await orders.nth(0).locator('.ph-values').textContent(),/R\$.*15,00/);
