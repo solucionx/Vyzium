@@ -28,6 +28,7 @@ from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env, row_factory, ensure_cipher_runtime
 from crypto_migration import migrate_plain_database, validate_encrypted_database, MigrationError
 from workbook_formats import normalize_header
+from followup_purchase_history import FollowupPurchaseHistory
 
 
 class WhatsAppUnavailable(RuntimeError):
@@ -61,7 +62,7 @@ def whatsapp_request(route, body=None):
         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
 
 APP_NAME = "Vyzium"
-APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.4.12")
+APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.4.13")
 DB_SCHEMA_VERSION = 1
 DEFAULT_CONTROL_PRESETS = [
     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
@@ -341,6 +342,7 @@ class Store:
         path.parent.mkdir(parents=True, exist_ok=True)
         self.path = path
         self.db_key_hex = key_from_env()
+        self.purchase_history = FollowupPurchaseHistory(path, self.db_key_hex)
         self.safety = DataSafetyManager(path, "followup", APP_VERSION, auto_retention=10, key_hex=self.db_key_hex)
         had_existing_database = self.safety.has_existing_database
         # Critical safety rule: validate the user's existing database read-only
@@ -2422,6 +2424,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200, {"ok": True, "app": APP_NAME})
             if parsed.path == "/search":
                 return self._json(200, search_followup(self.service.store, parse_qs(parsed.query).get("q", [""])[0]))
+            if parsed.path == "/purchase-history":
+                query = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+                return self._json(200, self.store.purchase_history.query(query))
             if parsed.path == "/overview":
                 dashboard = self.service.dashboard("")
                 return self._json(200, {

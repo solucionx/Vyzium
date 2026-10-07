@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.12",
-  "description": "Vyzium 3.4.12: histórico com preço unitário da OC e NF, correções de importação, identidade e cache da 3.4.11.",
+  "version": "3.4.13",
+  "description": "Vyzium 3.4.13: últimas compras pela base de OCs do Acompanhamento, todos os compradores, filtros independentes e tela compacta.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {

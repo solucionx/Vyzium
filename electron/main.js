@@ -292,11 +292,11 @@ async function stopAllEngines() {
 
 const ROUTES = {
   followup: {
-    GET: new Set(['/health', '/search', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
+    GET: new Set(['/health', '/search', '/purchase-history', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
     POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed', '/data-safety/backup'])
   },
   compras: {
-    GET: new Set(['/health', '/search', '/overview', '/items', '/purchase-history', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),
+    GET: new Set(['/health', '/search', '/overview', '/items', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),
     POST: new Set(['/import', '/maps/create', '/maps/save', '/maps/complete', '/maps/archive', '/maps/delete', '/settings', '/send', '/send-negotiation', '/review', '/data-safety/backup'])
   }
 };
@@ -590,6 +590,11 @@ async function apiRequest(method, route, body) {
   // Os dois módulos usam a mesma sessão do WhatsApp. Impedir que uma cotação
   // concorra com um lote de follow-up que esteja rodando em segundo plano.
   const routePath = String(route || '').split('?')[0];
+  // This view lives in Compras but its source is always the operational OC
+  // database. Never inherit another view's buyer/status filters or workbook.
+  if (routePath === '/purchase-history') {
+    return requestEngine('followup', method, route, body);
+  }
   if (activeModule === 'compras' && String(method).toUpperCase() === 'POST' && ['/send', '/send-negotiation'].includes(routePath)) {
     try {
       const state = await requestEngine('followup', 'GET', '/send-status');
