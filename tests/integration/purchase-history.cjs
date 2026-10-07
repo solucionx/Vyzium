@@ -19,7 +19,7 @@ const mainPath = path.join(root, 'electron/main.js');
 const requireMain = createRequire(mainPath);
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'vyzium-purchase-history-integration-'));
 const ipc = new Map(), calls = [], httpCalls = [], errors = [], passed = [];
-let server, browser, page, backendUrl, followupUrl, nextFault = null, hold = null;
+let server, browser, page, backendUrl, followupUrl, nextFault = null, hold = null, serverStderr = '';
 const context = vm.createContext({
   require: name => name === 'electron' ? {
     app: {requestSingleInstanceLock:()=>true, setAppUserModelId:()=>{}, on:()=>{}, whenReady:()=>new Promise(()=>{}),
@@ -57,9 +57,20 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
   server = spawn(process.env.VYZIUM_TEST_PYTHON || (process.platform==='win32'?'python':'python3'),
     ['-u', path.join(__dirname, 'purchase_history_server.py')],
     {env:{...process.env,FOLLOWUP_API_TOKEN:token},stdio:['ignore','pipe','pipe']});
-  server.stderr.on('data',chunk=>process.stderr.write(chunk));
+  server.stderr.on('data',chunk=>{serverStderr+=chunk.toString();process.stderr.write(chunk);});
   const lines=createInterface({input:server.stdout});
-  const [line]=await once(lines,'line');const setup=JSON.parse(line);lines.close();
+  const setupLine = await new Promise((resolve,reject)=>{
+    let settled=false;
+    const finishError=message=>{
+      if(settled)return;settled=true;clearTimeout(timer);lines.close();
+      reject(new Error(message+(serverStderr.trim()?('\n'+serverStderr.trim()):'')));
+    };
+    const timer=setTimeout(()=>finishError('Purchase-history backend did not become ready within 15 seconds.'),15000);
+    lines.once('line',line=>{if(settled)return;settled=true;clearTimeout(timer);lines.close();resolve(line);});
+    server.once('error',error=>finishError('Purchase-history backend failed to start: '+error.message));
+    server.once('exit',(code,signal)=>finishError('Purchase-history backend exited before readiness (code '+code+', signal '+signal+').'));
+  });
+  const setup=JSON.parse(setupLine);
   backendUrl='http://127.0.0.1:'+setup.port;
   context.backendUrl=backendUrl;followupUrl='http://127.0.0.1:'+setup.followup;context.followupUrl=followupUrl;
   vm.runInContext(`activeModule='compras';comprasEngineUrl=backendUrl;followupEngineUrl=followupUrl;workspaceServicesStarted=true;
