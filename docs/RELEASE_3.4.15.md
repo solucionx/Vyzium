@@ -38,6 +38,8 @@ Foram adicionados testes de produção para provar:
 - falha forçada durante a transação, depois de DELETE/INSERT, restaura integralmente OCs, recebimentos e batch por rollback;
 - `last_workbook_path` só permanece apontando para importação efetivamente aceita;
 - uma importação válida fica imediatamente visível em Últimas compras;
+- recebimentos usam `IDITEMDAENTRADA` como identidade estável quando disponível; repetições idênticas são deduplicadas e divergências da mesma entrada são rejeitadas sem substituir a base anterior;
+- sem identificador de entrada, o fallback não usa a unidade para criar uma segunda entrada artificial; divergências são tratadas como ambiguidade;
 - Últimas compras continua independente de comprador/filtros operacionais e usa somente o banco do Acompanhamento.
 
 ## Escopo preservado
