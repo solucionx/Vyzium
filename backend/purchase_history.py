@@ -97,16 +97,20 @@ def unit_price(price, total, quantity):
 class HistoryBuilder:
     def __init__(self, headers):
         self.mapping = {}
+        self.alias_indexes = {}
         for field, aliases in FIELDS.items():
             indexes = [i for i, h in enumerate(headers) if compact(h) in {compact(a) for a in aliases}]
+            self.alias_indexes[field] = []
             # A code and a textual status, or SCI/OC units, may coexist. Use
             # documented alias priority; duplicate spellings of one alias are ambiguous.
             for alias in aliases:
                 matches = [i for i in indexes if compact(headers[i]) == compact(alias)]
                 if len(matches) > 1:
                     raise ValueError('Cabeçalho ambíguo no histórico de compras: ' + text(headers[matches[0]]) + '. A base anterior foi preservada.')
-                if matches and field not in self.mapping:
-                    self.mapping[field] = matches[0]
+                if matches:
+                    self.alias_indexes[field].append(matches[0])
+                    if field not in self.mapping:
+                        self.mapping[field] = matches[0]
         self.columns = {f: text(headers[i]) for f, i in self.mapping.items()}
         self.lines = {}
         self.source_rows = 0
@@ -115,11 +119,22 @@ class HistoryBuilder:
         def get(field):
             i = self.mapping.get(field)
             return values[i] if i is not None and i < len(values) else None
+
+        def first_value(field):
+            # Some SCI exports contain more than one compatible supplier-name
+            # column. Fall back only inside the same semantic field; never mix
+            # order values with receipt values.
+            for i in self.alias_indexes.get(field, ()):
+                if i < len(values) and text(values[i]):
+                    return values[i]
+            return get(field)
+
         oc, description = text(get('oc')), text(get('description'))
         if oc in ('', '0', '0.0') or not description:
             return
         self.source_rows += 1
-        article, unit, company, supplier = (text(get(f)) for f in ('article', 'unit', 'company', 'supplier'))
+        article, unit, company = (text(get(f)) for f in ('article', 'unit', 'company'))
+        supplier = text(first_value('supplier'))
         unit_basis = 'sci' if compact(self.columns.get('unit')) in ('UNIDADEDEMEDIDASCI', 'UNIDADE') else 'order'
         item_id = key(['code' if article else 'description', norm(article or description), norm(unit), unit_basis])
         order_id = key([text(get('company_id')) or norm(company), oc, text(get('supplier_id')) or norm(supplier)])
@@ -178,10 +193,13 @@ class HistoryBuilder:
             line['receipts'] = sorted(line.pop('_receipts').values(), key=lambda r: (r['date'], r['invoice'], r['id']), reverse=True)
             for receipt in line['receipts']:
                 receipt['conflicts'] = sorted(receipt['conflicts'])
-                if not set(receipt['conflicts']) & {'price', 'total', 'quantity'}:
-                    receipt['price'], receipt['price_source'] = unit_price(receipt['price'], receipt['total'], receipt['quantity'])
+                # A unit conflict makes any "price per unit" ambiguous even when
+                # the numeric amount itself is repeated consistently.
+                if set(receipt['conflicts']) & {'price', 'total', 'quantity', 'unit'}:
+                    receipt['price'] = None
+                    receipt['price_source'] = 'conflict'
                 else:
-                    receipt['price_source'] = 'conflict' if 'price' in receipt['conflicts'] else ('column' if receipt['price'] is not None else 'missing')
+                    receipt['price'], receipt['price_source'] = unit_price(receipt['price'], receipt['total'], receipt['quantity'])
             # Conflicting source fields cannot be repaired by a derived price.
             if not set(line['conflicts']) & {'order_price', 'order_total', 'quantity'}:
                 line['order_price'], line['price_source'] = unit_price(line['order_price'], line['order_total'], line['quantity'])
@@ -221,8 +239,19 @@ def page_number(query):
 
 
 def search(snapshot, query):
+    # Text search selects article identities. Once an identity matches, compute
+    # its card over every line that still satisfies hotel/supplier/status
+    # filters. The card and detail therefore agree on latest OC and count.
+    base = filtered_lines(snapshot, {**query, 'q': ''})
+    tokens = norm(query.get('q', '')).split()
+    if tokens:
+        matching_ids = {l['item_id'] for l in base
+                        if all(t in norm(l['article'] + ' ' + l['description']) for t in tokens)}
+        lines = (l for l in base if l['item_id'] in matching_ids)
+    else:
+        lines = iter(base)
     groups = {}
-    for line in filtered_lines(snapshot, query):
+    for line in lines:
         g = groups.setdefault(line['item_id'], {'id': line['item_id'], 'article': line['article'],
               'description': line['description'], 'unit': line['unit'], 'unit_basis': line['unit_basis'], 'latest': {k: line[k] for k in
               ('oc', 'company', 'supplier', 'sort_date', 'date_basis', 'order_price', 'price_source', 'cancelled')}, '_orders': set()})
