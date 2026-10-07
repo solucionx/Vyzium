@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.16",
-  "description": "Vyzium 3.4.16: visualização detalhada do mapa em formato de planilha por fornecedor.",
+  "version": "3.5.0",
+  "description": "Vyzium 3.5.0: versão estável consolidada com visualização detalhada em planilha por fornecedor.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
