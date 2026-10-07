@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.15",
-  "description": "Vyzium 3.4.15: correção definitiva do roteamento de Últimas compras e reforço da auditoria de importação.",
+  "version": "3.4.16",
+  "description": "Vyzium 3.4.16: visualização detalhada do mapa em formato de planilha por fornecedor.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
