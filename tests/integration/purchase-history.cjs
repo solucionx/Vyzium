@@ -73,11 +73,15 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
   assert.equal(directCalls.length,1,'Purchase-history IPC must perform exactly one engine request');
   assert.equal(directCalls[0].module,'followup','Purchase-history IPC must target the follow-up engine');
   const engineStart=httpCalls.length;
-  const engineHistory=await vm.runInContext("requestEngine('compras','GET','/purchase-history?q=lampada')",context);
-  assert.ok(Array.isArray(engineHistory.items),'Direct engine redirect must return the history payload');
-  const engineCalls=httpCalls.slice(engineStart).filter(r=>r.route==='/purchase-history');
-  assert.equal(engineCalls.length,1,'Low-level compras redirect must perform exactly one request');
-  assert.equal(engineCalls[0].module,'followup','Low-level compras redirect must terminate at followup');
+  await assert.rejects(
+    vm.runInContext("requestEngine('compras','GET','/purchase-history?q=lampada')",context),
+    /Operação local não permitida/
+  );
+  assert.equal(
+    httpCalls.slice(engineStart).filter(r=>r.route==='/purchase-history').length,
+    0,
+    'Low-level engine calls must never forward purchase history'
+  );
   const launch={headless:true};
   if(process.env.VYZIUM_TEST_CHROMIUM)launch.executablePath=process.env.VYZIUM_TEST_CHROMIUM;
   if(process.env.VYZIUM_TEST_SERVERLESS_CHROMIUM==='1'){
