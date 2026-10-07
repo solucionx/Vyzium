@@ -66,6 +66,12 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     authManager={getState:()=>({authenticated:true,email:'synthetic@example.invalid'})};
     whatsapp={status:()=>({status:'ready'})};
     window={isDestroyed:()=>false,webContents:{setZoomFactor:()=>{}}};`,context);
+  const directStart=httpCalls.length;
+  const directHistory=await actualApi('GET','/purchase-history?q=lampada');
+  assert.ok(Array.isArray(directHistory.items),'Direct purchase-history IPC must return the follow-up history payload');
+  const directCalls=httpCalls.slice(directStart).filter(r=>r.route==='/purchase-history');
+  assert.equal(directCalls.length,1,'Purchase-history IPC must perform exactly one engine request');
+  assert.equal(directCalls[0].module,'followup','Purchase-history IPC must target the follow-up engine');
   const launch={headless:true};
   if(process.env.VYZIUM_TEST_CHROMIUM)launch.executablePath=process.env.VYZIUM_TEST_CHROMIUM;
   if(process.env.VYZIUM_TEST_SERVERLESS_CHROMIUM==='1'){
