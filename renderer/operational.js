@@ -88,7 +88,7 @@ async function renderOperational() {
   content.innerHTML = `<section class="panel operational-workspace">
     <div class="panel-head"><div><p class="section-kicker">ACOMPANHAMENTO DAS ORDENS</p><h2>Controle operacional</h2><p>Clique nos títulos para ordenar e nas bolhas para editar o controle.</p></div><span id="op-count" class="badge"></span></div>
     <div class="toolbar">
-      <input id="op-search" class="search" aria-label="Buscar ordens" placeholder="Buscar OC, fornecedor, hotel ou observação">
+      <input id="op-search" class="search" aria-label="Buscar ordens" placeholder="Buscar OC, SCI, fornecedor, hotel ou observação">
       ${multiFilterHtml('buyer', filterConfig.buyer)}
       ${multiFilterHtml('company', filterConfig.company)}
       ${multiFilterHtml('attendance_status', filterConfig.attendance_status)}
