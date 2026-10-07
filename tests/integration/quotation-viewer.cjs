@@ -131,6 +131,9 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     await page.locator('#qv-search').fill('não existe');assert.match(await page.locator('#qv-sheet-host').textContent(),/Nenhum item corresponde/);
   });
   await check('supplier coverage and assigned totals match the backend without interpreting absent quotes as zero',async()=>{
+    await page.locator('#qv-search').fill('');
+    await page.locator('#qv-hotel').selectOption('');
+    await page.locator('#qv-state').selectOption('');
     assert.equal(await page.locator('.qv-supplier-head').count(),2);
     await page.evaluate(detail=>window.__viewerDetail=detail,original);
     const model=await page.evaluate(()=>QuotationViewer.createModel(window.__viewerDetail));
