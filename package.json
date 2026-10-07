@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.14",
-  "description": "Vyzium 3.4.14: hotfix de roteamento da consulta Últimas compras sobre a produção 3.4.13.",
+  "version": "3.4.15",
+  "description": "Vyzium 3.4.15: correção definitiva do roteamento de Últimas compras e reforço da auditoria de importação.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
