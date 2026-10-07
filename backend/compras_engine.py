@@ -424,6 +424,9 @@ class Store:
         self.safety.assert_existing_integrity()
         self.lock = threading.RLock()
         self.send_lock = threading.Lock()
+        self.history_query_lock = threading.Lock()
+        self._purchase_history_cache = None
+        self._purchase_history_cache_token = None
         if had_existing_database:
             # Snapshot through a read-only source before journal/schema maintenance.
             self.safety.ensure_version_backup()
@@ -508,12 +511,28 @@ class Store:
             row = con.execute('SELECT data FROM settings WHERE id=?', (sid,)).fetchone()
         return json.loads(row[0]) if row else None
 
+    def _purchase_history_snapshot(self):
+        # Read the 40+ MB history JSON only when the imported SCI snapshot
+        # changes. The small import setting is the cache generation marker and
+        # is restored together with purchase-history by backup merge.
+        with self.db() as con:
+            marker = con.execute("SELECT data FROM settings WHERE id='import'").fetchone()
+            token = marker[0] if marker else ''
+            if self._purchase_history_cache is not None and token == self._purchase_history_cache_token:
+                return self._purchase_history_cache
+            row = con.execute("SELECT data FROM settings WHERE id='purchase-history'").fetchone()
+        snapshot = json.loads(row[0]) if row else {'lines': [], 'columns': {}}
+        self._purchase_history_cache = snapshot
+        self._purchase_history_cache_token = token
+        return snapshot
+
     def purchase_history(self, query):
-        # Single snapshot read while import is locked. Existing schema/backup
-        # encryption applies to this read-only reference data too.
-        with self.lock:
-            snapshot = self.get_setting('purchase-history') or {'lines': [], 'columns': {}}
-        result = purchase_detail(snapshot, query) if query.get('id') else search_purchases(snapshot, query)
+        # Serialize expensive scans so fast typing cannot deserialize/filter
+        # multiple complete snapshots concurrently beside Chromium/WhatsApp.
+        with self.history_query_lock:
+            with self.lock:
+                snapshot = self._purchase_history_snapshot()
+            result = purchase_detail(snapshot, query) if query.get('id') else search_purchases(snapshot, query)
         result['source'] = {k: snapshot.get(k) for k in ('at', 'filename', 'orders', 'items', 'source_rows', 'columns')}
         result['source']['available'] = snapshot.get('id') == 'purchase-history'
         return result
@@ -523,6 +542,8 @@ class Store:
             raise ValueError('Escolha um arquivo XLS, XLSX ou XLSM.')
         history = {}
         items, report = load_items(path, history)
+        if int(report.get('rows', 0) or 0) <= 0:
+            raise ValueError('A planilha não possui linhas de dados válidas. A base anterior foi preservada.')
         with self.lock, self.db() as con:
             self.safety.backup(reason='pre-import', source_connection=con, automatic=True)
             con.execute('DELETE FROM items')
@@ -530,11 +551,15 @@ class Store:
             report.update(id='import', at=now(), filename=Path(path).name)
             history.update(at=report['at'], filename=report['filename'])
             report.update(purchase_orders=history.get('orders', 0), purchase_items=history.get('items', 0))
-            con.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('purchase-history', json.dumps(history, ensure_ascii=False)))
-            con.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('import', json.dumps(report)))
+            history_raw = json.dumps(history, ensure_ascii=False)
+            report_raw = json.dumps(report)
+            con.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('purchase-history', history_raw))
+            con.execute('INSERT OR REPLACE INTO settings VALUES (?,?)', ('import', report_raw))
             check = [str(row[0]) for row in con.execute('PRAGMA quick_check').fetchall()]
             if check != ['ok']:
                 raise DataIntegrityError('A nova importação não passou na verificação interna; alterações revertidas.')
+        self._purchase_history_cache = history
+        self._purchase_history_cache_token = report_raw
         return report
 
     def catalog(self):
