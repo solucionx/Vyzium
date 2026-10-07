@@ -57,7 +57,6 @@ class FollowupPurchaseHistoryTests(unittest.TestCase):
         self.seed()
         before = self.store.purchase_history.query({})
         maps = compras_engine.Store(self.root / 'compras')
-        self.addCleanup(maps._clear_purchase_cache)
         maps.put('settings', 'ui', {'id': 'ui', 'filters': {'buyer': 'Ninguém', 'company': 'Outro hotel'}})
         headers = ['Empresa', 'Comprador SCI', 'Número da SCI', 'Descrição do Artigo', 'Status da SCI',
                    'Quantidade', 'Unidade', 'ID OC', 'Status BPM SCI', 'Status do Item da OC']
