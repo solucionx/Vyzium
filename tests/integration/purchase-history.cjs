@@ -107,16 +107,18 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     await page.locator('[data-ph-page="results"][data-page="1"]').click();await ready();
     assert.equal(await page.locator('[data-ph-item]').count(),20);assert.match(await page.locator('.ph-pagination').textContent(),/Página 2/);
   });
-  await check('accent-insensitive search separates OC units and receipt value from OC price',async()=>{
+  await check('accent-insensitive search displays OC unit price with invoice and receipt unit',async()=>{
     await search('lampada');assert.equal(await page.locator('[data-ph-item]').count(),2);await choose();
     assert.deepEqual(await getOrders(),['OC 202','OC 201','OC 200']);
     const orders=page.locator('[data-ph-order]');
     assert.match(await orders.nth(0).locator('.ph-values').textContent(),/R\$.*15,00/);
-    assert.match(await orders.nth(0).locator('.ph-receipts').textContent(),/Não informado/);
+    assert.match(await orders.nth(0).locator('.ph-receipts').textContent(),/NF NF-001/);
     assert.match(await orders.nth(0).locator('.ph-receipts').textContent(),/CX/);
-    assert.match(await orders.nth(1).locator('.ph-receipts').textContent(),/15,25/);
-    assert.match(await orders.nth(1).locator('.ph-receipts').textContent(),/Calculado: total ÷ quantidade/);
+    assert.match(await orders.nth(1).locator('.ph-receipts').textContent(),/NF NF-001/);
+    assert.equal(await orders.nth(1).locator('.ph-receipts').textContent().then(t=>t.includes('15,25')),false);
+    assert.match(await orders.nth(1).locator('.ph-values').textContent(),/Preço unitário da OC/);
     assert.equal(await orders.nth(2).locator('[data-ph-receipt]').count(),1);
+    assert.match(await orders.nth(2).locator('.ph-warning').textContent(),/Dados divergentes.*unidade/);
     assert.equal(await page.locator('.purchase-history img,.purchase-history script').count(),0);
     assert.match(await orders.nth(0).textContent(),/Fornecedor B <img src=x onerror=alert\(1\)>/);
     await shots('purchase-history-details');

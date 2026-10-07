@@ -7,6 +7,7 @@ exact normalized description and unit instead of fuzzy article identities.
 import hashlib
 import json
 import re
+from copy import deepcopy
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from workbook_formats import normalize_header
@@ -97,6 +98,7 @@ def unit_price(price, total, quantity):
 class HistoryBuilder:
     def __init__(self, headers):
         self.mapping = {}
+        self.supplier_indexes = []
         for field, aliases in FIELDS.items():
             indexes = [i for i, h in enumerate(headers) if compact(h) in {compact(a) for a in aliases}]
             # A code and a textual status, or SCI/OC units, may coexist. Use
@@ -107,12 +109,17 @@ class HistoryBuilder:
                     raise ValueError('Cabeçalho ambíguo no histórico de compras: ' + text(headers[matches[0]]) + '. A base anterior foi preservada.')
                 if matches and field not in self.mapping:
                     self.mapping[field] = matches[0]
+                if field == 'supplier':
+                    self.supplier_indexes.extend(i for i in matches if i not in self.supplier_indexes)
         self.columns = {f: text(headers[i]) for f, i in self.mapping.items()}
         self.lines = {}
         self.source_rows = 0
 
     def add(self, values):
         def get(field):
+            if field == 'supplier':
+                return next((values[i] for i in self.supplier_indexes
+                             if i < len(values) and text(values[i])), None)
             i = self.mapping.get(field)
             return values[i] if i is not None and i < len(values) else None
         oc, description = text(get('oc')), text(get('description'))
@@ -196,18 +203,41 @@ class HistoryBuilder:
                 'items': len({l['item_id'] for l in lines})}
 
 
-def filtered_lines(snapshot, query):
+class HistoryIndex:
+    """One immutable, in-memory view of a snapshot; never written to the database.
+
+    Sorting and text normalization happen once per snapshot, not per keystroke.
+    Detail queries only scan the chosen article. Returned details are detached
+    from the index so no caller can mutate a cached receipt or order.
+    """
+    def __init__(self, snapshot):
+        self.source = {k: snapshot.get(k) for k in ('at', 'filename', 'orders', 'items', 'source_rows', 'columns')}
+        self.source['available'] = snapshot.get('id') == 'purchase-history'
+        self.lines = sorted(snapshot.get('lines', []),
+                            key=lambda l: (l['sort_date'], l['oc'].zfill(20), l['id']), reverse=True)
+        self.by_item = {}
+        self.terms = {}
+        for line in self.lines:
+            self.by_item.setdefault(line['item_id'], []).append(line)
+            self.terms[line['id']] = norm(line['article'] + ' ' + line['description'])
+        self.companies = sorted({l['company'] for l in self.lines if l['company']})
+        self.suppliers = sorted({l['supplier'] for l in self.lines if l['supplier']})
+
+
+def as_index(snapshot):
+    return snapshot if isinstance(snapshot, HistoryIndex) else HistoryIndex(snapshot)
+
+
+def filtered_lines(snapshot, query, item_id=None):
+    index = as_index(snapshot)
     status = query.get('status', 'valid')
     if status not in ('valid', 'received', 'all'):
         raise ValueError('Filtro de compras inválido.')
-    tokens = norm(query.get('q', '')).split()
-    return sorted((l for l in snapshot.get('lines', [])
+    return [l for l in (index.by_item.get(item_id, []) if item_id is not None else index.lines)
                    if (status == 'all' or not l['cancelled'])
                    and (status != 'received' or l['receipts'])
                    and (not query.get('company') or l['company'] == query['company'])
-                   and (not query.get('supplier') or l['supplier'] == query['supplier'])
-                   and all(t in norm(l['article'] + ' ' + l['description']) for t in tokens)),
-                  key=lambda l: (l['sort_date'], l['oc'].zfill(20), l['id']), reverse=True)
+                   and (not query.get('supplier') or l['supplier'] == query['supplier'])]
 
 
 def page_number(query):
@@ -221,8 +251,14 @@ def page_number(query):
 
 
 def search(snapshot, query):
+    index = as_index(snapshot)
+    lines = filtered_lines(index, query)
+    tokens = norm(query.get('q', '')).split()
+    matched = {l['item_id'] for l in lines if all(t in index.terms[l['id']] for t in tokens)} if tokens else None
     groups = {}
-    for line in filtered_lines(snapshot, query):
+    for line in lines:
+        if matched is not None and line['item_id'] not in matched:
+            continue
         g = groups.setdefault(line['item_id'], {'id': line['item_id'], 'article': line['article'],
               'description': line['description'], 'unit': line['unit'], 'unit_basis': line['unit_basis'], 'latest': {k: line[k] for k in
               ('oc', 'company', 'supplier', 'sort_date', 'date_basis', 'order_price', 'price_source', 'cancelled')}, '_orders': set()})
@@ -231,15 +267,15 @@ def search(snapshot, query):
     for g in items:
         del g['_orders']
     page, size = page_number(query), 20
+    page = min(page, max(0, (len(items) - 1) // size))
     return {'items': items[page * size:(page + 1) * size], 'total': len(items), 'page': page, 'page_size': size,
-            'companies': sorted({l['company'] for l in snapshot.get('lines', []) if l['company']}),
-            'suppliers': sorted({l['supplier'] for l in snapshot.get('lines', []) if l['supplier']})}
+            'companies': list(index.companies), 'suppliers': list(index.suppliers)}
 
 
 def detail(snapshot, query):
     # Search terms choose article identities. They must not hide another
     # description of the SAME article from its order history.
-    lines = [l for l in filtered_lines(snapshot, {**query, 'q': ''}) if l['item_id'] == query.get('id')]
+    lines = filtered_lines(snapshot, query, item_id=query.get('id', ''))
     if not lines:
         raise ValueError('Item não encontrado com os filtros atuais.')
     orders = {}
@@ -249,5 +285,6 @@ def detail(snapshot, query):
         order.setdefault('lines', []).append(line)
     values = list(orders.values())
     page, size = page_number(query), 10
+    page = min(page, max(0, (len(values) - 1) // size))
     return {'item': {k: lines[0][k] for k in ('item_id', 'article', 'description', 'unit', 'unit_basis')},
-            'orders': values[page * size:(page + 1) * size], 'total': len(values), 'page': page, 'page_size': size}
+            'orders': deepcopy(values[page * size:(page + 1) * size]), 'total': len(values), 'page': page, 'page_size': size}

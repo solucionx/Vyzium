@@ -27,11 +27,12 @@ from openpyxl import load_workbook
 from workbook_formats import open_book, REPORT_REQUIRED, adapt_report, approval_deadline, normalize_header
 from data_safety import DataIntegrityError, DataSafetyManager
 from secure_sqlite import connect as secure_connect, key_from_env
-from purchase_history import HistoryBuilder, search as search_purchases, detail as purchase_detail
+from purchase_history import HistoryBuilder, HistoryIndex, search as search_purchases, detail as purchase_detail
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.11')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.12')
 DB_SCHEMA_VERSION = 1
+PURCHASE_HISTORY_CACHE_SECONDS = 60
 
 def map_urgent(value):
     if not isinstance(value, bool):
@@ -222,6 +223,8 @@ def load_items(path, history=None):
             groups.setdefault(key, []).append(r)
     finally:
         book.close()
+    if not rows_seen:
+        raise ValueError('A planilha não contém linhas de dados. A base anterior foi preservada; confira o export antes de importar novamente.')
     result = []
     deadline_conflicts = 0
     excluded = {'with_order': 0, 'closed_or_rejected': 0, 'other_status': 0, 'invalid_quantity': 0, 'conflict': 0}
@@ -424,6 +427,10 @@ class Store:
         self.safety.assert_existing_integrity()
         self.lock = threading.RLock()
         self.send_lock = threading.Lock()
+        self._purchase_cache = None
+        self._purchase_cache_stamp = None
+        self._purchase_cache_timer = None
+        self._purchase_cache_epoch = 0
         if had_existing_database:
             # Snapshot through a read-only source before journal/schema maintenance.
             self.safety.ensure_version_backup()
@@ -508,15 +515,57 @@ class Store:
             row = con.execute('SELECT data FROM settings WHERE id=?', (sid,)).fetchone()
         return json.loads(row[0]) if row else None
 
-    def purchase_history(self, query):
-        # Single snapshot read while import is locked. Existing schema/backup
-        # encryption applies to this read-only reference data too.
+    def _purchase_source_stamp(self):
+        # Also notices writes from another Store and file replacement during a
+        # controlled restore. No database connection or JSON read on cache hits.
+        stamp = []
+        for path in (self.path, self.path + '-wal'):
+            try:
+                stat = os.stat(path)
+                stamp.append((stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns, stat.st_ctime_ns))
+            except FileNotFoundError:
+                stamp.append(None)
+        return tuple(stamp)
+
+    def _clear_purchase_cache(self):
+        self._purchase_cache_epoch += 1
+        if self._purchase_cache_timer is not None:
+            self._purchase_cache_timer.cancel()
+        self._purchase_cache_timer = None
+        self._purchase_cache = None
+        self._purchase_cache_stamp = None
+
+    def _expire_purchase_cache(self, epoch):
         with self.lock:
-            snapshot = self.get_setting('purchase-history') or {'lines': [], 'columns': {}}
-        result = purchase_detail(snapshot, query) if query.get('id') else search_purchases(snapshot, query)
-        result['source'] = {k: snapshot.get(k) for k in ('at', 'filename', 'orders', 'items', 'source_rows', 'columns')}
-        result['source']['available'] = snapshot.get('id') == 'purchase-history'
-        return result
+            if epoch == self._purchase_cache_epoch:
+                self._clear_purchase_cache()
+
+    def purchase_history(self, query):
+        # One bounded cache and one query at a time. It is never persisted and
+        # is released after inactivity; old engines/backups need no migration.
+        with self.lock:
+            stamp = self._purchase_source_stamp()
+            if self._purchase_cache is None or self._purchase_cache_stamp != stamp:
+                self._clear_purchase_cache()
+                index = HistoryIndex(self.get_setting('purchase-history') or {'lines': [], 'columns': {}})
+                after = self._purchase_source_stamp()
+                # A concurrent external write must not bless old data with a
+                # newer signature. Serve this coherent read without caching it.
+                if stamp == after:
+                    self._purchase_cache, self._purchase_cache_stamp = index, after
+            else:
+                index = self._purchase_cache
+            result = purchase_detail(index, query) if query.get('id') else search_purchases(index, query)
+            result['source'] = {**index.source, 'columns': dict(index.source.get('columns') or {})}
+            if self._purchase_cache is not None:
+                if self._purchase_cache_timer is not None:
+                    self._purchase_cache_timer.cancel()
+                self._purchase_cache_epoch += 1
+                self._purchase_cache_timer = threading.Timer(PURCHASE_HISTORY_CACHE_SECONDS, self._expire_purchase_cache,
+                                                             args=(self._purchase_cache_epoch,))
+                self._purchase_cache_timer.daemon = True
+                self._purchase_cache_timer.start()
+            return result
 
     def import_file(self, path):
         if Path(path).suffix.lower() not in ('.xls', '.xlsx', '.xlsm'):
@@ -535,6 +584,7 @@ class Store:
             check = [str(row[0]) for row in con.execute('PRAGMA quick_check').fetchall()]
             if check != ['ok']:
                 raise DataIntegrityError('A nova importação não passou na verificação interna; alterações revertidas.')
+            self._clear_purchase_cache()
         return report
 
     def catalog(self):

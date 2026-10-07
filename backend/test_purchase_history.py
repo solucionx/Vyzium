@@ -51,6 +51,60 @@ class PurchaseHistoryTests(unittest.TestCase):
         with patch.object(engine, 'open_book', return_value=book(rows)):
             return self.store.import_file('BASE SCI.xlsx')
 
+    def test_description_search_resolves_all_orders_of_matching_identity(self):
+        data = snapshot([row(), row(IDORDEMDECOMPRA=201, DATAOC='05/10/2026',
+                                   DESCRICAOARTIGO='Luminaria LED', VALORUNITARIOITEMOC=25)])
+        result = search(data, {'q': 'lampada'})['items'][0]
+        self.assertEqual(result['orders'], 2)
+        self.assertEqual(result['latest']['oc'], '201')
+        self.assertEqual(result['latest']['order_price'], '25')
+        self.assertEqual(detail(data, {'id': result['id'], 'q': 'lampada'})['total'], 2)
+
+    def test_empty_import_preserves_catalog_maps_history_and_cached_results(self):
+        self.import_rows([row(), row(IDORDEMDECOMPRA=None, IDSCI=999, NMSTATUSDOITEMDASCI=0)])
+        self.store.put('maps', 'saved', {'id': 'saved', 'items': [], 'quotes': {}})
+        previous = self.store.purchase_history({})
+        before = {table: self.store.all(table) for table in self.store.JSON_TABLES}
+        with self.assertRaisesRegex(ValueError, 'não contém linhas'):
+            self.import_rows([])
+        self.assertEqual(previous, self.store.purchase_history({}))
+        self.assertEqual(before, {table: self.store.all(table) for table in self.store.JSON_TABLES})
+        # A complete export without eligible demand remains legitimate.
+        self.assertEqual(self.import_rows([row()])['eligible'], 0)
+        self.assertEqual(self.store.purchase_history({})['total'], 1)
+
+    def test_supplier_alias_fallback_is_per_row_and_keeps_native_identity(self):
+        headers = HEADERS + ['NOMEFORNECEDOR', 'FKFORNECEDOR']
+        builder = HistoryBuilder(headers)
+        builder.add(row(RAZAOSOCIALFORNECEDOR='') + ['Fornecedor alternativo', 42])
+        builder.add(row() + ['Outro nome', 42])
+        data = builder.finish()
+        self.assertEqual(data['orders'], 1)
+        self.assertEqual(len(data['lines']), 1)
+        self.assertTrue(data['lines'][0]['supplier'])
+
+    def test_cache_reuses_snapshot_detaches_details_and_invalidates_external_writes(self):
+        self.import_rows([row()])
+        with patch.object(self.store, 'get_setting', wraps=self.store.get_setting) as reads:
+            result = self.store.purchase_history({})
+            iid = result['items'][0]['id']
+            details = self.store.purchase_history({'id': iid})
+            details['orders'][0]['lines'][0]['receipts'][0]['invoice'] = 'MUTATED'
+            self.assertEqual(self.store.purchase_history({'id': iid})['orders'][0]['lines'][0]['receipts'][0]['invoice'], 'NF-001')
+            self.assertEqual(reads.call_count, 1)
+            other = engine.Store(self.tmp.name)
+            with patch.object(engine, 'open_book', return_value=book([row(IDORDEMDECOMPRA=900)])):
+                other.import_file('new.xlsx')
+            self.assertEqual(self.store.purchase_history({})['items'][0]['latest']['oc'], '900')
+            self.assertEqual(reads.call_count, 2)
+            epoch = self.store._purchase_cache_epoch
+            self.store._expire_purchase_cache(epoch - 1)
+            self.assertIsNotNone(self.store._purchase_cache)
+            self.store._expire_purchase_cache(epoch)
+            self.assertIsNone(self.store._purchase_cache)
+            self.store.purchase_history({})
+            self.assertEqual(reads.call_count, 3)
+
     def test_import_saves_orders_even_when_they_are_ineligible_for_quotation(self):
         pending = row(IDSCI=999, IDORDEMDECOMPRA=None, IDITEMDASCI=9, NMSTATUSDOITEMDASCI=0)
         result = self.import_rows([row(), pending])

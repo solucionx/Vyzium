@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.11",
-  "description": "Vyzium 3.4.11: histórico de últimas compras e entradas na BASE SCI, baseado na 3.4.10.",
+  "version": "3.4.12",
+  "description": "Vyzium 3.4.12: histórico com preço unitário da OC e NF, correções de importação, identidade e cache da 3.4.11.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
