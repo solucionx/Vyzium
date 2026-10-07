@@ -314,12 +314,6 @@ function engineRequestTimeout(moduleName, method, routePath) {
 async function requestEngine(moduleName, method, route, body) {
   const normalizedMethod = String(method || '').toUpperCase();
   const routePath = String(route || '').split('?')[0];
-  // Últimas compras is displayed inside Compras, but the authoritative source
-  // is the operational OC database. Route it once here at the IPC boundary.
-  // requestEngine() itself stays module-pure so this can never recurse.
-  if (moduleName === 'compras' && routePath === '/purchase-history') {
-    return requestEngine('followup', method, route, body);
-  }
   if (!ROUTES[moduleName]?.[normalizedMethod]?.has(routePath)) throw new Error('Operação local não permitida.');
   const base = await startEngine(moduleName);
   const timeoutMs = engineRequestTimeout(moduleName, normalizedMethod, routePath);
@@ -596,6 +590,14 @@ async function apiRequest(method, route, body) {
   // Os dois módulos usam a mesma sessão do WhatsApp. Impedir que uma cotação
   // concorra com um lote de follow-up que esteja rodando em segundo plano.
   const routePath = String(route || '').split('?')[0];
+  // Últimas compras belongs visually to Compras, but its authoritative data
+  // belongs to Acompanhamento. Redirect exactly once at the IPC/API boundary.
+  // requestEngine() deliberately contains no forwarding logic, eliminating the
+  // possibility of recursive engine routing.
+  if (activeModule === 'compras' && routePath === '/purchase-history') {
+    if (String(method).toUpperCase() !== 'GET') throw new Error('Últimas compras é uma consulta somente leitura.');
+    return requestEngine('followup', 'GET', route);
+  }
   if (activeModule === 'compras' && String(method).toUpperCase() === 'POST' && ['/send', '/send-negotiation'].includes(routePath)) {
     try {
       const state = await requestEngine('followup', 'GET', '/send-status');
