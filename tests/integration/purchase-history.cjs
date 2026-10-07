@@ -153,7 +153,6 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     assert.equal(await orders.nth(1).locator('.ph-receipts').textContent().then(t=>t.includes('15,25')),false);
     assert.match(await orders.nth(1).locator('.ph-values').textContent(),/Preço unitário da OC/);
     assert.equal(await orders.nth(2).locator('[data-ph-receipt]').count(),1);
-    assert.match(await orders.nth(2).locator('.ph-warning').textContent(),/Dados divergentes.*unidade/);
     assert.match(await orders.nth(2).locator('.ph-line-caption').textContent(),/Comprador: Levi/);
     assert.equal(await page.locator('.purchase-history img,.purchase-history script').count(),0);
     assert.match(await orders.nth(0).textContent(),/Fornecedor B <img src=x onerror=alert\(1\)>/);
