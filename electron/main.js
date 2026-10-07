@@ -317,7 +317,7 @@ async function requestEngine(moduleName, method, route, body) {
   // Últimas compras is displayed inside Compras, but the authoritative source
   // is the operational OC database. Route it once here at the IPC boundary.
   // requestEngine() itself stays module-pure so this can never recurse.
-  if (activeModule === 'compras' && routePath === '/purchase-history') {
+  if (moduleName === 'compras' && routePath === '/purchase-history') {
     return requestEngine('followup', method, route, body);
   }
   if (!ROUTES[moduleName]?.[normalizedMethod]?.has(routePath)) throw new Error('Operação local não permitida.');
