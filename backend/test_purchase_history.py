@@ -145,6 +145,22 @@ class PurchaseHistoryTests(unittest.TestCase):
         self.assertEqual(len(orders), 1)
         self.assertEqual(len(orders[0]['lines']), 2)
 
+    def test_text_search_selects_identity_then_uses_latest_order_even_after_description_changes(self):
+        data = snapshot([
+            row(IDORDEMDECOMPRA=200, DATAOC='01/10/2026', DESCRICAOARTIGO='Lampada LED',
+                VALORUNITARIOITEMOC='10,00', VALORTOTALITEMOC='100,00'),
+            row(IDORDEMDECOMPRA=201, DATAOC='05/10/2026', DESCRICAOARTIGO='Luminaria LED',
+                VALORUNITARIOITEMOC='25,00', VALORTOTALITEMOC='250,00')
+        ])
+        result = search(data, {'q': 'lampada'})
+        self.assertEqual(result['total'], 1)
+        self.assertEqual(result['items'][0]['orders'], 2)
+        self.assertEqual(result['items'][0]['latest']['oc'], '201')
+        self.assertEqual(result['items'][0]['latest']['order_price'], '25')
+        opened = detail(data, {'id': result['items'][0]['id'], 'q': 'lampada'})
+        self.assertEqual(opened['total'], 2)
+        self.assertEqual(opened['orders'][0]['oc'], '201')
+
     def test_native_sci_item_identity_survives_description_edits_and_export_reordering(self):
         first = row()
         changed = row(DESCRICAOARTIGO='LED 9W', IDITEMDAENTRADA='E2', ANNUMERODANOTAFISCAL='NF-002')
@@ -164,6 +180,46 @@ class PurchaseHistoryTests(unittest.TestCase):
         with_missing = snapshot([row(), row(VALORUNITARIOITEMOC=None, VALORUNITARIOITEMENTRADA=None)])
         self.assertEqual(with_missing['lines'][0]['order_price'], '12.5')
         self.assertEqual(with_missing['lines'][0]['receipts'][0]['price'], '13.75')
+
+    def test_receipt_unit_conflict_is_visible_and_price_per_unit_is_not_presented_as_certain(self):
+        data = snapshot([row(), row(UNIDADEMEDIDARECEBIDA='CX')])
+        receipt = data['lines'][0]['receipts'][0]
+        self.assertIn('unit', receipt['conflicts'])
+        self.assertIsNone(receipt['unit'])
+        self.assertIsNone(receipt['price'])
+        self.assertEqual(receipt['price_source'], 'conflict')
+
+    def test_supplier_name_falls_back_per_row_to_an_equivalent_supplier_column(self):
+        headers = [*HEADERS, 'NOMEFORNECEDOR']
+        values = row(RAZAOSOCIALFORNECEDOR=None) + ['Fornecedor alternativo']
+        builder = HistoryBuilder(headers)
+        builder.add(values)
+        data = builder.finish()
+        self.assertEqual(data['lines'][0]['supplier'], 'Fornecedor alternativo')
+
+    def test_header_only_import_is_rejected_before_replacing_catalog_or_history(self):
+        self.import_rows([row()])
+        before = {table: self.store.all(table) for table in self.store.JSON_TABLES}
+        with patch.object(engine, 'open_book', return_value=book([])):
+            with self.assertRaisesRegex(ValueError, 'não possui linhas de dados válidas'):
+                self.store.import_file('empty.xlsx')
+        for table in before:
+            self.assertEqual(self.store.all(table), before[table])
+
+    def test_purchase_history_cache_reuses_snapshot_and_detects_external_reimport(self):
+        self.import_rows([row()])
+        first = self.store.purchase_history({'q': '0090'})
+        cached = self.store._purchase_history_cache
+        self.assertIsNotNone(cached)
+        self.store.purchase_history({'q': 'lampada'})
+        self.assertIs(self.store._purchase_history_cache, cached)
+
+        other = engine.Store(self.tmp.name)
+        with patch.object(engine, 'open_book', return_value=book([row(IDORDEMDECOMPRA=900)])):
+            other.import_file('BASE SCI NOVA.xlsx')
+        refreshed = self.store.purchase_history({'q': '0090'})
+        self.assertEqual(refreshed['items'][0]['latest']['oc'], '900')
+        self.assertIsNot(self.store._purchase_history_cache, cached)
 
     def test_reimport_replaces_snapshot_but_preserves_maps_messages_and_ui(self):
         self.import_rows([row()])
