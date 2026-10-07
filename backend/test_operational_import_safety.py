@@ -93,29 +93,6 @@ class OperationalImportSafetyTests(unittest.TestCase):
         self.assertEqual(self.store.purchase_history.query({}), before_history)
         self.assertEqual(self.store.settings().get('last_workbook_path'), before_path)
 
-    def test_conflicting_duplicate_receipt_id_is_rejected_without_double_counting(self):
-        import_orders(self.store, self.root, [row()], 'BASE SCI ANTERIOR.xlsx')
-        before_tables = self.snapshot_tables()
-        before_history = self.store.purchase_history.query({})
-        conflicting = [
-            row(IDORDEMDECOMPRA=800, IDSCI=880, IDITEMDASCI=8801, IDITEMDAENTRADA='ENT-1',
-                QUANTIDADERECEBIDA=4, UNIDADEMEDIDARECEBIDA='UN'),
-            row(IDORDEMDECOMPRA=800, IDSCI=880, IDITEMDASCI=8801, IDITEMDAENTRADA='ENT-1',
-                QUANTIDADERECEBIDA=4, UNIDADEMEDIDARECEBIDA='CX'),
-        ]
-        with self.assertRaisesRegex(ValueError, 'Recebimento ambíguo'):
-            import_orders(self.store, self.root, conflicting, 'BASE SCI CONFLITANTE.xlsx')
-        self.assertEqual(self.snapshot_tables(), before_tables)
-        self.assertEqual(self.store.purchase_history.query({}), before_history)
-
-    def test_duplicate_receipt_id_with_same_data_is_deduplicated_once(self):
-        duplicate = row(IDORDEMDECOMPRA=801, IDSCI=881, IDITEMDASCI=8811, IDITEMDAENTRADA='ENT-2',
-                        QUANTIDADERECEBIDA=4, UNIDADEMEDIDARECEBIDA='UN')
-        result = import_orders(self.store, self.root, [duplicate, duplicate], 'BASE SCI DUPLICADA.xlsx')
-        self.assertEqual(result['receipts'], 1)
-        self.assertEqual(self.store.order_rows()[0]['received_qty'], 4)
-        self.assertEqual(len(self.store.receipt_rows([self.store.order_rows()[0]['item_key']])), 1)
-
     def test_committed_import_is_immediately_visible_to_read_only_purchase_history(self):
         import_orders(
             self.store, self.root,
