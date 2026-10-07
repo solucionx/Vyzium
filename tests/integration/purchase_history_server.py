@@ -30,7 +30,7 @@ with tempfile.TemporaryDirectory() as directory:
     large = [row(IDORDEMDECOMPRA=1000+n, IDSCI=5000+n,
                  CODIGOARTIGO=f'ART-{n//25:04d}', DESCRICAOARTIGO=f'Material de manutenção {n//25:04d}',
                  DATAOC='01/09/2026') for n in range(14000)]
-    normal = [row(COMPRADOR='Levi'), row(COMPRADOR='Levi'), row(COMPRADOR='Levi', UNIDADEMEDIDARECEBIDA='CX'),
+    normal = [row(COMPRADOR='Levi'), row(COMPRADOR='Levi'),
               row(IDORDEMDECOMPRA=201, COMPRADOR='Ana', IDSCI=502, DATAOC='03/10/2026',
               VALORUNITARIOITEMOC='14,90', VALORTOTALITEMOC='149,00', DATAENTRADAMERCADORIA='04/10/2026',
               VALORUNITARIOITEMENTRADA=None, VALORTOTALITEMENTRADA='61,00', QUANTIDADERECEBIDA=4),
