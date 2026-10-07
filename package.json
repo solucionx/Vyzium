@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.4.12",
-  "description": "Vyzium 3.4.12: hardening de produção do histórico de compras, baseado na 3.4.11 auditada.",
+  "version": "3.4.13",
+  "description": "Vyzium 3.4.13: histórico operacional consolidado e busca de ordens por SCI, sobre a produção 3.4.12 auditada.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {
@@ -10,7 +10,7 @@
     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
     "diagnose:whatsapp": "node scripts/diagnose-whatsapp.js",
     "build": "electron-builder --win nsis --x64 --publish never",
-    "test:node": "node --test tests/global-search.cjs tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/remote-backup.cjs tests/backup-restore.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs tests/operational-ui.cjs && node tests/sort.cjs",
+    "test:node": "node --test tests/global-search.cjs tests/quote-send.cjs tests/supplier-contacts.cjs tests/whatsapp-lifecycle.cjs tests/diagnostics.cjs tests/sentry.cjs tests/whatsapp.cjs tests/whatsapp-patch.cjs tests/remote-backup.cjs tests/backup-restore.cjs tests/updates.cjs tests/purchase-model.cjs tests/project-config.cjs tests/security.cjs tests/security-manager.cjs tests/auth-manager.cjs tests/firebase.cjs tests/operational-ui.cjs tests/followup-sci-search.cjs && node tests/sort.cjs",
     "test": "npm run test:syntax && npm run test:backend && npm run test:node",
     "test:whatsapp-browser": "node --test tests/whatsapp-browser.cjs",
     "test:syntax": "node --check renderer/purchase-history.js && node --check renderer/quotation-viewer.js && node --check electron/main.js && node --check electron/remote-backup.js && node --check electron/backup-restore.js && node --check electron/backup-state.js && node --check renderer/auth.js && node --check electron/search-navigation.js && node --check renderer/home.js && node --check renderer/app.js && node --check renderer/compras-app.js"
