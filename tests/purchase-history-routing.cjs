@@ -20,7 +20,8 @@ test('purchase history redirects exactly once at the API boundary', () => {
 
 test('requestEngine contains no purchase-history forwarding or self-call', () => {
   assert.doesNotMatch(engineBody, /purchase-history/);
-  assert.doesNotMatch(engineBody, /requestEngine\(/);
+  assert.equal((engineBody.match(/requestEngine\(/g) || []).length, 1, 'Only the function declaration may mention requestEngine(');
+  assert.doesNotMatch(engineBody, /return\s+requestEngine\(/);
 });
 
 test('purchase history is read-only and owned by followup allowlist only', () => {
