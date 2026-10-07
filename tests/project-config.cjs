@@ -8,9 +8,9 @@ const pkg = require(path.join(root, 'package.json'));
 
 function read(rel) { return fs.readFileSync(path.join(root, rel), 'utf8'); }
 
-test('3.4.16 production candidate keeps the stable Vyzium identity and Draft release channel', () => {
+test('3.5.0 production candidate keeps the stable Vyzium identity and Draft release channel', () => {
   assert.equal(pkg.name, 'vyzium-gestao-operacional');
-  assert.equal(pkg.version, '3.4.16');
+  assert.equal(pkg.version, '3.5.0');
   assert.equal(pkg.build?.appId, 'com.vyzium.gestaooperacional');
   assert.equal(pkg.build?.productName, 'Vyzium');
   assert.equal(pkg.build?.artifactName, "Vyzium-Setup.${ext}");
@@ -53,7 +53,7 @@ test('release version changes preserve the original dependency versions and arch
 });
 
 
-test('3.4 line keeps one authoritative release version across package, Python and renderer', () => {
+test('3.5 line keeps one authoritative release version across package, Python and renderer', () => {
   const lock = JSON.parse(read('package-lock.json'));
   assert.equal(lock.version, pkg.version);
   assert.equal(lock.packages?.['']?.version, pkg.version);
@@ -69,6 +69,7 @@ test('3.4 line keeps one authoritative release version across package, Python an
     assert.match(read(rel), /src="version\.js"/);
   }
   assert.match(read('renderer/version.js'), /window\.followup\?\.appVersion/);
+  assert.ok(read('renderer/version.js').includes(`const fallback = '${pkg.version}';`), 'Fallback visual deve acompanhar a versão do pacote.');
 });
 
 test('repository safety blocks operational spreadsheets and WhatsApp session artifacts', () => {
@@ -134,7 +135,7 @@ test('release workflow builds, validates and packages SQLCipher-enabled engines'
 });
 
 test('3.1 data safety and authentication files are included', () => {
-  assert.equal(pkg.version, '3.4.16');
+  assert.equal(pkg.version, '3.5.0');
   for (const rel of [
     'backend/data_safety.py', 'backend/secure_sqlite.py', 'backend/crypto_migration.py',
     'electron/firebase-client.js', 'electron/auth-manager.js', 'electron/security-manager.js',
