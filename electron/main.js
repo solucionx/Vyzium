@@ -292,11 +292,11 @@ async function stopAllEngines() {
 
 const ROUTES = {
   followup: {
-    GET: new Set(['/health', '/search', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
+    GET: new Set(['/health', '/search', '/purchase-history', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
     POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed', '/data-safety/backup'])
   },
   compras: {
-    GET: new Set(['/health', '/search', '/overview', '/items', '/purchase-history', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),
+    GET: new Set(['/health', '/search', '/overview', '/items', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),
     POST: new Set(['/import', '/maps/create', '/maps/save', '/maps/complete', '/maps/archive', '/maps/delete', '/settings', '/send', '/send-negotiation', '/review', '/data-safety/backup'])
   }
 };
@@ -314,6 +314,11 @@ function engineRequestTimeout(moduleName, method, routePath) {
 async function requestEngine(moduleName, method, route, body) {
   const normalizedMethod = String(method || '').toUpperCase();
   const routePath = String(route || '').split('?')[0];
+  // "Últimas compras" lives in Compras, but its authoritative source is the
+  // operational OC database. Do not read the quotation workbook or its filters.
+  if (routePath === '/purchase-history') {
+    return requestEngine('followup', method, route, body);
+  }
   if (!ROUTES[moduleName]?.[normalizedMethod]?.has(routePath)) throw new Error('Operação local não permitida.');
   const base = await startEngine(moduleName);
   const timeoutMs = engineRequestTimeout(moduleName, normalizedMethod, routePath);
