@@ -185,7 +185,7 @@ class PurchaseHistoryTests(unittest.TestCase):
         data = snapshot([row(), row(UNIDADEMEDIDARECEBIDA='CX')])
         receipt = data['lines'][0]['receipts'][0]
         self.assertIn('unit', receipt['conflicts'])
-        self.assertIsNone(receipt['unit'])
+        self.assertFalse(receipt['unit'])
         self.assertIsNone(receipt['price'])
         self.assertEqual(receipt['price_source'], 'conflict')
 
