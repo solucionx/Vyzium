@@ -128,6 +128,8 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     assert.equal(await page.locator('.qv-sheet tbody tr:visible').count(),2);
     await page.locator('#qv-state').selectOption('unquoted');assert.equal(await page.locator('.qv-sheet tbody tr:visible').count(),1);
     assert.match(await page.locator('#qv-count').textContent(),/1 de 4 itens exibidos/);
+    assert.match(await page.locator('#qv-count').textContent(),/Totais do rodapé = mapa completo/);
+    assert.match(await page.locator('.qv-sheet tfoot').textContent(),/Totais do mapa completo/);
     await page.locator('#qv-search').fill('não existe');assert.match(await page.locator('#qv-sheet-host').textContent(),/Nenhum item corresponde/);
   });
   await check('supplier coverage and assigned totals match the backend without interpreting absent quotes as zero',async()=>{
