@@ -1,9 +1,9 @@
-name: Vyzium 3.4.12 Production Hardening Draft
+name: Vyzium 3.4.13 Production SCI Search Draft
 
 on:
   push:
     branches:
-      - release/v3.4.12-production
+      - release/v3.4.13-production-sci-search
   workflow_dispatch:
     inputs:
       tag:
@@ -12,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: vyzium-3.4.12-production
+  group: vyzium-3.4.13-production-sci-search
   cancel-in-progress: true
 
 # O workflow apenas lê o repositório de código. A permissão para publicar
@@ -33,10 +33,23 @@ jobs:
     steps:
       - name: Baixar código
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Verificar que o repositório não contém bancos ou credenciais privadas
         shell: pwsh
         run: ./scripts/verify-repository-safety.ps1
+
+      - name: Confirmar linhagem da produção e isolamento do WhatsApp
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $base = '2d40d673edfcc038fc01c361e7d361268480dba1'
+          git merge-base --is-ancestor $base HEAD
+          if ($LASTEXITCODE -ne 0) { throw 'A candidata não descende da Vyzium 3.4.12 publicada.' }
+          $waChanges = @(git diff --name-only "$base..HEAD" -- electron/whatsapp.js electron/whatsapp-hidden-browser.ps1)
+          if ($waChanges.Count -gt 0) { throw "Alteração de WhatsApp fora do escopo: $($waChanges -join ', ')" }
+          Write-Host 'Linhagem 3.4.12 confirmada; arquivos de runtime do WhatsApp intactos.'
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
@@ -88,6 +101,23 @@ jobs:
           gh repo view $env:RELEASE_REPO --json nameWithOwner,visibility | Out-Null
           if ($LASTEXITCODE -ne 0) {
             throw "Não foi possível acessar $env:RELEASE_REPO com VYZIUM_RELEASE_TOKEN."
+          }
+
+
+      - name: Marcar Draft anterior como não publicável durante a validação
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.VYZIUM_RELEASE_TOKEN }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $raw = gh api "repos/$env:RELEASE_REPO/releases?per_page=100"
+          if ($LASTEXITCODE -ne 0) { throw 'Falha ao consultar Draft anterior.' }
+          $release = @($raw | ConvertFrom-Json | Where-Object tag_name -eq $env:RELEASE_TAG)
+          if ($release.Count -gt 1) { throw 'Mais de uma release encontrada para a mesma tag.' }
+          if ($release.Count -eq 1) {
+            if (-not $release[0].draft) { throw 'A v3.4.13 já está publicada; não sobrescrever.' }
+            gh release edit $env:RELEASE_TAG --repo $env:RELEASE_REPO --title "Vyzium $env:RELEASE_TAG — VALIDAÇÃO EM ANDAMENTO" --notes "NÃO PUBLICAR. Esta Draft está sendo substituída pela candidata baseada na produção 3.4.12. Os anexos só serão atualizados após todos os testes passarem."
+            if ($LASTEXITCODE -ne 0) { throw 'Falha ao colocar a Draft anterior em quarentena.' }
           }
 
       - name: Instalar dependências Node
@@ -239,7 +269,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tag = $env:RELEASE_TAG
           $releaseRepo = $env:RELEASE_REPO
-          $notes = 'docs/RELEASE_3.4.12.md'
+          $notes = 'docs/RELEASE_3.4.13.md'
           gh release view $tag --repo $releaseRepo *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $releaseRepo --target main --draft --title "Vyzium $tag" --notes-file $notes
@@ -248,7 +278,7 @@ jobs:
             $raw = gh release view $tag --repo $releaseRepo --json isDraft
             if ($LASTEXITCODE -ne 0) { throw 'Falha ao consultar o estado da release.' }
             if (-not ($raw | ConvertFrom-Json).isDraft) { throw 'A release já foi publicada. Gere outra versão.' }
-            gh release edit $tag --repo $releaseRepo --notes-file $notes
+            gh release edit $tag --repo $releaseRepo --title "Vyzium $tag" --notes-file $notes
             if ($LASTEXITCODE -ne 0) { throw 'Falha ao atualizar as notas da Draft.' }
           }
           $files = @('dist/Vyzium-Setup.exe', 'dist/Vyzium-Setup.exe.blockmap', 'dist/latest.yml', "dist/Vyzium-$env:APP_VERSION-Portable.zip", "dist/Vyzium-$env:APP_VERSION-Source.zip", 'dist/SHA256SUMS.txt')
