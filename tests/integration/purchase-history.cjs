@@ -19,7 +19,7 @@ const mainPath = path.join(root, 'electron/main.js');
 const requireMain = createRequire(mainPath);
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'vyzium-purchase-history-integration-'));
 const ipc = new Map(), calls = [], httpCalls = [], errors = [], passed = [];
-let server, browser, page, backendUrl, nextFault = null, hold = null;
+let server, browser, page, backendUrl, followupUrl, nextFault = null, hold = null;
 const context = vm.createContext({
   require: name => name === 'electron' ? {
     app: {requestSingleInstanceLock:()=>true, setAppUserModelId:()=>{}, on:()=>{}, whenReady:()=>new Promise(()=>{}),
@@ -31,11 +31,11 @@ const context = vm.createContext({
   __dirname:path.dirname(mainPath), process, Buffer, console, setTimeout, clearTimeout,
   setInterval, clearInterval, AbortSignal,
   fetch:async (url, options) => {
-    assert.ok(String(url).startsWith(backendUrl + '/'), 'Only the temporary backend may be contacted');
+    assert.ok([backendUrl, followupUrl].some(base=>String(url).startsWith(base + '/')), 'Only temporary backends may be contacted');
     const route = new URL(url).pathname;
     assert.ok(!['/send','/send-negotiation'].includes(route), 'Never send supplier messages in tests');
     const body = options.body ? JSON.parse(options.body) : null;
-    const request = {route, method:options.method, body};httpCalls.push(request);
+    const request = {route, module:String(url).startsWith(followupUrl+'/')?'followup':'compras', method:options.method, body};httpCalls.push(request);
     if (nextFault && nextFault.route===route) {const fault=nextFault;nextFault=null;throw Error(fault.message);}
     if (hold && hold.route===route && (!hold.additionOnly || body?.add_item_ids)) {hold.started=true;await hold.promise;}
     const response = await fetch(url, options);request.status=response.status;return response;
@@ -61,8 +61,8 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
   const lines=createInterface({input:server.stdout});
   const [line]=await once(lines,'line');const setup=JSON.parse(line);lines.close();
   backendUrl='http://127.0.0.1:'+setup.port;
-  context.backendUrl=backendUrl;
-  vm.runInContext(`activeModule='compras';comprasEngineUrl=backendUrl;workspaceServicesStarted=true;
+  context.backendUrl=backendUrl;followupUrl='http://127.0.0.1:'+setup.followup;context.followupUrl=followupUrl;
+  vm.runInContext(`activeModule='compras';comprasEngineUrl=backendUrl;followupEngineUrl=followupUrl;workspaceServicesStarted=true;
     authManager={getState:()=>({authenticated:true,email:'synthetic@example.invalid'})};
     whatsapp={status:()=>({status:'ready'})};
     window={isDestroyed:()=>false,webContents:{setZoomFactor:()=>{}}};`,context);
@@ -102,24 +102,32 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     const before=posts();const started=Date.now();await page.locator('[data-view="purchases"]').click();await ready();
     assert.ok(Date.now()-started<15000,'Initial history must remain practical on a large import');
     assert.equal(await page.locator('[data-ph-item]').count(),20);
-    assert.match(await page.locator('#ph-source').textContent(),/BASE SCI.xlsx/);
-    assert.equal(posts(),before);assert.ok(httpCalls.some(r=>r.route==='/purchase-history'));
+    assert.match(await page.locator('#ph-source').textContent(),/Acompanhamento: BASE SCI OCs.xlsx/);
+    assert.equal(posts(),before);assert.ok(httpCalls.some(r=>r.route==='/purchase-history'&&r.module==='followup'));
+    assert.ok(httpCalls.filter(r=>r.route==='/purchase-history').every(r=>r.module==='followup'));
+    assert.equal(await page.locator('#import-button').isVisible(),false);
+    assert.equal(await page.locator('#ph-status').inputValue(),'all');
     await page.locator('[data-ph-page="results"][data-page="1"]').click();await ready();
     assert.equal(await page.locator('[data-ph-item]').count(),20);assert.match(await page.locator('.ph-pagination').textContent(),/Página 2/);
   });
-  await check('text search selects article identity before calculating latest OC and count',async()=>{
-    await search('lampada');assert.equal(await page.locator('[data-ph-item]').count(),2);
-    assert.match(await item().textContent(),/3 OCs/);
-    assert.match(await item().textContent(),/15,00/);
-    await choose();
+  await check('accent-insensitive search displays OC unit price with invoice and receipt unit',async()=>{
+    await search('lampada');assert.equal(await page.locator('[data-ph-item]').count(),2);await choose();
+    assert.deepEqual(await getOrders(),['OC 203','OC 202','OC 201','OC 200']);
+    assert.match(await page.locator('#ph-detail').textContent(),/Comprador: Levi/);
+    assert.match(await page.locator('#ph-detail').textContent(),/Comprador: Ana/);
+    assert.match(await page.locator('#ph-detail').textContent(),/Comprador: Carlos/);
+    await page.locator('#ph-status').selectOption('valid');await ready();await choose();
     assert.deepEqual(await getOrders(),['OC 202','OC 201','OC 200']);
     const orders=page.locator('[data-ph-order]');
     assert.match(await orders.nth(0).locator('.ph-values').textContent(),/R\$.*15,00/);
-    assert.match(await orders.nth(0).locator('.ph-receipts').textContent(),/Não informado/);
+    assert.match(await orders.nth(0).locator('.ph-receipts').textContent(),/NF NF-001/);
     assert.match(await orders.nth(0).locator('.ph-receipts').textContent(),/CX/);
-    assert.match(await orders.nth(1).locator('.ph-receipts').textContent(),/15,25/);
-    assert.match(await orders.nth(1).locator('.ph-receipts').textContent(),/Calculado: total ÷ quantidade/);
+    assert.match(await orders.nth(1).locator('.ph-receipts').textContent(),/NF NF-001/);
+    assert.equal(await orders.nth(1).locator('.ph-receipts').textContent().then(t=>t.includes('15,25')),false);
+    assert.match(await orders.nth(1).locator('.ph-values').textContent(),/Preço unitário da OC/);
     assert.equal(await orders.nth(2).locator('[data-ph-receipt]').count(),1);
+    assert.match(await orders.nth(2).locator('.ph-warning').textContent(),/Dados divergentes.*unidade/);
+    assert.match(await orders.nth(2).locator('.ph-line-caption').textContent(),/Comprador: Levi/);
     assert.equal(await page.locator('.purchase-history img,.purchase-history script').count(),0);
     assert.match(await orders.nth(0).textContent(),/Fornecedor B <img src=x onerror=alert\(1\)>/);
     await shots('purchase-history-details');
@@ -130,7 +138,7 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     await page.locator('#ph-supplier').selectOption('Fornecedor A');await ready();await choose();
     assert.deepEqual(await getOrders(),['OC 201','OC 200']);
   });
-  await check('cancelled items are excluded by default and visibly marked when requested',async()=>{
+  await check('own status control can show cancelled orders without using operational filters',async()=>{
     await page.locator('#ph-status').selectOption('all');await ready();await choose();
     assert.deepEqual(await getOrders(),['OC 203','OC 201','OC 200']);
     assert.equal(await page.locator('.ph-cancelled').count(),1);
@@ -168,6 +176,15 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     assert.equal(await page.locator('.purchase-history').count(),0);
     await page.locator('[data-view="purchases"]').click();await page.locator('[data-leave-action="discard"]').click();await ready();
     assert.equal((await actualApi('GET','/map?id='+setup.map_id)).map.revision,original.map.revision);
+  });
+  await check('compact layout fits more items and keeps readable titles at laptop size',async()=>{
+    await page.setViewportSize({width:1366,height:768});
+    await page.locator('#ph-company').selectOption('');await page.locator('#ph-supplier').selectOption('');
+    await page.locator('#ph-status').selectOption('all');await search('');
+    const metrics=await page.locator('.ph-item').evaluateAll(items=>items.slice(0,5).map(el=>({height:el.getBoundingClientRect().height,font:parseFloat(getComputedStyle(el.querySelector('strong')).fontSize)})));
+    assert.ok(metrics.every(m=>m.height<=88&&m.font<=12),JSON.stringify(metrics));
+    await page.evaluate(()=>document.querySelector('#toast').classList.remove('visible'));
+    await shots('purchase-history-compact');
   });
   await check('responsive history page fits the content area and requests are strictly read-only',async()=>{
     await search('0090');await choose();await page.setViewportSize({width:780,height:720});
