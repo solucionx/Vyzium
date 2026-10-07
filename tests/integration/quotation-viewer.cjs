@@ -99,43 +99,45 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
   const viewer = page.locator('dialog.quotation-viewer');
   const show = async()=>{await page.locator('#view-map-detail').click();await viewer.waitFor({state:'visible'});};
   const close = async()=>{await page.locator('#qv-close').click();await viewer.waitFor({state:'detached'});};
-  const tab = name=>page.locator(`[data-qv-tab="${name}"]`).click();
   const shots = async name=>{if(process.env.VYZIUM_TEST_OUTPUT_DIR){fs.mkdirSync(process.env.VYZIUM_TEST_OUTPUT_DIR,{recursive:true});await page.screenshot({path:path.join(process.env.VYZIUM_TEST_OUTPUT_DIR,name+'.png')});}};
   await check('viewer opens read-only through real preload and GET without a save or WhatsApp request',async()=>{
     const posts=httpCalls.filter(r=>r.method==='POST').length;
     await show();assert.equal(await page.locator('#qv-title').textContent(),'Manut · 0210');
     assert.match(await viewer.textContent(),/Urgente/);
-    assert.equal(await page.locator('.qv-metrics strong').nth(1).textContent(),Number(original.result.net).toLocaleString('pt-BR',{style:'currency',currency:'BRL'}));
+    assert.equal(await page.locator('.qv-sheet tbody tr').count(),original.map.items.length);
+    assert.equal(await page.locator('.qv-supplier-head').count(),original.map.suppliers.length);
+    assert.equal(await page.locator('[data-qv-tab]').count(),0);
+    assert.equal(await page.locator('.qv-metrics').count(),0);
     assert.equal(httpCalls.filter(r=>r.method==='POST').length,posts);
     assert.equal((await actualApi('GET','/map?id='+setup.map_id)).map.revision,original.map.revision);
-    assert.equal(await page.locator('#qv-save').count(),0);await shots('viewer-summary');
+    assert.equal(await page.locator('#qv-save').count(),0);await shots('viewer-sheet');
   });
   await check('manual award, financial best, tie, unquoted and legacy discounts remain separate',async()=>{
-    await tab('items');
     const item=page.locator('[data-qv-item="c1"]');
-    assert.match(await item.textContent(),/Escolha operacional/);assert.match(await item.textContent(),/Entrega imediata <especial>/);
-    assert.match(await item.textContent(),/sobre o menor preço/);
-    assert.equal(await item.locator('.qv-chosen-row').count(),1);
-    assert.match(await page.locator('[data-qv-item="m1"]').textContent(),/Empate pendente/);
-    assert.equal(await page.locator('[data-qv-item="m1"] .qv-chosen-row').count(),0);
-    assert.match(await page.locator('[data-qv-item="m2"]').textContent(),/Nenhum preço informado/);
-    assert.equal(await viewer.locator('img,script').count(),0);await shots('viewer-items');
+    assert.match(await item.textContent(),/Entrega imediata <especial>/);
+    assert.equal(await item.locator('.qv-price-cell.is-chosen').count(),1);
+    assert.ok(await item.locator('.qv-price-cell.is-best').count()>=1);
+    assert.match(await page.locator('[data-qv-item="m1"]').textContent(),/Empate/);
+    assert.equal(await page.locator('[data-qv-item="m1"] .qv-price-cell.is-chosen').count(),0);
+    assert.match(await page.locator('[data-qv-item="m2"]').textContent(),/Sem cotação/);
+    assert.equal(await viewer.locator('img,script').count(),0);await shots('viewer-values');
   });
   await check('search supports accents and filters keep full-map totals explicitly labelled',async()=>{
-    await page.locator('#qv-search').fill('lampada');assert.equal(await page.locator('.qv-item:visible').count(),1);
+    await page.locator('#qv-search').fill('lampada');assert.equal(await page.locator('.qv-sheet tbody tr:visible').count(),1);
     await page.locator('#qv-search').fill('');await page.locator('#qv-hotel').selectOption('MAGNA PRAIA');
-    assert.equal(await page.locator('.qv-item:visible').count(),2);
-    await page.locator('#qv-state').selectOption('unquoted');assert.equal(await page.locator('.qv-item:visible').count(),1);
-    assert.match(await page.locator('#qv-count').textContent(),/Totais do mapa completo/);
-    await page.locator('#qv-search').fill('não existe');assert.match(await page.locator('#qv-items').textContent(),/Nenhum item corresponde/);
+    assert.equal(await page.locator('.qv-sheet tbody tr:visible').count(),2);
+    await page.locator('#qv-state').selectOption('unquoted');assert.equal(await page.locator('.qv-sheet tbody tr:visible').count(),1);
+    assert.match(await page.locator('#qv-count').textContent(),/1 de 4 itens exibidos/);
+    await page.locator('#qv-search').fill('não existe');assert.match(await page.locator('#qv-sheet-host').textContent(),/Nenhum item corresponde/);
   });
   await check('supplier coverage and assigned totals match the backend without interpreting absent quotes as zero',async()=>{
-    await tab('suppliers');assert.equal(await page.locator('.qv-supplier').count(),2);
+    assert.equal(await page.locator('.qv-supplier-head').count(),2);
     await page.evaluate(detail=>window.__viewerDetail=detail,original);
     const model=await page.evaluate(()=>QuotationViewer.createModel(window.__viewerDetail));
     for(const supplier of original.result.suppliers){const actual=model.suppliers.find(s=>s.id===supplier.id);assert.equal(actual.net,Number(supplier.net));assert.equal(actual.saving,Number(supplier.saving));}
-    assert.equal(model.defined,2);assert.equal(model.completion,50);assert.equal(model.suppliers[0].coverage,3);
-    assert.match(await page.locator('.qv-supplier').first().textContent(),/3\/4 itens cotados/);
+    assert.equal(model.defined,2);assert.equal(model.suppliers[0].coverage,3);
+    assert.match(await page.locator('.qv-supplier-head').first().textContent(),/3\/4 itens cotados/);
+    assert.match(await page.locator('.qv-sheet tfoot').textContent(),/3\/4 itens/);
   });
   await shots('viewer-suppliers');await close();
   await check('Escape returns focus and preserves dirty inputs and map revision',async()=>{
@@ -169,11 +171,11 @@ function gate(route, additionOnly=false) {let release;const promise=new Promise(
     assert.match(await viewer.textContent(),/Mapa concluído/);assert.equal(await page.locator('#qv-save').count(),0);await close();
   });
   await check('60 items and 10 suppliers render, filter and close without horizontal dialog overflow',async()=>{
-    await openMap(setup.large_id);await show();await tab('items');assert.equal(await page.locator('.qv-item:visible').count(),60);
-    await page.locator('#qv-search').fill('Peça de manutenção 59');assert.equal(await page.locator('.qv-item:visible').count(),1);
-    await tab('suppliers');assert.equal(await page.locator('.qv-supplier').count(),10);
+    await openMap(setup.large_id);await show();assert.equal(await page.locator('.qv-sheet tbody tr:visible').count(),60);
+    assert.equal(await page.locator('.qv-supplier-head').count(),10);
+    await page.locator('#qv-search').fill('Peça de manutenção 59');assert.equal(await page.locator('.qv-sheet tbody tr:visible').count(),1);
     await shots('viewer-large');await close();
-    await page.setViewportSize({width:780,height:720});await show();await tab('items');
+    await page.setViewportSize({width:780,height:720});await show();
     const fits=await viewer.evaluate(el=>el.scrollWidth<=el.clientWidth+1);assert.ok(fits,'Dialog must not overflow horizontally');
     await shots('viewer-small');await close();
     await page.setViewportSize({width:1440,height:900});
