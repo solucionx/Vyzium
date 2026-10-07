@@ -1,9 +1,9 @@
-name: Vyzium 3.4.13 Production SCI Search Draft
+name: Vyzium 3.4.14 Purchase History Recursion Hotfix Draft
 
 on:
   push:
     branches:
-      - release/v3.4.13-production-sci-search
+      - release/v3.4.14-purchase-history-recursion-fix
   workflow_dispatch:
     inputs:
       tag:
@@ -12,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: vyzium-3.4.13-production-sci-search
+  group: vyzium-3.4.14-purchase-history-recursion-fix
   cancel-in-progress: true
 
 # O workflow apenas lê o repositório de código. A permissão para publicar
@@ -44,12 +44,12 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $base = '2d40d673edfcc038fc01c361e7d361268480dba1'
+          $base = '78a83e9ea5800a0a024ed80fc238eaae13bc28ee'
           git merge-base --is-ancestor $base HEAD
-          if ($LASTEXITCODE -ne 0) { throw 'A candidata não descende da Vyzium 3.4.12 publicada.' }
+          if ($LASTEXITCODE -ne 0) { throw 'A candidata não descende da Vyzium 3.4.13 publicada.' }
           $waChanges = @(git diff --name-only "$base..HEAD" -- electron/whatsapp.js electron/whatsapp-hidden-browser.ps1)
           if ($waChanges.Count -gt 0) { throw "Alteração de WhatsApp fora do escopo: $($waChanges -join ', ')" }
-          Write-Host 'Linhagem 3.4.12 confirmada; arquivos de runtime do WhatsApp intactos.'
+          Write-Host 'Linhagem 3.4.13 confirmada; arquivos de runtime do WhatsApp intactos.'
 
       - name: Configurar Node.js
         uses: actions/setup-node@v4
@@ -116,7 +116,7 @@ jobs:
           if ($release.Count -gt 1) { throw 'Mais de uma release encontrada para a mesma tag.' }
           if ($release.Count -eq 1) {
             if (-not $release[0].draft) { throw 'A v3.4.13 já está publicada; não sobrescrever.' }
-            gh release edit $env:RELEASE_TAG --repo $env:RELEASE_REPO --title "Vyzium $env:RELEASE_TAG — VALIDAÇÃO EM ANDAMENTO" --notes "NÃO PUBLICAR. Esta Draft está sendo substituída pela candidata baseada na produção 3.4.12. Os anexos só serão atualizados após todos os testes passarem."
+            gh release edit $env:RELEASE_TAG --repo $env:RELEASE_REPO --title "Vyzium $env:RELEASE_TAG — VALIDAÇÃO EM ANDAMENTO" --notes "NÃO PUBLICAR. Esta Draft está sendo validada como hotfix sobre a produção 3.4.13. Os anexos só serão atualizados após todos os testes passarem."
             if ($LASTEXITCODE -ne 0) { throw 'Falha ao colocar a Draft anterior em quarentena.' }
           }
 
@@ -269,7 +269,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tag = $env:RELEASE_TAG
           $releaseRepo = $env:RELEASE_REPO
-          $notes = 'docs/RELEASE_3.4.13.md'
+          $notes = 'docs/RELEASE_3.4.14.md'
           gh release view $tag --repo $releaseRepo *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $releaseRepo --target main --draft --title "Vyzium $tag" --notes-file $notes
