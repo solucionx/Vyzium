@@ -1,9 +1,9 @@
-name: Vyzium 3.4.11 Purchase History Draft
+name: Vyzium 3.4.12 Production Hardening Draft
 
 on:
   push:
     branches:
-      - release/v3.4.11-purchase-history
+      - release/v3.4.12-production
   workflow_dispatch:
     inputs:
       tag:
@@ -12,7 +12,7 @@ on:
         type: string
 
 concurrency:
-  group: vyzium-3.4.11-purchase-history
+  group: vyzium-3.4.12-production
   cancel-in-progress: true
 
 # O workflow apenas lê o repositório de código. A permissão para publicar
@@ -239,7 +239,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $tag = $env:RELEASE_TAG
           $releaseRepo = $env:RELEASE_REPO
-          $notes = 'docs/RELEASE_3.4.11.md'
+          $notes = 'docs/RELEASE_3.4.12.md'
           gh release view $tag --repo $releaseRepo *> $null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag --repo $releaseRepo --target main --draft --title "Vyzium $tag" --notes-file $notes
