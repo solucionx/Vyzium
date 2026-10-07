@@ -62,7 +62,7 @@
           <td class="qv-sticky qv-col-item"><strong>${esc(item.description)}</strong><small>${item.article?'Artigo '+esc(item.article)+' · ':''}${item.buyer?esc(item.buyer):''}${item.purchase_type?' · '+esc(item.purchase_type):''}</small>${item.note?`<small class="qv-note">${esc(item.note)}</small>`:''}</td>
           <td class="qv-col-qty">${number(item.quantity)}<small>${esc(item.unit)}</small></td>
           ${suppliers.map(supplier=>`<td class="qv-supplier-cell">${supplierCell(item,supplier)}</td>`).join('')}
-          <td class="qv-col-choice"><span class="qv-state qv-state-${item.line.state}">${stateLabel[item.line.state]}</span><strong>${esc(item.line.chosen?.supplier || '—')}</strong>${item.line.selection_reason?`<small>${esc(item.line.selection_reason)}</small>`:''}</td>
+          <td class="qv-col-choice"><span class="qv-state qv-state-${item.line.state}">${stateLabel[item.line.state]}</span><strong>${esc(item.line.chosen?.supplier || '—')}</strong>${item.line.selection_reason?`<small>${esc(item.line.selection_reason)}</small>`:''}${item.line.selection_note?`<small class="qv-choice-note">${esc(item.line.selection_note)}</small>`:''}</td>
           <td class="qv-col-total"><strong>${item.line.chosen?money(item.line.chosen.net):'—'}</strong>${item.line.chosen?`<small>Economia ${money(item.line.chosen.saving)}</small>`:''}</td>
         </tr>`).join('')}</tbody>
         <tfoot><tr>
