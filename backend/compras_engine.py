@@ -30,7 +30,7 @@ from secure_sqlite import connect as secure_connect, key_from_env
 from purchase_history import HistoryBuilder, search as search_purchases, detail as purchase_detail
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.4.16')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.5.0')
 DB_SCHEMA_VERSION = 1
 
 def map_urgent(value):
