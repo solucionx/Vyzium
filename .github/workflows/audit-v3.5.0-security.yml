@@ -1,0 +1,87 @@
+name: Vyzium 3.5.0 Security Audit
+
+on:
+  push:
+    branches:
+      - audit/v3.5.0-security
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install lockfile dependencies without lifecycle scripts
+        run: npm ci --ignore-scripts
+
+      - name: Collect complete npm audit
+        shell: bash
+        run: |
+          npm audit --json > npm-audit-full.json || true
+          npm audit --omit=dev --json > npm-audit-production.json || true
+
+      - name: Print npm security classification
+        shell: node {0}
+        run: |
+          const fs = require('fs');
+          for (const [label,file] of [['FULL','npm-audit-full.json'],['PRODUCTION','npm-audit-production.json']]) {
+            const data = JSON.parse(fs.readFileSync(file,'utf8'));
+            const meta = data.metadata?.vulnerabilities || {};
+            console.log('\n=== NPM AUDIT '+label+' ===');
+            console.log('COUNTS '+JSON.stringify(meta));
+            const vulns = Object.entries(data.vulnerabilities || {}).map(([name,v]) => ({
+              name,
+              severity:v.severity,
+              direct:Boolean(v.isDirect),
+              range:v.range,
+              fix:v.fixAvailable,
+              via:(v.via||[]).map(x=>typeof x==='string'?x:(x.title || x.name || x.url || 'advisory'))
+            }));
+            vulns.sort((a,b)=>({critical:4,high:3,moderate:2,low:1,info:0}[b.severity]||0)-({critical:4,high:3,moderate:2,low:1,info:0}[a.severity]||0));
+            for (const v of vulns) console.log('VULN '+JSON.stringify(v));
+          }
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Audit pinned Python direct dependencies
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check pip-audit
+          pip-audit -r backend/requirements.txt --no-deps --format json > pip-audit.json || true
+
+      - name: Print Python audit
+        shell: python
+        run: |
+          import json
+          data=json.load(open('pip-audit.json',encoding='utf-8'))
+          print('=== PYTHON AUDIT ===')
+          deps=data.get('dependencies',data if isinstance(data,list) else [])
+          findings=[]
+          for dep in deps:
+              for vuln in dep.get('vulns',[]):
+                  findings.append({'name':dep.get('name'),'version':dep.get('version'),'id':vuln.get('id'),'fix_versions':vuln.get('fix_versions',[])})
+          print('PYTHON_FINDINGS',json.dumps(findings,ensure_ascii=False))
+          print('PYTHON_COUNT',len(findings))
+
+      - name: Upload audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vyzium-3.5.0-security-audit
+          path: |
+            npm-audit-full.json
+            npm-audit-production.json
+            pip-audit.json
+          if-no-files-found: warn
