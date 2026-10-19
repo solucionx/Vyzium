@@ -295,64 +295,59 @@ function normalizeDeviceId(value) {
 async function requestRemoteToFile({ host = PUBLIC_HOST, route, token, outputPath, expectedId, timeoutMs = 120000 }) {
   const bearer = normalizeToken(token);
   const id = normalizeObjectId(expectedId);
-  if (String(route || '') !== `/v1/backups/${id}`) throw new RemoteBackupError('Rota de download incompatível com o objeto.', { code:'BACKUP_ROUTE_INVALID' });
-  await fs.promises.mkdir(path.dirname(outputPath), { recursive:true, mode:0o700 });
-  await fs.promises.rm(outputPath, { force:true });
-
-  return new Promise((resolve, reject) => {
-    let settled = false;
-    const fail = async error => {
-      if (settled) return;
-      settled = true;
-      await fs.promises.rm(outputPath, { force:true }).catch(() => {});
-      reject(error instanceof RemoteBackupError ? error : new RemoteBackupError('Não foi possível baixar o backup do servidor.', { code:'BACKUP_DOWNLOAD_ERROR' }));
-    };
-    const req = https.request({
-      protocol:'https:', hostname:host, port:443, method:'GET', path:route,
-      headers:{Authorization:`Bearer ${bearer}`,Accept:'application/octet-stream',Connection:'close'},
-      agent:false, timeout:timeoutMs, rejectUnauthorized:true
-    }, response => {
-      const status = Number(response.statusCode || 0);
-      if (status !== 200) {
-        const chunks=[]; let total=0;
-        response.on('data', chunk => { total += chunk.length; if (total <= RESPONSE_LIMIT) chunks.push(chunk); });
-        response.on('error', fail);
-        response.on('end', () => fail(responseError(status, Buffer.concat(chunks))));
-        return;
-      }
-      const declared = Number(response.headers['content-length'] || 0);
-      if (!Number.isSafeInteger(declared) || declared < 32 || declared > MAX_OBJECT) {
-        response.resume();
-        fail(new RemoteBackupError('O servidor informou tamanho inválido para o backup.', { code:'BACKUP_DOWNLOAD_SIZE_INVALID' }));
-        return;
-      }
-      const hash = crypto.createHash('sha256');
-      let total = 0;
-      const output = fs.createWriteStream(outputPath, { flags:'wx', mode:0o600 });
-      output.on('error', fail);
-      response.on('error', fail);
-      response.on('data', chunk => {
-        total += chunk.length;
-        if (total > MAX_OBJECT || total > declared) {
-          response.destroy(new RemoteBackupError('O download excedeu o tamanho anunciado.', { code:'BACKUP_DOWNLOAD_SIZE_INVALID' }));
-          return;
-        }
-        hash.update(chunk);
-      });
-      response.pipe(output);
-      output.on('finish', async () => {
-        if (settled) return;
-        if (total !== declared) return fail(new RemoteBackupError('O download terminou incompleto.', { code:'BACKUP_DOWNLOAD_INCOMPLETE' }));
-        const actual = hash.digest('hex');
-        if (actual !== id) return fail(new RemoteBackupError('O backup baixado não passou na verificação SHA-256.', { code:'BACKUP_DOWNLOAD_CHECKSUM_MISMATCH' }));
-        settled = true;
-        resolve({ path:outputPath, id, bytes:total });
-      });
+  if (String(route || '') !== `/v1/backups/${id}`) throw new RemoteBackupError('Rota de download incompatível com o objeto.', {code:'BACKUP_ROUTE_INVALID'});
+  await fs.promises.mkdir(path.dirname(outputPath), {recursive:true, mode:0o700});
+  // Own a new file exclusively: a failed request must never erase an older copy.
+  const output = await fs.promises.open(outputPath, 'wx', 0o600);
+  let req;
+  let response;
+  try {
+    response = await new Promise((resolve, reject) => {
+      req = https.request({protocol:'https:', hostname:host, port:443, method:'GET', path:route,
+        headers:{Authorization:`Bearer ${bearer}`,Accept:'application/octet-stream',Connection:'close'},
+        agent:false, timeout:timeoutMs, rejectUnauthorized:true}, resolve);
+      req.on('timeout', () => req.destroy(new RemoteBackupError('Tempo limite ao baixar o backup do servidor.', {code:'BACKUP_TIMEOUT'})));
+      req.on('error', reject);
+      req.end();
     });
-    req.on('timeout', () => req.destroy(new RemoteBackupError('Tempo limite ao baixar o backup do servidor.', { code:'BACKUP_TIMEOUT' })));
-    req.on('error', fail);
-    req.end();
-  });
+    if (response.statusCode !== 200) {
+      const chunks = []; let total = 0;
+      for await (const chunk of response) {
+        total += chunk.length;
+        if (total > RESPONSE_LIMIT) throw new RemoteBackupError('Resposta do servidor excedeu o limite seguro.', {code:'BACKUP_RESPONSE_TOO_LARGE'});
+        chunks.push(chunk);
+      }
+      throw responseError(response.statusCode, Buffer.concat(chunks));
+    }
+    const declared = Number(response.headers['content-length'] || 0);
+    if (!Number.isSafeInteger(declared) || declared < 32 || declared > MAX_OBJECT) {
+      throw new RemoteBackupError('O servidor informou tamanho inválido para o backup.', {code:'BACKUP_DOWNLOAD_SIZE_INVALID'});
+    }
+    const hash = crypto.createHash('sha256');
+    let total = 0;
+    for await (const chunk of response) {
+      total += chunk.length;
+      if (total > declared) throw new RemoteBackupError('O download excedeu o tamanho anunciado.', {code:'BACKUP_DOWNLOAD_SIZE_INVALID'});
+      hash.update(chunk);
+      let offset = 0;
+      while (offset < chunk.length) {
+        const {bytesWritten} = await output.write(chunk, offset, chunk.length - offset);
+        if (!bytesWritten) throw new Error('Incomplete write');
+        offset += bytesWritten;
+      }
+    }
+    if (total !== declared) throw new RemoteBackupError('O download terminou incompleto.', {code:'BACKUP_DOWNLOAD_INCOMPLETE'});
+    if (hash.digest('hex') !== id) throw new RemoteBackupError('O backup baixado não passou na verificação SHA-256.', {code:'BACKUP_DOWNLOAD_CHECKSUM_MISMATCH'});
+    await output.sync();
+    await output.close();
+    return {path:outputPath, id, bytes:total};
+  } catch (error) {
+    response?.destroy();
+    req?.destroy();
+    await output.close().catch(() => {});
+    await fs.promises.rm(outputPath, {force:true}).catch(() => {});
+    throw error instanceof RemoteBackupError ? error : new RemoteBackupError('Não foi possível baixar o backup do servidor.', {code:'BACKUP_DOWNLOAD_ERROR'});
+  }
 }
 
 async function unsealEnvelopeFile(inputPath, outputPath, key, uid) {
@@ -512,7 +507,7 @@ class RemoteBackupManager {
       && Number(payload?.retention || 0) === 3
       && backups.every(item => ['current','previous','divergent'].includes(item.role));
     let headId = normalizeObjectId(payload?.head_id, {optional:true});
-    if (!headId) headId = backups[0]?.id || null; // read-only compatibility with the 3.3.8/RC5 server
+    if (!headId && !Object.prototype.hasOwnProperty.call(payload || {}, 'head_id')) headId = backups[0]?.id || null; // read-only compatibility with the 3.3.8/RC5 server
     for (const item of backups) {
       if (!item.role) item.role = item.id === headId ? 'current' : 'previous';
     }
@@ -625,6 +620,45 @@ class RemoteBackupManager {
         fs.promises.rm(bundlePath, { force:true }),
         fs.promises.rm(envelopePath, { force:true })
       ]);
+    }
+  }
+
+  // Export only: never apply a restore or advance the local synchronization parent.
+  async downloadLatest(destinationRoot) {
+    const listing = await this.list();
+    const current = listing.backups.find(item => item.id === listing.head_id && item.role === 'current');
+    if (!current) throw new RemoteBackupError('O servidor não informou um backup principal válido.', {code:'BACKUP_CURRENT_MISSING'});
+    if (!Number.isSafeInteger(current.bytes)) throw new RemoteBackupError('Tamanho do backup inválido.', {code:'BACKUP_DOWNLOAD_SIZE_INVALID'});
+    const {uid, token} = await this._tokenAndUid();
+    if (uid !== listing.uid) throw new RemoteBackupError('A conta mudou durante a consulta. Tente novamente.', {code:'BACKUP_IDENTITY_INVALID'});
+    await fs.promises.mkdir(destinationRoot, {recursive:true, mode:0o700});
+    const dir = await fs.promises.mkdtemp(path.join(destinationRoot, '.partial-'));
+    const envelopePath = path.join(dir, current.id + '.vzb');
+    const bundlePath = path.join(dir, 'workspace.vyb');
+    const filesDir = path.join(dir, 'validation');
+    try {
+      await this.downloadFn({host:this.host, route:`/v1/backups/${current.id}`, token,
+        outputPath:envelopePath, expectedId:current.id, timeoutMs:120000});
+      // Independently verify the persisted bytes, including injected download adapters.
+      const stat = await fs.promises.stat(envelopePath);
+      if (stat.size !== current.bytes || await sha256File(envelopePath) !== current.id) {
+        throw new RemoteBackupError('O arquivo baixado não corresponde ao backup principal.', {code:'BACKUP_DOWNLOAD_CHECKSUM_MISMATCH'});
+      }
+      await this.withBackupKey(key => unsealEnvelopeFile(envelopePath, bundlePath, key, uid));
+      const extracted = await extractBundleFile(bundlePath, filesDir, uid);
+      if (!extracted.files.length) throw new RemoteBackupError('Backup sem bancos de dados.', {code:'BACKUP_MANIFEST_INVALID'});
+      await fs.promises.rm(bundlePath, {force:true});
+      await fs.promises.rm(filesDir, {recursive:true, force:true});
+      const handle = await fs.promises.open(envelopePath, 'r+');
+      try { await handle.sync(); } finally { await handle.close(); }
+      // Publish a unique directory only after every verification has succeeded.
+      const finalDir = path.join(destinationRoot, `backup-${Date.now()}-${crypto.randomBytes(12).toString('hex')}`);
+      await fs.promises.rename(dir, finalDir);
+      this._event('download-complete', {id:current.id, bytes:stat.size});
+      return {downloaded:true, id:current.id, bytes:stat.size, created_ms:current.created_ms,
+        path:path.join(finalDir, current.id + '.vzb')};
+    } finally {
+      await fs.promises.rm(dir, {recursive:true, force:true});
     }
   }
 

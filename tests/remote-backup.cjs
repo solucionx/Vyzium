@@ -274,3 +274,89 @@ test('RC4 409 diagnostics preserve server code and request correlation id', () =
   assert.equal(error.requestId, 'request-123');
   assert.match(error.message, /servidor rejeitou/i);
 });
+
+async function exportFixture(t) {
+  const dir = tmpdir(); t.after(() => fs.rmSync(dir, {recursive:true, force:true}));
+  const uid = 'exportUser_123456', key = crypto.randomBytes(32);
+  const source = path.join(dir, 'live.db');
+  const original = crypto.randomBytes(1024); fs.writeFileSync(source, original);
+  await buildBundleFile([{module:'followup',path:source,encrypted:true}], path.join(dir,'bundle'), {uid});
+  const envelope = await sealBundleFile(path.join(dir,'bundle'), path.join(dir,'object'), key, uid);
+  const bytes = fs.readFileSync(envelope.path);
+  const current = {id:envelope.id,bytes:bytes.length,created_ms:100,role:'current'};
+  const payload = {head_id:current.id,retention:3,backups:[{id:'f'.repeat(64),bytes:64,created_ms:999,role:'divergent'},current]};
+  const calls = [];
+  const manager = new RemoteBackupManager({tempRoot:path.join(dir,'temp'),getUid:()=>uid,getToken:()=> 'token-export',
+    withBackupKey:fn=>fn(key),requestFn:async args=>{calls.push(args);return {status:200,body:Buffer.from(JSON.stringify(payload))};},
+    downloadFn:async args=>{calls.push(args);assert.equal(args.expectedId,envelope.id);fs.writeFileSync(args.outputPath,bytes);return {path:args.outputPath,bytes:bytes.length};}});
+  return {dir,source,original,key,bytes,current,payload,calls,manager,destination:path.join(dir,'downloads')};
+}
+
+test('download latest exports validated HEAD, ignores newer divergent candidate and preserves live data and previous copies', async t => {
+  const f = await exportFixture(t);
+  const first = await f.manager.downloadLatest(f.destination);
+  const second = await f.manager.downloadLatest(f.destination);
+  assert.notEqual(first.path,second.path);
+  assert.deepEqual(fs.readFileSync(first.path),f.bytes);
+  assert.deepEqual(fs.readFileSync(second.path),f.bytes);
+  assert.deepEqual(fs.readFileSync(f.source),f.original);
+  assert.equal(fs.readdirSync(f.destination).length,2);
+  assert.deepEqual(fs.readdirSync(path.dirname(first.path)),[f.current.id+'.vzb']);
+  assert.ok(f.calls.every(c=>!c.method || c.method==='GET'));
+});
+
+test('modern catalog without HEAD never promotes a divergent file through timestamp fallback', async t => {
+  const f = await exportFixture(t); f.payload.head_id=null; f.payload.backups=[f.payload.backups[0]];
+  await assert.rejects(f.manager.downloadLatest(f.destination),{code:'BACKUP_CURRENT_MISSING'});
+  assert.equal(f.calls.length,1);
+  assert.equal(fs.existsSync(f.destination),false);
+});
+
+test('download fails closed when HEAD is missing from listing', async t => {
+  const f = await exportFixture(t); f.payload.head_id='a'.repeat(64);
+  await assert.rejects(f.manager.downloadLatest(f.destination),{code:'BACKUP_CURRENT_MISSING'});
+});
+
+test('corrupt, truncated and wrong-key downloads leave no published copy and preserve live data', async t => {
+  for (const mode of ['corrupt','truncated','key','offline']) {
+    const f = await exportFixture(t);
+    if (mode==='key') f.key.fill(0);
+    else f.manager.downloadFn=async args=>{
+      if (mode==='offline') throw new Error('offline');
+      const data=Buffer.from(f.bytes);data[20]^=1;
+      fs.writeFileSync(args.outputPath,mode==='truncated'?data.subarray(0,40):data);
+    };
+    await assert.rejects(f.manager.downloadLatest(f.destination));
+    assert.deepEqual(fs.readdirSync(f.destination),[]);
+    assert.deepEqual(fs.readFileSync(f.source),f.original);
+  }
+});
+
+test('GET downloader never removes an existing destination', async t => {
+  const {requestRemoteToFile}=require('../electron/remote-backup');
+  const f=await exportFixture(t);
+  await assert.rejects(requestRemoteToFile({route:'/v1/backups/'+f.current.id,token:'token-export',expectedId:f.current.id,outputPath:f.source}),{code:'EEXIST'});
+  assert.deepEqual(fs.readFileSync(f.source),f.original);
+});
+
+test('stream downloader validates persisted bytes and cleans up interrupted transfers', async t => {
+  const https=require('node:https');
+  const {Readable}=require('node:stream');
+  const {EventEmitter}=require('node:events');
+  const {requestRemoteToFile}=require('../electron/remote-backup');
+  const f=await exportFixture(t);
+  for (const mode of ['valid','truncated','corrupt','interrupted','unauthorized']) {
+    const data=Buffer.from(f.bytes);if(mode==='corrupt')data[20]^=1;
+    const response= mode==='interrupted' ? Readable.from((async function*(){yield data.subarray(0,20);throw new Error('disconnect');})()) : Readable.from([mode==='truncated'?data.subarray(0,20):data]);
+    response.statusCode=mode==='unauthorized'?403:200;
+    response.headers={'content-length':String(data.length)};
+    const mock=t.mock.method(https,'request',(_opts,callback)=>{
+      const req=new EventEmitter();req.end=()=>callback(response);req.destroy=()=>{};return req;
+    });
+    const outputPath=path.join(f.dir,mode+'.vzb');
+    const run=requestRemoteToFile({route:'/v1/backups/'+f.current.id,token:'token-export',expectedId:f.current.id,outputPath});
+    if(mode==='valid'){await run;assert.deepEqual(fs.readFileSync(outputPath),f.bytes);}
+    else {await assert.rejects(run);assert.equal(fs.existsSync(outputPath),false);}
+    mock.mock.restore();
+  }
+});
