@@ -660,8 +660,10 @@ function dataSafetyPanelHtml() {
   return `<section class="panel narrow" id="data-safety-panel">
     <div class="panel-head"><div><h2>Segurança dos dados</h2><p>Banco local criptografado e verificação de integridade.</p></div></div>
     <div id="data-safety-status" class="callout">Verificando banco de dados…</div>
+    <p>Baixe uma cópia criptografada do backup principal. O download não restaura nem substitui os dados em uso.</p>
     <div id="remote-backup-status" class="callout" style="margin-top:10px">Backup online: verificando servidor…</div>
     <div class="toolbar" style="margin-top:12px">
+      <button id="download-latest-backup" class="button" type="button">Baixar backup mais recente</button>
       <button id="create-db-backup" class="button primary" type="button">Criar e enviar backup</button>
     </div>
   </section>`;
@@ -691,6 +693,20 @@ async function refreshDataSafetyPanel() {
 }
 
 function wireDataSafetyPanel() {
+  document.getElementById('download-latest-backup')?.addEventListener('click', async event => {
+    const button = event.currentTarget;
+    button.disabled = true;
+    button.textContent = 'Baixando e verificando…';
+    try {
+      await api('POST', '/remote-backup/download-latest', {});
+      showToast('Backup baixado e verificado. Pasta aberta; os dados em uso foram preservados.');
+    } catch (error) {
+      showToast(`Falha ao baixar backup: ${String(error.message || error)}`, true);
+    } finally {
+      button.disabled = false;
+      button.textContent = 'Baixar backup mais recente';
+    }
+  });
   document.getElementById('create-db-backup')?.addEventListener('click', async event => {
     const button = event.currentTarget;
     button.disabled = true;

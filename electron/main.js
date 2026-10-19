@@ -536,6 +536,11 @@ async function apiRequest(method, route, body) {
       throw new Error('O backup remoto só fica disponível após entrar na sua conta Vyzium.');
     }
     if (method === 'GET' && route === '/remote-backup/status') return remoteBackup.status();
+    if (method === 'POST' && route === '/remote-backup/download-latest') {
+      const result = await remoteBackup.downloadLatest(path.join(securityManager.workspaceRoot(), 'backups', 'remote-downloads'));
+      shell.showItemInFolder(result.path);
+      return result;
+    }
     if (method === 'POST' && route === '/remote-backup/create') {
       return performRemoteBackup({reason:'manual', skipIfUnchanged:false});
     }
