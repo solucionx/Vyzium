@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.5.1",
-  "description": "Vyzium 3.5.1: download verificado do backup principal, preservando os dados em uso.",
+  "version": "3.5.2",
+  "description": "Vyzium 3.5.2: download verificado do backup principal, preservando os dados em uso.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {

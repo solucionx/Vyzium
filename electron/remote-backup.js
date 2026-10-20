@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const https = require('https');
+const {downloadedCopies, pruneDownloads, cleanDownloadPartials} = require('./storage-retention');
 
 const PUBLIC_HOST = 'api-vyzium.solucionx.com.br';
 const MAX_OBJECT = 128 * 1024 * 1024;
@@ -625,6 +626,12 @@ class RemoteBackupManager {
 
   // Export only: never apply a restore or advance the local synchronization parent.
   async downloadLatest(destinationRoot) {
+    if (this.downloadPending) return this.downloadPending;
+    this.downloadPending = this._downloadLatest(destinationRoot);
+    try { return await this.downloadPending; } finally { this.downloadPending = null; }
+  }
+
+  async _downloadLatest(destinationRoot) {
     const listing = await this.list();
     const current = listing.backups.find(item => item.id === listing.head_id && item.role === 'current');
     if (!current) throw new RemoteBackupError('O servidor não informou um backup principal válido.', {code:'BACKUP_CURRENT_MISSING'});
@@ -632,6 +639,13 @@ class RemoteBackupManager {
     const {uid, token} = await this._tokenAndUid();
     if (uid !== listing.uid) throw new RemoteBackupError('A conta mudou durante a consulta. Tente novamente.', {code:'BACKUP_IDENTITY_INVALID'});
     await fs.promises.mkdir(destinationRoot, {recursive:true, mode:0o700});
+    await cleanDownloadPartials(destinationRoot).catch(()=>{});
+    const copies = await downloadedCopies(destinationRoot);
+    const existing = copies.find(x=>x.id === current.id && x.bytes === current.bytes);
+    if (existing) {
+      await pruneDownloads(destinationRoot, existing.path).catch(()=>{});
+      return {downloaded:true, reused:true, id:current.id, bytes:existing.bytes, created_ms:current.created_ms, path:existing.path};
+    }
     const dir = await fs.promises.mkdtemp(path.join(destinationRoot, '.partial-'));
     const envelopePath = path.join(dir, current.id + '.vzb');
     const bundlePath = path.join(dir, 'workspace.vyb');
@@ -654,6 +668,7 @@ class RemoteBackupManager {
       // Publish a unique directory only after every verification has succeeded.
       const finalDir = path.join(destinationRoot, `backup-${Date.now()}-${crypto.randomBytes(12).toString('hex')}`);
       await fs.promises.rename(dir, finalDir);
+      await pruneDownloads(destinationRoot, path.join(finalDir, current.id + '.vzb')).catch(()=>{});
       this._event('download-complete', {id:current.id, bytes:stat.size});
       return {downloaded:true, id:current.id, bytes:stat.size, created_ms:current.created_ms,
         path:path.join(finalDir, current.id + '.vzb')};
