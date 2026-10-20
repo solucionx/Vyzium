@@ -187,6 +187,15 @@ function mapMatchesSearch(map,term) {
  const q=normalizedSearch(term);if(!q)return true;
  return normalizedSearch([map.name,...(map.scis||[]),...(map.items||[]),...(map.articles||[])].join(' ')).includes(q);
 }
+function quotationDeliveryHtml(m) {
+ if(m.archived)return '';
+ const d=m.quotation_delivery;
+ if(!d)return '<span class="quotation-delivery pending">Envios não verificados</span>';
+ const labels={sent:'Cotações enviadas',partial:'Cotações parcialmente enviadas',pending:'Cotações aguardando envio',sending:'Cotações em envio',uncertain:'Envio sem confirmação',failed:'Falha no envio das cotações'};
+ const state=Object.hasOwn(labels,d.state)?d.state:'pending';
+ const detail=d.total?`${d.sent} de ${d.total} fornecedores com envio confirmado${d.uncertain?` · ${d.uncertain} sem confirmação`:''}${d.failed?` · ${d.failed} com falha`:''}${d.sending?` · ${d.sending} em envio`:''}`:'Nenhum fornecedor adicionado';
+ return `<span class="quotation-delivery ${state}" title="${esc(detail)}">${labels[state]}</span><small class="quotation-delivery-detail">${esc(detail)}</small>`;
+}
 function mapCardHtml(m) {
  const scis=(m.scis||[]).slice(0,4),items=(m.items||[]).slice(0,2),moreScis=(m.scis||[]).length-scis.length,moreItems=(m.items||[]).length-items.length;
  const referenceDate=(m.archived?(m.completed_at||m.updated||m.created):m.created)||'';
@@ -194,7 +203,7 @@ function mapCardHtml(m) {
  const action=m.archived
   ?`<button class="button secondary" data-open-map="${m.id}">Abrir mapa</button>`
   :`<div class="map-card-action-area"><div class="map-card-progress" style="--progress:${completion}" role="img" aria-label="${completion}% dos itens definidos"><strong>${completion}%</strong><span>definido</span></div><button class="button secondary" data-open-map="${m.id}">Abrir mapa</button></div>`;
- return `<article class="map-card map-library-card"><div class="map-card-top"><span class="badge ${m.archived?'action-neutral':'action-normal'}">${m.archived?'Concluído':'Em cotação'}</span><span class="map-card-date">${referenceDate?dateLabel(referenceDate.slice(0,10)):''}</span></div><div class="map-card-deadline">${m.urgent?'<span class="map-urgent-badge">Urgente</span>':''}${mapDueBadgeHtml(m)}</div><h3>${esc(m.name)}</h3><p class="map-card-count">${m.count} ${m.count===1?'item':'itens'}</p>${scis.length?`<div class="map-card-reference"><small>SCI</small><span>${scis.map(esc).join(' · ')}${moreScis>0?` · +${moreScis}`:''}</span></div>`:''}${items.length?`<div class="map-card-items">${items.map(item=>`<span>${esc(item)}</span>`).join('')}${moreItems>0?`<small>+ ${moreItems} ${moreItems===1?'item':'itens'}</small>`:''}</div>`:''}${action}</article>`;
+ return `<article class="map-card map-library-card"><div class="map-card-top"><span class="badge ${m.archived?'action-neutral':'action-normal'}">${m.archived?'Concluído':'Em cotação'}</span><span class="map-card-date">${referenceDate?dateLabel(referenceDate.slice(0,10)):''}</span></div><div class="map-card-deadline">${m.urgent?'<span class="map-urgent-badge">Urgente</span>':''}${mapDueBadgeHtml(m)}</div><h3>${esc(m.name)}</h3><p class="map-card-count">${m.count} ${m.count===1?'item':'itens'}${quotationDeliveryHtml(m)}</p>${scis.length?`<div class="map-card-reference"><small>SCI</small><span>${scis.map(esc).join(' · ')}${moreScis>0?` · +${moreScis}`:''}</span></div>`:''}${items.length?`<div class="map-card-items">${items.map(item=>`<span>${esc(item)}</span>`).join('')}${moreItems>0?`<small>+ ${moreItems} ${moreItems===1?'item':'itens'}</small>`:''}</div>`:''}${action}</article>`;
 }
 function drawMapLibrary(maps) {
  const activeCount=maps.filter(m=>!m.archived).length,completedCount=maps.length-activeCount;

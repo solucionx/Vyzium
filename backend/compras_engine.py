@@ -30,7 +30,7 @@ from secure_sqlite import connect as secure_connect, key_from_env
 from purchase_history import HistoryBuilder, search as search_purchases, detail as purchase_detail
 
 
-APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.5.2')
+APP_VERSION = os.environ.get('VYZIUM_APP_VERSION', '3.5.3')
 DB_SCHEMA_VERSION = 1
 
 def map_urgent(value):
@@ -620,9 +620,45 @@ class Store:
             self.put('maps', data['id'], data)
         return data
 
+    def quotation_delivery(self, data, messages):
+        """Read-only projection of confirmed sends for the current quotation content."""
+        counts = dict(sent=0, sending=0, uncertain=0, failed=0, pending=0)
+        suppliers = data.get('suppliers', [])
+        for supplier in suppliers:
+            try:
+                fingerprint = self._quote_preview(data, supplier['id'])['fingerprint']
+            except (ValueError, KeyError):
+                counts['pending'] += 1
+                continue
+            matches = [m for m in messages if m.get('fingerprint') == fingerprint
+                       and m.get('supplier', {}).get('id') == supplier['id']]
+            statuses = {m.get('status') for m in matches}
+            # A confirmed send remains evidence even if a later retry failed.
+            if 'sent' in statuses:
+                counts['sent'] += 1
+            elif 'sending' in statuses:
+                counts['sending'] += 1
+            elif 'uncertain' in statuses:
+                counts['uncertain'] += 1
+            elif 'failed' in statuses:
+                counts['failed'] += 1
+            else:
+                counts['pending'] += 1
+        total = len(suppliers)
+        state = ('sent' if total and counts['sent'] == total else
+                 'partial' if counts['sent'] else
+                 'sending' if counts['sending'] else
+                 'uncertain' if counts['uncertain'] else
+                 'failed' if counts['failed'] else 'pending')
+        return dict(state=state, total=total, **counts)
+
     def map_summaries(self):
         """Small searchable summaries for the map library without changing stored map data."""
         summaries = []
+        messages_by_map = {}
+        for message in self.all('messages'):
+            if message.get('kind', 'quote') == 'quote':
+                messages_by_map.setdefault(message.get('map_id'), []).append(message)
         for data in self.all('maps'):
             items = data.get('items', [])
             archived = bool(data.get('archived'))
@@ -644,6 +680,7 @@ class Store:
                 'count': len(items),
                 'defined_count': defined_count,
                 'completion_percent': completion_percent,
+                'quotation_delivery': self.quotation_delivery(data, messages_by_map.get(data.get('id'), [])),
                 # Keep the historical `archived` flag for backwards compatibility; in the UI it means concluded.
                 'archived': archived,
                 'scis': sorted({text(item.get('sci')) for item in items if text(item.get('sci'))}),
@@ -838,12 +875,16 @@ class Store:
             raise ValueError('Mapa concluído. Crie um novo mapa para solicitar cotações.')
         if detail['changes']:
             raise ValueError('A base mudou para itens deste mapa. Conclua este mapa e crie outro com os dados atuais antes de enviar.')
+        return self._quote_preview(data, sid)
+
+    def _quote_preview(self, data, sid):
+        mid = data['id']
         supplier = next((s for s in data['suppliers'] if s['id'] == sid), None)
         if not supplier:
             raise ValueError('Fornecedor não encontrado.')
         lines = [f"Olá, {supplier['name']}! Poderia cotar os itens abaixo?", f"Mapa: {data['name']}", '']
         previous_hotel = None
-        for n, item in enumerate(data['items'], 1):
+        for n, item in enumerate(sorted(data['items'], key=lambda item: norm(item.get('company'))), 1):
             cnpj = hotel_cnpj(item['company'])
             if not cnpj:
                 raise ValueError(f"CNPJ não cadastrado para o hotel {item['company']}. Atualize a associação antes de enviar a cotação.")
