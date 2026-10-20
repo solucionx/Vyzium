@@ -1577,3 +1577,10 @@ body.module-compras .map-card-progress span {
     flex-basis: 48px;
   }
 }
+
+/* Delivery is independent from quote prices / item award progress. */
+body.module-compras .quotation-delivery {display:table;max-width:100%;white-space:normal;margin-top:7px;padding:4px 7px;border-radius:5px;font-size:10px;font-weight:700;line-height:1.4;background:#edf1f4;color:#465765;}
+body.module-compras .quotation-delivery.sent {background:#e3f4eb;color:#216a48;}
+body.module-compras .quotation-delivery.partial, body.module-compras .quotation-delivery.sending {background:#e6f2f8;color:#225d7c;}
+body.module-compras .quotation-delivery.uncertain, body.module-compras .quotation-delivery.failed {background:#fff1dc;color:#875413;}
+body.module-compras .quotation-delivery-detail {display:block;margin-top:4px;font-size:10px;font-weight:400;line-height:1.4;color:var(--muted);}
