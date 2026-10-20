@@ -296,11 +296,12 @@ test('download latest exports validated HEAD, ignores newer divergent candidate 
   const f = await exportFixture(t);
   const first = await f.manager.downloadLatest(f.destination);
   const second = await f.manager.downloadLatest(f.destination);
-  assert.notEqual(first.path,second.path);
+  assert.equal(first.path,second.path);
+  assert.equal(second.reused,true);
   assert.deepEqual(fs.readFileSync(first.path),f.bytes);
   assert.deepEqual(fs.readFileSync(second.path),f.bytes);
   assert.deepEqual(fs.readFileSync(f.source),f.original);
-  assert.equal(fs.readdirSync(f.destination).length,2);
+  assert.equal(fs.readdirSync(f.destination).length,1);
   assert.deepEqual(fs.readdirSync(path.dirname(first.path)),[f.current.id+'.vzb']);
   assert.ok(f.calls.every(c=>!c.method || c.method==='GET'));
 });
@@ -359,4 +360,55 @@ test('stream downloader validates persisted bytes and cleans up interrupted tran
     else {await assert.rejects(run);assert.equal(fs.existsSync(outputPath),false);}
     mock.mock.restore();
   }
+});
+
+test('simultaneous download clicks share one transfer and one copy', async t=>{
+  const f=await exportFixture(t);
+  const results=await Promise.all([f.manager.downloadLatest(f.destination),f.manager.downloadLatest(f.destination)]);
+  assert.equal(results[0].path,results[1].path);
+  assert.equal(f.calls.filter(c=>c.outputPath).length,1);
+});
+
+test('retention keeps three verified downloads and preserves unknown and corrupt files',async t=>{
+  const {pruneDownloads,downloadedCopies}=require('../electron/storage-retention');
+  const f=await exportFixture(t);fs.mkdirSync(f.destination);
+  const paths=[];
+  for(let i=0;i<5;i++) {
+    const data=Buffer.concat([Buffer.from('VZB1'),crypto.randomBytes(50)]);
+    const id=crypto.createHash('sha256').update(data).digest('hex');
+    const dir=path.join(f.destination,`backup-${i}-${'a'.repeat(24)}`);fs.mkdirSync(dir);
+    const file=path.join(dir,id+'.vzb');fs.writeFileSync(file,data);fs.utimesSync(file,i+1,i+1);paths.push(file);
+  }
+  const odd=path.join(f.destination,'my-database.db');fs.writeFileSync(odd,'keep');
+  const badDir=path.join(f.destination,'backup-7-'+ 'b'.repeat(24));fs.mkdirSync(badDir);
+  const bad=path.join(badDir,'c'.repeat(64)+'.vzb');fs.writeFileSync(bad,Buffer.alloc(40));
+  await pruneDownloads(f.destination,paths[4]);
+  assert.equal((await downloadedCopies(f.destination)).length,3);
+  assert.equal(fs.existsSync(paths[0]),false);assert.equal(fs.existsSync(paths[4]),true);
+  assert.equal(fs.readFileSync(odd,'utf8'),'keep');assert.equal(fs.existsSync(bad),true);
+});
+
+test('partial cleanup removes only stale recognized download files, preserving recent and unknown files',async t=>{
+  const {cleanDownloadPartials}=require('../electron/storage-retention');
+  const f=await exportFixture(t);fs.mkdirSync(f.destination);
+  for(const suffix of ['old123','new123','odd123']){
+    const dir=path.join(f.destination,'.partial-'+suffix);fs.mkdirSync(dir);
+    fs.writeFileSync(path.join(dir,suffix==='odd123'?'database.db':'workspace.vyb'),'keep');
+    if(suffix!=='new123')fs.utimesSync(dir,1,1);
+  }
+  await cleanDownloadPartials(f.destination);
+  assert.equal(fs.existsSync(path.join(f.destination,'.partial-old123')),false);
+  assert.equal(fs.existsSync(path.join(f.destination,'.partial-new123')),true);
+  assert.equal(fs.existsSync(path.join(f.destination,'.partial-odd123','database.db')),true);
+});
+
+test('a failed replacement preserves existing downloads and does not trigger retention',async t=>{
+  const f=await exportFixture(t);
+  const first=await f.manager.downloadLatest(f.destination);
+  f.payload.head_id='d'.repeat(64);
+  f.payload.backups=[{id:f.payload.head_id,bytes:80,created_ms:200,role:'current'}];
+  f.manager.downloadFn=async()=>{throw new Error('network unavailable');};
+  await assert.rejects(f.manager.downloadLatest(f.destination));
+  assert.deepEqual(fs.readFileSync(first.path),f.bytes);
+  assert.equal(fs.readdirSync(f.destination).length,1);
 });

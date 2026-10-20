@@ -82,3 +82,22 @@ test('report surfaces WhatsApp storage errors and last stage even without app er
   assert.doesNotMatch(report,/sensitive/);
  }finally{fs.rmSync(root,{recursive:true,force:true});}
 });
+
+test('old diagnostic runs and ZIPs are bounded without deleting unknown content',()=>{
+  const {pruneDiagnostics}=require('../electron/storage-retention');
+  const root=fs.mkdtempSync(path.join(os.tmpdir(),'vyzium-retention-'));
+  try {
+    const dirs=[];
+    for(let i=0;i<8;i++){
+      const dir=path.join(root,`run-2026-01-01T00-00-00-000Z-abc${i}-abcdef`);fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir,'timeline.jsonl'),'test');fs.utimesSync(dir,i+1,i+1);dirs.push(dir);
+      const zip=path.join(root,`Vyzium-Diagnostico-abc${i}-abcdef.zip`);fs.writeFileSync(zip,'zip');fs.utimesSync(zip,i+1,i+1);
+    }
+    fs.writeFileSync(path.join(dirs[0],'user.db'),'preserve');fs.utimesSync(dirs[0],1,1);
+    pruneDiagnostics(root,dirs[7]);
+    assert.equal(fs.existsSync(dirs[0]),true);
+    assert.equal(fs.existsSync(dirs[1]),false);
+    assert.equal(fs.existsSync(dirs[7]),true);
+    assert.equal(fs.readdirSync(root).filter(x=>x.endsWith('.zip')).length,5);
+  } finally {fs.rmSync(root,{recursive:true,force:true});}
+});
