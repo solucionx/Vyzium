@@ -14,8 +14,8 @@ const root=path.resolve(__dirname,'../..');
   await page.evaluate(async()=>{
    const items=[1,2,3].map(id=>({id,article:String(id),unit:'UN'}));
    await PurchaseHistory.fillMapReferences(document.body,items,async(method,route)=>{
-    const q=new URLSearchParams(route.split('?')[1]).get('q');
-    return {items:q==='3'?[]:[{article:q,unit:'UN',unit_basis:'order',latest:{oc:'12345',sort_date:'2026-10-22',order_price:q==='1'?125.1234:null,company:'Hotel de referência',supplier:'Fornecedor de referência',price_source:q==='2'?'conflict':'direct',cancelled:q==='2'}}],page:0,page_size:20,total:q==='3'?0:1};
+    const refs=JSON.parse(new URLSearchParams(route.split('?')[1]).get('references'));
+    return {references:refs.map(ref=>ref.article==='3'?{status:'missing',item:null}:{status:'found',item:{article:ref.article,unit:'UN',unit_basis:'order',latest:{oc:'12345',sort_date:'2026-10-22',order_price:ref.article==='1'?125.1234:null,company:'Hotel de referência',supplier:'Fornecedor de referência',price_source:ref.article==='2'?'conflict':'direct',cancelled:ref.article==='2'}}})};
    });
   });
   const labels=await page.locator('.map-last-purchase').allTextContents();
@@ -23,6 +23,15 @@ const root=path.resolve(__dirname,'../..');
   assert.match(labels[1],/Não informado.*cancelado/);
   assert.match(labels[2],/sem referência/);
   assert.match(await page.locator('.map-last-purchase').first().getAttribute('title'),/OC 12345.*22\/10\/2026.*Hotel de referência/);
+  await page.evaluate(()=>{
+   const input=document.createElement('input');input.id='quote-edit-during-reference';document.body.appendChild(input);
+   window.pendingReference=PurchaseHistory.fillMapReferences(document.body,[1,2,3].map(id=>({id,article:String(id),unit:'UN'})),()=>new Promise(resolve=>window.releaseReference=resolve));
+  });
+  await page.waitForFunction(()=>typeof window.releaseReference==='function');
+  await page.locator('#quote-edit-during-reference').fill('125,90');
+  assert.equal(await page.locator('#quote-edit-during-reference').inputValue(),'125,90','Editing must remain responsive while prices load');
+  await page.evaluate(async()=>{window.releaseReference({references:Array(3).fill({status:'missing',item:null})});await window.pendingReference;});
+  assert.equal(await page.locator('#quote-edit-during-reference').inputValue(),'125,90','Reference response must preserve edits');
   for(const width of [1440,1000]){
    await page.setViewportSize({width,height:900});
    const cells=await page.locator('.item-col').evaluateAll(cells=>cells.map(el=>({width:getComputedStyle(el).width,overflow:el.scrollWidth>el.clientWidth+1})));

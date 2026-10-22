@@ -81,20 +81,22 @@ window.PurchaseHistory = (() => {
   await loadSearch();
   if(root.isConnected&&state.id)await loadDetail();
  }
- // Same read-only endpoint, ordering and default scope as the history tab.
- // Search is fuzzy; automatic price selection must identify the exact article/unit.
- const identity = value => String(value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
- async function latestForItem(item, api) {
-  const q=String(item.article || item.description || '').trim();
-  if(!q || !identity(item.unit))return null;
-  for(let page=0;;page++) {
-   const data=await api('GET','/purchase-history?'+new URLSearchParams({q,status:'all',page}));
-   const match=data.items.find(candidate=>
-    (item.article ? identity(candidate.article)===identity(item.article) : !candidate.article && identity(candidate.description)===identity(item.description)) &&
-    identity(candidate.unit)===identity(item.unit) && candidate.unit_basis==='order');
-   if(match)return match;
-   if((data.page+1)*data.page_size>=data.total || !data.items.length)return null;
+ // Bounded batches use the same read-only snapshot as the history tab.
+ const pendingBatches = new Map();
+ const descriptor = item => Object.fromEntries(['article','description','unit'].map(k=>[k,String(item[k]??'').trim()]));
+ async function requestReferences(items, api) {
+  const route='/purchase-history?'+new URLSearchParams({references:JSON.stringify(items)});
+  // Only in-flight requests are shared: completed results are never kept stale
+  // across a workbook import, backup restore or account change.
+  const key=route;
+  if(!pendingBatches.has(key)) {
+   const request=Promise.resolve().then(()=>api('GET',route)).then(data=>{
+    if(!Array.isArray(data.references)||data.references.length!==items.length)throw Error('Resposta de referências inválida.');
+    return data.references;
+   }).finally(()=>pendingBatches.delete(key));
+   pendingBatches.set(key,request);
   }
+  return pendingBatches.get(key);
  }
  function referenceText(item) {
   if(!item)return {text:'Última compra: sem referência',title:'Nenhuma OC encontrada para este artigo e unidade em Últimas compras.'};
@@ -104,27 +106,43 @@ window.PurchaseHistory = (() => {
    title:`OC ${last.oc} · ${date(last.sort_date)}${last.date_basis==='receipt'?' (data da entrada)':''} · ${last.company} · ${last.supplier}${last.price_source==='conflict'?' · Valores divergentes na planilha':''}`};
  }
  async function fillMapReferences(container, items, api) {
-  const elements=[...container.querySelectorAll('[data-last-purchase]')];
   const byId=new Map(items.map(item=>[String(item.id),item]));
-  const pending=new Map();
-  // Deduplicate identical articles within this render; limit concurrent queries.
-  async function worker() {
-   while(elements.length) {
-    const element=elements.shift();
-    if(!element.isConnected)continue;
-    const item=byId.get(element.dataset.lastPurchase);
-    if(!item)continue;
-    const key=JSON.stringify([item.article,item.description,item.unit]);
-    try {
-     if(!pending.has(key))pending.set(key,latestForItem(item,api));
-     const result=referenceText(await pending.get(key));
-     if(element.isConnected){element.textContent=result.text;element.title=result.title;}
-    } catch(_) {
-     if(element.isConnected){element.textContent='Última compra: consulta indisponível';element.title='Reabra o mapa para tentar novamente.';}
-    }
+  const groups=new Map();
+  for(const element of container.querySelectorAll('[data-last-purchase]')) {
+   const item=byId.get(element.dataset.lastPurchase);
+   if(!item)continue;
+   const value=descriptor(item),key=JSON.stringify(value);
+   if(!groups.has(key))groups.set(key,{value,elements:[]});
+   groups.get(key).elements.push(element);
+  }
+  const queue=[...groups.values()];
+  // One batch at a time. Yield before the initial query so the map paints first.
+  await new Promise(resolve=>setTimeout(resolve,0));
+  while(queue.length) {
+   const batch=[];let size=0;
+   while(queue.length && batch.length<50) {
+    const next=queue[0],cost=encodeURIComponent(JSON.stringify(next.value)).length+3;
+    if(batch.length && size+cost>6000)break;
+    queue.shift();
+    if(!next.elements.some(el=>el.isConnected))continue;
+    batch.push(next);size+=cost;
+   }
+   if(!batch.length)continue;
+   try {
+    const results=await requestReferences(batch.map(entry=>entry.value),api);
+    batch.forEach((entry,i)=>{
+     const result=results[i];
+     const display=result.status==='ambiguous'
+      ?{text:'Última compra: referência ambígua',title:'Há artigos diferentes com esta descrição e unidade. Confira Últimas compras.'}
+      :result.status==='incomplete'
+      ?{text:'Última compra: dados insuficientes',title:'É necessário identificar o item e sua unidade para comparar o preço.'}
+      :referenceText(result.item);
+     for(const element of entry.elements)if(element.isConnected){element.textContent=display.text;element.title=display.title;}
+    });
+   } catch(_) {
+    for(const entry of batch)for(const element of entry.elements)if(element.isConnected){element.textContent='Última compra: consulta indisponível';element.title='Reabra o mapa para tentar novamente.';}
    }
   }
-  await Promise.all(Array.from({length:3},worker));
  }
- return {mount,latestForItem,referenceText,fillMapReferences};
+ return {mount,referenceText,fillMapReferences};
 })();

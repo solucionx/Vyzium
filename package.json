@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.5.4",
-  "description": "Vyzium 3.5.4: valor da última compra no mapa com a pesquisa compartilhada de Últimas compras.",
+  "version": "3.5.5",
+  "description": "Vyzium 3.5.5: valor da última compra no mapa com a pesquisa compartilhada de Últimas compras.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {

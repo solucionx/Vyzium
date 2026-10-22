@@ -10,6 +10,7 @@ import threading
 
 from purchase_history import HistoryBuilder, search, detail
 from secure_sqlite import connect
+from map_purchase_reference import ReferenceIndex, parse_references
 
 
 class FollowupPurchaseHistory:
@@ -19,6 +20,7 @@ class FollowupPurchaseHistory:
         self.path = str(path)
         self.key_hex = key_hex
         self.lock = threading.RLock()
+        self.reference_index = None
         self.snapshot = None
         self.stamp = None
         self.timer = None
@@ -40,6 +42,7 @@ class FollowupPurchaseHistory:
             if self.timer is not None:
                 self.timer.cancel()
             self.timer = None
+            self.reference_index = None
             self.snapshot = None
             self.stamp = None
 
@@ -93,6 +96,7 @@ class FollowupPurchaseHistory:
     def query(self, query):
         # Only controls from this read-only screen are accepted. Buyer, urgency,
         # attendance and persisted filters from other views are intentionally ignored.
+        references = parse_references(query['references']) if 'references' in query else None
         query = {k: v for k, v in query.items()
                  if k in ('q', 'id', 'page', 'company', 'supplier', 'status')}
         query.setdefault('status', 'all')
@@ -111,7 +115,15 @@ class FollowupPurchaseHistory:
 
             # detail() contains references to cached line dictionaries. Copy the
             # response so a caller can never mutate the in-memory source snapshot.
-            result = deepcopy(detail(snapshot, query) if query.get('id') else search(snapshot, query))
+            if references is not None:
+                index = self.reference_index
+                if index is None:
+                    index = ReferenceIndex(snapshot)
+                    if self.snapshot is snapshot:
+                        self.reference_index = index
+                result = {'references': deepcopy([index.lookup(item) for item in references])}
+            else:
+                result = deepcopy(detail(snapshot, query) if query.get('id') else search(snapshot, query))
             result['source'] = {
                 'at': snapshot.get('at'),
                 'filename': snapshot.get('filename'),
