@@ -81,5 +81,50 @@ window.PurchaseHistory = (() => {
   await loadSearch();
   if(root.isConnected&&state.id)await loadDetail();
  }
- return {mount};
+ // Same read-only endpoint, ordering and default scope as the history tab.
+ // Search is fuzzy; automatic price selection must identify the exact article/unit.
+ const identity = value => String(value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().replace(/[^A-Z0-9]+/g,' ').trim();
+ async function latestForItem(item, api) {
+  const q=String(item.article || item.description || '').trim();
+  if(!q || !identity(item.unit))return null;
+  for(let page=0;;page++) {
+   const data=await api('GET','/purchase-history?'+new URLSearchParams({q,status:'all',page}));
+   const match=data.items.find(candidate=>
+    (item.article ? identity(candidate.article)===identity(item.article) : !candidate.article && identity(candidate.description)===identity(item.description)) &&
+    identity(candidate.unit)===identity(item.unit) && candidate.unit_basis==='order');
+   if(match)return match;
+   if((data.page+1)*data.page_size>=data.total || !data.items.length)return null;
+  }
+ }
+ function referenceText(item) {
+  if(!item)return {text:'Última compra: sem referência',title:'Nenhuma OC encontrada para este artigo e unidade em Últimas compras.'};
+  const last=item.latest;
+  const suffix=last.cancelled?' · cancelado':'';
+  return {text:`Última compra: ${money(last.order_price)}${missing(last.order_price)?'':` / ${item.unit}`}${suffix}`,
+   title:`OC ${last.oc} · ${date(last.sort_date)}${last.date_basis==='receipt'?' (data da entrada)':''} · ${last.company} · ${last.supplier}${last.price_source==='conflict'?' · Valores divergentes na planilha':''}`};
+ }
+ async function fillMapReferences(container, items, api) {
+  const elements=[...container.querySelectorAll('[data-last-purchase]')];
+  const byId=new Map(items.map(item=>[String(item.id),item]));
+  const pending=new Map();
+  // Deduplicate identical articles within this render; limit concurrent queries.
+  async function worker() {
+   while(elements.length) {
+    const element=elements.shift();
+    if(!element.isConnected)continue;
+    const item=byId.get(element.dataset.lastPurchase);
+    if(!item)continue;
+    const key=JSON.stringify([item.article,item.description,item.unit]);
+    try {
+     if(!pending.has(key))pending.set(key,latestForItem(item,api));
+     const result=referenceText(await pending.get(key));
+     if(element.isConnected){element.textContent=result.text;element.title=result.title;}
+    } catch(_) {
+     if(element.isConnected){element.textContent='Última compra: consulta indisponível';element.title='Reabra o mapa para tentar novamente.';}
+    }
+   }
+  }
+  await Promise.all(Array.from({length:3},worker));
+ }
+ return {mount,latestForItem,referenceText,fillMapReferences};
 })();

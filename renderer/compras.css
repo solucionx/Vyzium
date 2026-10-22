@@ -462,3 +462,6 @@ input:focus,select:focus,textarea:focus {outline:2px solid #00bfa55c;outline-off
 .map-urgent-control { display:inline-flex; align-items:center; gap:6px; }
 .map-urgent-control input[type="checkbox"] { width:15px; height:15px; margin:0; accent-color:#18384e; }
 .map-urgent-badge { display:inline-block; padding:4px 7px; margin-right:6px; border:1px solid #e0a87d; border-radius:4px; background:#fff3e7; color:#85451a; font-size:inherit; font-weight:650; }
+
+/* Keep the established 250px item column; long references wrap inside it. */
+.map-workspace .map-last-purchase {display:block;white-space:normal;overflow-wrap:anywhere;max-width:100%;font-size:11px;line-height:1.4;margin:5px 0;color:var(--text-muted,#64748b);}
