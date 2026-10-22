@@ -49,7 +49,12 @@ async function openMap(id) {
   await page.locator('[data-view="maps"]').click();
   await page.locator('[data-map-scope="'+(id==='archived-viewer'?'completed':'active')+'"]').click();
   await page.locator(`[data-open-map="${id}"]`).click();
-  await page.locator('#save-map').waitFor();
+  try { await page.locator('#save-map').waitFor({timeout:15000}); }
+  catch (error) {
+    const info = await page.locator('#content').innerText().catch(()=>'(content inaccessible)');
+    console.error('MAP_OPEN_DIAGNOSTIC', JSON.stringify({id, info:info.slice(0,1400), errors, recentHttp:httpCalls.slice(-12)}));
+    throw error;
+  }
 }
 function gate(route, additionOnly=false) {let release;const promise=new Promise(r=>release=r);hold={route,additionOnly,promise};return ()=>{hold=null;release();};}
 
