@@ -88,13 +88,15 @@ const actualApi = (method, route, body) => ipc.get('api')({}, {method, route, bo
   await page.locator('#broadcast-review').click();await page.locator('#broadcast-confirm').waitFor();
   const preview=await page.locator('#broadcast-review-panel').textContent();
   assert.match(preview,/3 números únicos/);assert.match(preview,/repetido/);assert.match(preview,/ausente/);assert.match(preview,/SIMULAÇÃO/);
-  assert.equal(await page.locator('#broadcast-fields').isDisabled(),true);
+  assert.equal(await page.locator('#broadcast-fields').evaluate(fieldset=>fieldset.disabled),true);
+  assert.equal(await page.locator('#broadcast-search').isDisabled(),true,'Reviewed form controls must be disabled');
   assert.equal(await page.locator('#broadcast-review-panel img').count(),0,'Supplier names must be escaped');
   const output=process.env.VYZIUM_TEST_OUTPUT_DIR||path.join(temp,'shots');fs.mkdirSync(output,{recursive:true});
   for(const width of [1440,1000]){await page.setViewportSize({width,height:1000});await page.screenshot({path:path.join(output,`broadcast-review-${width}.png`),fullPage:true});}
   loseStartResponse=true;
   await page.locator('#broadcast-confirm').click();await page.locator('#broadcast-retry').waitFor();
-  assert.equal(await page.locator('#broadcast-fields').isDisabled(),true,'Lost response must not allow editing into a new batch');
+  assert.equal(await page.locator('#broadcast-fields').evaluate(fieldset=>fieldset.disabled),true,'Lost response must keep the fieldset locked');
+  assert.equal(await page.locator('#broadcast-message').isDisabled(),true,'Lost response must not allow editing into a new batch');
   await page.locator('#broadcast-retry').click();
   await page.waitForFunction(()=>document.getElementById('broadcast-progress').textContent.includes('3 simulados'));
   const starts=httpCalls.filter(c=>c.route==='/broadcast/start');assert.equal(starts.length,2);assert.deepEqual(starts[0].body,starts[1].body);
