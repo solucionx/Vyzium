@@ -75,6 +75,7 @@ const actualApi = (method, route, body) => ipc.get('api')({}, {method, route, bo
   const unexpectedDialogs=[];page.on('dialog',async d=>{unexpectedDialogs.push(d.message());await d.dismiss();});
   await page.goto(pathToFileURL(path.join(root,'renderer/acompanhamento.html')).href);
   await page.locator('#op-body').waitFor({state:'attached',timeout:15000});
+  assert.equal(await page.locator('[data-view="broadcast"] svg').count(),1,'Collapsed sidebar must retain a visible transmission icon');
   await page.locator('[data-view="broadcast"]').click();
   await page.waitForFunction(()=>document.getElementById('broadcast-fields')?.disabled===false);
   await page.locator('#broadcast-search').fill('agua');
