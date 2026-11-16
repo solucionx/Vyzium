@@ -105,7 +105,9 @@ const actualApi = (method, route, body) => ipc.get('api')({}, {method, route, bo
   await page.reload();await page.locator('#op-body').waitFor({state:'attached',timeout:15000});await page.locator('[data-view="broadcast"]').click();
   await page.waitForFunction(()=>document.getElementById('broadcast-progress')?.textContent.includes('3 simulados'));
   await page.screenshot({path:path.join(output,'broadcast-results.png'),fullPage:true});
-  await page.locator('[data-view="history"]').click();await page.getByText('Transmissão',{exact:true}).first().waitFor();
+  await page.locator('[data-view="history"]').click();
+  await page.locator('#content tbody .status-broadcast').first().waitFor();
+  assert.equal(await page.locator('#content tbody .status-broadcast').count(),3,'History must show all three broadcast recipients');
   assert.deepEqual(errors,[]);assert.deepEqual(unexpectedDialogs,[]);
   console.log('PASS broadcast: real renderer/preload/IPC/allowlist/HTTP/backend; auth, search, select-all, manual, dedupe, escaping, lost response, idempotency, history, reload; no real messages.');
 })().catch(e=>{console.error(e);process.exitCode=1;}).finally(async()=>{if(browser)await browser.close();if(server)server.kill();fs.rmSync(temp,{recursive:true,force:true});});
