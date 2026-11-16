@@ -292,8 +292,8 @@ async function stopAllEngines() {
 
 const ROUTES = {
   followup: {
-    GET: new Set(['/health', '/search', '/purchase-history', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/data-safety']),
-    POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/followup-reviewed', '/data-safety/backup'])
+    GET: new Set(['/health', '/search', '/purchase-history', '/overview', '/dashboard', '/orders', '/order', '/filters', '/suppliers', '/preview', '/history', '/settings', '/send-status', '/broadcast/status', '/data-safety']),
+    POST: new Set(['/import', '/supplier', '/order-control', '/settings', '/send', '/send-start', '/broadcast/preview', '/broadcast/start', '/followup-reviewed', '/data-safety/backup'])
   },
   compras: {
     GET: new Set(['/health', '/search', '/overview', '/items', '/maps', '/map', '/preview', '/negotiation-preview', '/history', '/settings', '/export', '/data-safety']),

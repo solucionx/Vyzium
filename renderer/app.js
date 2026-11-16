@@ -19,7 +19,7 @@ let controlOptions = [
 
 const titles = {
   operational: 'Controle operacional', dashboard: 'Dashboard', orders: 'Pedidos', suppliers: 'Fornecedores',
-  messages: 'Mensagens', history: 'Histórico', settings: 'Configurações'
+  broadcast: 'Transmissão', messages: 'Mensagens', history: 'Histórico', settings: 'Configurações'
 };
 
 const escapeHtml = value => String(value ?? '').replace(/[&<>'"]/g, char => ({
@@ -88,7 +88,7 @@ async function navigate(view) {
   title.textContent = titles[view];
   document.querySelectorAll('.nav-item').forEach(button => button.classList.toggle('active', button.dataset.view === view));
   content.innerHTML = '<div class="loading">Carregando...</div>';
-  const renderers = { operational: renderOperational, dashboard: renderDashboard, orders: renderOrders, suppliers: renderSuppliers, messages: renderMessages, history: renderHistory, settings: renderSettings };
+  const renderers = { operational: renderOperational, dashboard: renderDashboard, orders: renderOrders, suppliers: renderSuppliers, broadcast: renderBroadcast, messages: renderMessages, history: renderHistory, settings: renderSettings };
   await renderers[view]();
   paintBubbles(content);
 }
@@ -111,7 +111,7 @@ function historyRows(history) {
     return `<tr class="${pending ? 'history-needs-review' : ''}">
     <td>${escapeHtml(formatDateTime(row.sent_at))}</td>
     <td>${escapeHtml(row.supplier_name)}</td>
-    <td><span class="badge status-${escapeHtml(row.urgency)}">${escapeHtml(row.urgency)}</span></td>
+    <td><span class="badge status-${escapeHtml(row.urgency)}">${escapeHtml(row.urgency === 'broadcast' ? 'Transmissão' : row.urgency)}</span></td>
     <td><span class="badge ${pending ? 'status-overdue' : ''}">${escapeHtml(HISTORY_STATUS_LABELS[row.status] || row.status)}</span></td>
     <td class="muted">${note}</td>
   </tr>`;
