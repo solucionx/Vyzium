@@ -62,7 +62,7 @@ def whatsapp_request(route, body=None):
         raise RuntimeError("Não foi possível falar com a ponte do WhatsApp. Verifique se o Vyzium e o WhatsApp Web estão abertos e tente novamente.") from exc
 
 APP_NAME = "Vyzium"
-APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.5.5")
+APP_VERSION = os.environ.get("VYZIUM_APP_VERSION", "3.5.6")
 DB_SCHEMA_VERSION = 1
 DEFAULT_CONTROL_PRESETS = [
     {"id": "sent", "label": "Pedido enviado", "color": "#007D9C", "rule": "sent", "active": True},
@@ -1064,6 +1064,7 @@ class Store:
             row = self.connection.execute("""
                 SELECT * FROM message_batches
                 WHERE status IN ('preparing','running','error')
+                  AND NOT (status='error' AND request_json LIKE '%"kind": "broadcast"%')
                 ORDER BY created_at DESC LIMIT 1
             """).fetchone()
         if not row:
@@ -1598,7 +1599,113 @@ class FollowUpService:
             return self.groups()
         return self.groups(include_blocked=include_blocked, buyer=buyer)
 
+    def broadcast_status(self, job_id=None):
+        busy = bool(self.send_status().get("active") or self.send_lock.locked())
+        if job_id:
+            batch = self.store.message_batch(str(job_id))
+        else:
+            with self.store.lock:
+                row = self.store.connection.execute(
+                    "SELECT batch_id FROM message_batches WHERE request_json LIKE ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+                    ('%"kind": "broadcast"%',)
+                ).fetchone()
+            batch = self.store.message_batch(row[0]) if row else None
+        if not batch or batch.get("request", {}).get("kind") != "broadcast":
+            return {"exists": False, "busy": busy}
+        state = self.send_status(batch["batch_id"])
+        # Errors must also display per-contact outcomes and remaining work.
+        state["result"] = self._batch_result(batch["batch_id"])
+        state.update(exists=True, busy=busy, simulation=batch["simulation"])
+        return state
+
+    def preview_broadcast(self, body):
+        if not isinstance(body, dict):
+            raise ValueError("Transmissão inválida.")
+        message = body.get("message")
+        keys = body.get("supplier_keys", [])
+        manual = body.get("manual", [])
+        if not isinstance(message, str) or not message.strip() or len(message) > 60000:
+            raise ValueError("Escreva uma mensagem de até 60.000 caracteres.")
+        if not isinstance(keys, list) or not isinstance(manual, list) or len(keys) + len(manual) > 500:
+            raise ValueError("Selecione até 500 destinatários por transmissão.")
+        registered = {s["supplier_key"]: s for s in self.store.suppliers()}
+        candidates = []
+        for key in keys:
+            supplier = registered.get(str(key))
+            if not supplier:
+                raise ValueError("Fornecedor não encontrado. Atualize a seleção.")
+            candidates.append({"name": supplier["display_name"], "phone": supplier["phone"], "active": supplier["active"]})
+        candidates.extend(manual)
+        groups, skipped, seen = [], [], set()
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                raise ValueError("Contato manual inválido.")
+            name = str(candidate.get("name") or candidate.get("phone") or "Sem nome")[:160]
+            if candidate.get("active") in (False, 0):
+                skipped.append({"name": name, "reason": "Fornecedor desativado"})
+                continue
+            raw_phone = candidate.get("phone")
+            if not isinstance(raw_phone, str) or not re.fullmatch(r"[+0-9() .-]{1,40}", raw_phone):
+                skipped.append({"name": name, "reason": "WhatsApp ausente ou inválido"})
+                continue
+            try:
+                phone = phone_value(raw_phone)
+                if not re.fullmatch(r"\+[1-9]\d{7,14}", phone):
+                    raise ValueError("WhatsApp ausente ou inválido")
+            except ValueError:
+                skipped.append({"name": name, "reason": "WhatsApp ausente ou inválido"})
+                continue
+            if phone in seen:
+                skipped.append({"name": name, "reason": "Número repetido na seleção"})
+                continue
+            seen.add(phone)
+            groups.append({"supplier_key": "broadcast:" + phone, "supplier_name": name,
+                           "phone": phone, "message": message.strip(), "urgency": "broadcast", "items": []})
+        if not groups:
+            raise ValueError("Selecione pelo menos um destinatário com WhatsApp válido.")
+        preview = {"groups": groups, "skipped": skipped, "simulation": bool(self.store.settings()["simulation"])}
+        preview["snapshot_hash"] = hashlib.sha256(json.dumps(preview, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        return preview
+
+    def start_broadcast(self, body):
+        # Caller-generated ID makes a retried IPC request safe after a lost response.
+        if not isinstance(body, dict):
+            raise ValueError("Transmissão inválida.")
+        try:
+            job_id = str(uuid.UUID(str(body.get("request_id"))))
+        except (ValueError, TypeError, AttributeError):
+            raise ValueError("Identificador da transmissão inválido.")
+        payload_hash = hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+        with self.job_lock:
+            existing = self.store.message_batch(job_id)
+            if existing:
+                if existing.get("request", {}).get("kind") != "broadcast" or existing["request"].get("payload_hash") != payload_hash:
+                    raise ValueError("Identificador já utilizado.")
+                return self._state_from_batch(existing)
+            if self.job_state.get("active") or self.send_lock.locked() or self.worker_batches:
+                raise ValueError("Já existe um lote em execução ou aguardando conexão.")
+            preview = self.preview_broadcast(body)
+            if body.get("simulation") is not preview["simulation"] or body.get("snapshot_hash") != preview["snapshot_hash"]:
+                raise ValueError("Os destinatários ou o modo de envio mudaram. Revise a transmissão novamente.")
+            if not preview["simulation"]:
+                # Do not let a new batch bypass an unresolved delivery of the same message.
+                with self.store.lock:
+                    for group in preview["groups"]:
+                        pending = self.store.connection.execute(
+                            "SELECT 1 FROM followups WHERE urgency='broadcast' AND phone=? AND message=? AND status='uncertain' LIMIT 1",
+                            (group["phone"], group["message"])
+                        ).fetchone()
+                        if pending:
+                            raise ValueError("Há envio sem confirmação para " + group["supplier_name"] + ". Confira no WhatsApp e revise no Histórico antes de reenviar.")
+            batch = self.store.create_message_batch(job_id, preview["simulation"],
+                {"kind": "broadcast", "groups": preview["groups"], "payload_hash": payload_hash})
+            self.job_state = self._state_from_batch(batch, active=True)
+        self._start_persistent_worker(job_id)
+        return self.send_status(job_id)
+
     def _groups_for_request(self, request: dict[str, Any], simulation: bool) -> list[dict[str, Any]]:
+        if request.get("kind") == "broadcast":
+            return request["groups"]
         selected_list, overrides = self._validate_selection(
             request.get("supplier_keys"), request.get("message_overrides")
         )
@@ -1695,6 +1802,15 @@ class FollowUpService:
                         self._update_job(active=True, error=None, current_supplier=None)
                         time.sleep(min(30, 3 * (2 ** attempt)))
                 if last_error:
+                    failed_batch = self.store.message_batch(batch_id)
+                    if failed_batch and failed_batch.get("request", {}).get("kind") == "broadcast":
+                        with self.store.lock:
+                            self.store.connection.execute(
+                                "UPDATE message_queue SET status='failed',error=? WHERE batch_id=? AND status='queued'",
+                                ("Não enviado: lote interrompido. " + last_error, batch_id)
+                            )
+                            self.store.connection.commit()
+                        self.store.refresh_message_batch(batch_id)
                     with self.store.lock:
                         now = datetime.now().isoformat(timespec="seconds")
                         self.store.connection.execute(
@@ -1789,7 +1905,7 @@ class FollowUpService:
                 )
                 if status == "sent":
                     resolved_phone = result.get("resolved_phone")
-                    if resolved_phone and resolved_phone != item.get("phone"):
+                    if batch.get("request", {}).get("kind") != "broadcast" and resolved_phone and resolved_phone != item.get("phone"):
                         self.store.save_supplier({
                             "supplier_key": item["supplier_key"],
                             "display_name": item["supplier_name"],
@@ -2471,6 +2587,9 @@ class ApiHandler(BaseHTTPRequestHandler):
                 return self._json(200, self.store.settings())
             if parsed.path == "/data-safety":
                 return self._json(200, self.store.data_safety_status())
+            if parsed.path == "/broadcast/status":
+                query = parse_qs(parsed.query)
+                return self._json(200, self.service.broadcast_status(query.get("job_id", [""])[0] or None))
             if parsed.path == "/send-status":
                 query = parse_qs(parsed.query)
                 return self._json(200, self.service.send_status(query.get("job_id", [""])[0] or None))
@@ -2504,6 +2623,13 @@ class ApiHandler(BaseHTTPRequestHandler):
                 if self.service.send_lock.locked():
                     raise ValueError("Aguarde o lote terminar antes de revisar o envio.")
                 return self._json(200, self.store.review_followup(body.get("id")))
+            if self.path == "/broadcast/preview":
+                return self._json(200, self.service.preview_broadcast(body))
+            if self.path == "/broadcast/start":
+                try:
+                    return self._json(202, {**self.service.start_broadcast(body), "accepted": True})
+                except ValueError as exc:
+                    return self._json(200, {"accepted": False, "error": str(exc)})
             if self.path == "/send-start":
                 return self._json(202, self.service.start_send(
                     body.get("supplier_keys"), body.get("simulation"), body.get("message_overrides"), body.get("buyer", "")

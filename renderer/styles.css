@@ -1541,3 +1541,12 @@ body.sidebar-collapsed #check-updates.button.secondary {
 }
 
 tr.search-destination > td { background:#eef4f8; box-shadow:inset 0 1px #436b89,inset 0 -1px #436b89; }
+
+/* Supplier broadcast */
+#broadcast-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+.broadcast-list { max-height: 300px; overflow-y: auto; margin: 14px 0; }
+.broadcast-contact { display: flex; align-items: center; gap: 12px; padding: 10px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.broadcast-contact input { width: auto; flex: 0 0 auto; }
+.broadcast-contact small { display: block; margin-top: 4px; }
+.broadcast-preview { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+#broadcast-message { width: 100%; margin: 10px 0 16px; }
