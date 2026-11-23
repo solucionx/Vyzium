@@ -79,7 +79,7 @@ test('closed page cancels the real bootstrap barrier immediately', async t => {
   const fs=require('node:fs'),path=require('node:path');
   const source=fs.readFileSync(path.join(path.dirname(require.resolve('whatsapp-web.js/package.json')),'src/Client.js'),'utf8');
   const start=source.indexOf('        const vyziumBootstrapDeadline');
-  const end=source.indexOf('        // VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7: navigation recovery',start);
+  const end=source.indexOf('        // VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8: navigation recovery',start);
   assert.ok(start>=0 && end>start);
   const barrier=vm.runInNewContext(`(async function(page){${source.slice(start,end)}})`,{setTimeout});
   const page=await browser.newPage();await page.close();
