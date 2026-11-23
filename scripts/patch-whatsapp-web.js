@@ -7,7 +7,8 @@ const vm = require('node:vm');
 // Backports the QR/bootstrap fixes already present on whatsapp-web.js main to
 // the currently published npm 1.34.7 package. Keep the npm version pinned for
 // reproducible installs; patch only the startup/authentication code paths.
-const PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7';
+const PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8';
+const PREVIOUS_PATCH_MARKER_V7 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7';
 const PREVIOUS_PATCH_MARKER_V6 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V6';
 const PREVIOUS_PATCH_MARKER = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V5';
 const PREVIOUS_PATCH_MARKER_V4 = 'VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V4';
@@ -23,6 +24,31 @@ const SOCKET_STATE_PROBE_SOURCE = `() => {
                     return { need: state === 'UNPAIRED' || state === 'UNPAIRED_IDLE', state };
                 } catch (_) {
                     return false;
+                }
+            }`;
+
+const SOCKET_DIAGNOSTIC_PROBE_SOURCE = `() => {
+                const safe = (value, max = 180) => {
+                    if (value == null) return null;
+                    try { return String(value).slice(0, max); } catch (_) { return null; }
+                };
+                try {
+                    if (typeof window.require !== 'function') return { kind: 'require-unavailable' };
+                    const socketModule = window.require('WAWebSocketModel');
+                    const socket = socketModule?.Socket;
+                    if (!socket) return { kind: 'socket-unavailable' };
+                    return {
+                        kind: 'socket',
+                        state: safe(socket.state),
+                        hasSynced: socket.hasSynced === true,
+                        stream: safe(socket.stream),
+                    };
+                } catch (error) {
+                    return {
+                        kind: 'module-error',
+                        errorName: safe(error?.name || 'Error', 80),
+                        errorMessage: safe(error?.message || error, 240),
+                    };
                 }
             }`;
 
@@ -90,6 +116,56 @@ function replaceNavigationBlock(source, replacement) {
   return source.replace(tolerant, replacement);
 }
 
+
+function patchSocketWaitDiagnostics(source) {
+  if (source.includes("code = 'VYZIUM_SOCKET_TIMEOUT'") && source.includes("vyzium_socket_timeout")) return source;
+
+  const oldBlock = `        this.emit('vyzium_inject_stage', { stage: 'socket-wait' });
+        const needAuthHandle = await this.pupPage.waitForFunction(
+            ${SOCKET_STATE_PROBE_SOURCE},
+            { timeout: authTimeout, polling: 200 },
+        );
+        let needAuthentication;
+        try { needAuthentication = await needAuthHandle.jsonValue(); }
+        finally { await needAuthHandle.dispose(); }
+        this.emit('vyzium_inject_stage', { stage: 'socket-ready', state: needAuthentication.state });`;
+
+  const newBlock = `        this.emit('vyzium_inject_stage', { stage: 'socket-wait' });
+        const vyziumSocketTimeoutMs = Math.max(15000, Math.min(authTimeout, 45000));
+        this.emit('vyzium_socket_waiting', { timeoutMs: vyziumSocketTimeoutMs });
+        let needAuthHandle;
+        try {
+            needAuthHandle = await this.pupPage.waitForFunction(
+                ${SOCKET_STATE_PROBE_SOURCE},
+                { timeout: vyziumSocketTimeoutMs, polling: 200 },
+            );
+        } catch (error) {
+            let diagnostic = { kind: 'probe-unavailable' };
+            try {
+                diagnostic = await this.pupPage.evaluate(${SOCKET_DIAGNOSTIC_PROBE_SOURCE});
+            } catch (probeError) {
+                diagnostic = {
+                    kind: 'probe-error',
+                    errorName: String(probeError?.name || 'Error').slice(0, 80),
+                };
+            }
+            this.emit('vyzium_socket_timeout', { timeoutMs: vyziumSocketTimeoutMs, diagnostic });
+            const timeoutError = new Error('WhatsApp Web não liberou o socket de inicialização dentro do prazo.');
+            timeoutError.code = 'VYZIUM_SOCKET_TIMEOUT';
+            timeoutError.cause = error;
+            throw timeoutError;
+        }
+        let needAuthentication;
+        try { needAuthentication = await needAuthHandle.jsonValue(); }
+        finally { await needAuthHandle.dispose(); }
+        this.emit('vyzium_inject_stage', { stage: 'socket-ready', state: needAuthentication.state });`;
+
+  if (!source.includes(oldBlock)) {
+    throw new Error('Não foi possível aplicar o patch do WhatsApp Web (timeout/diagnóstico do socket).');
+  }
+  return source.replace(oldBlock, newBlock);
+}
+
 // Hidden native Windows windows may never deliver another animation frame.
 // Keep Puppeteer's navigation-aware WaitTask, but poll startup state by timer.
 function patchHiddenStartup(source) {
@@ -129,10 +205,12 @@ function patchHiddenStartup(source) {
 function patchClientSource(input) {
   let source = String(input).replace(/\r\n/g, '\n');
   const finish = value => {
-    const patched = patchHiddenStartup(value);
+    const hiddenPatched = patchHiddenStartup(value);
+    const patched = patchSocketWaitDiagnostics(hiddenPatched);
     assertValidJavaScript(patched);
     return {source:patched, changed:patched !== String(input)};
   };
+  source = source.replaceAll(PREVIOUS_PATCH_MARKER_V7, PATCH_MARKER);
   source = source.replaceAll(PREVIOUS_PATCH_MARKER_V6, PATCH_MARKER);
   if (source.includes(PREVIOUS_PATCH_MARKER_V2)) {
     source = repairMalformedV2QrClosure(source).replaceAll(PREVIOUS_PATCH_MARKER_V2, PATCH_MARKER);
@@ -395,6 +473,7 @@ module.exports = {
   applyPatch,
   PATCH_MARKER,
   SOCKET_STATE_PROBE_SOURCE,
+  SOCKET_DIAGNOSTIC_PROBE_SOURCE,
   QR_MODULE_PROBE_SOURCE,
   assertValidJavaScript,
   repairMalformedV2QrClosure
