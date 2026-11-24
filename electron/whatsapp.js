@@ -1427,7 +1427,7 @@ class WhatsAppSession {
           puppeteer:puppeteerPkg.version,
           clientSha256:crypto.createHash('sha256').update(source).digest('hex'),
           syntax:'loaded-by-node',
-          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V8'),
+          hasVyziumPatch:source.includes('VYZIUM_WWEBJS_BOOTSTRAP_PATCH_V7'),
           hasHiddenWindowPolling:(source.toString().match(/polling: 200/g) || []).length >= 4,
           hasSafeNavigationOrder:source.includes('navigation recovery is installed only after the initial inject'),
           hasSignalStore:source.includes('WAWebSignalStoreApi'),
@@ -1506,6 +1506,41 @@ class WhatsAppSession {
       }, Math.max(0, this.storageFallbackDelayMs));
       timer.unref?.();
     };
+    let readingLoginQr = false;
+    let nextLoginQrRead = 0;
+    let loginQrVisible = false;
+    const canReadLoginQr = () => this.client === client && generation === this.generation &&
+      !this.closed && client.__vyziumStartupStage === 'socket-wait' && qrSequence === 0 &&
+      (this.state.status === 'starting' || (loginQrVisible && this.state.status === 'qr'));
+    const refreshLoginQr = async () => {
+      if (!canReadLoginQr() || !client.pupPage || readingLoginQr || Date.now() < nextLoginQrRead) return;
+      readingLoginQr = true;
+      nextLoginQrRead = Date.now() + 1000;
+      try {
+        const image = await client.pupPage.evaluate(() => {
+          if (location.origin !== 'https://web.whatsapp.com') return null;
+          const canvas = document.querySelector('[data-ref] canvas');
+          if (!canvas || !canvas.width || !canvas.height || !canvas.getClientRects().length) return null;
+          return canvas.toDataURL('image/png');
+        });
+        if (!canReadLoginQr()) return;
+        if (image?.startsWith('data:image/png;base64,') && image !== this.state.qr) {
+          loginQrVisible = true;
+          this._clearStartupWatchdog();
+          this._armQrWatchdog(generation, client);
+          this.state = {status:'qr', qr:image, account:null, error:null};
+        } else if (!image && loginQrVisible) {
+          loginQrVisible = false;
+          this._clearQrWatchdog();
+          this.state = {status:'starting', qr:null, account:null, error:null};
+          this._armStartupWatchdog(generation, {});
+        }
+      } catch {
+        // Navigation after scanning can replace the page while reading the canvas.
+      } finally {
+        readingLoginQr = false;
+      }
+    };
     const attachRuntimeAudit = () => {
       if (generation !== this.generation || this.client !== client || this.closed) return;
       try {
@@ -1561,7 +1596,10 @@ class WhatsAppSession {
         }
       } catch (error) { this._audit('runtime-audit.attach-error', {generation, error}); }
     };
-    const runtimeAuditTimer = setInterval(attachRuntimeAudit, 100);
+    const runtimeAuditTimer = setInterval(() => {
+      attachRuntimeAudit();
+      void refreshLoginQr();
+    }, 100);
     runtimeAuditTimer.unref?.();
     client.__vyziumAuditTimer = runtimeAuditTimer;
     attachRuntimeAudit();
