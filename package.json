@@ -5,6 +5,7 @@
   "main": "electron/main.js",
   "private": true,
   "scripts": {
+    "postinstall": "node scripts/patch-whatsapp-web.js",
     "start": "electron .",
     "test:backend": "python -m unittest discover -s backend -p \"test_*.py\" -v",
     "verify:whatsapp-patch": "node scripts/verify-whatsapp-patch.js",
