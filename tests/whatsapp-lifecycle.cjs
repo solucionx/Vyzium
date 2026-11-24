@@ -157,3 +157,40 @@ test('startup diagnostics report the waiting stage without capturing QR values',
  const events=fs.readFileSync(s.auditFile,'utf8').trim().split('\n').map(JSON.parse);
  assert.ok(events.some(x=>x.event==='client.startup-snapshot'&&x.details.visibility==='hidden'));
 });
+
+test('official login canvas reaches the panel while socket bootstrap waits', async t => {
+  const {s} = fixture(t);
+  const finish = deferred();
+  const image = 'data:image/png;base64,dGVzdA==';
+  s.deps.library.Client.prototype.initialize = function() {
+    this.pupPage = {
+      evaluate: async fn => require('node:vm').runInNewContext('(' + fn.toString() + ')()', {
+        location:{origin:'https://web.whatsapp.com'},
+        document:{querySelector: selector => selector === '[data-ref] canvas' ? {
+          width:256, height:256, getClientRects:()=>[{}], toDataURL:()=>image
+        } : null}
+      })
+    };
+    this.emit('vyzium_inject_stage', {stage:'socket-wait'});
+    return finish.promise;
+  };
+  const connecting = s._connectInternal();
+  try {
+    await new Promise((resolve, reject) => {
+      const deadline = Date.now() + 3000;
+      function check() {
+        if (s.state.qr === image) return resolve();
+        if (Date.now() >= deadline) return reject(new Error('Login QR did not reach panel'));
+        setTimeout(check, 20);
+      }
+      check();
+    });
+    assert.equal(s.state.status, 'qr');
+    s.client.emit('authenticated');
+    assert.equal(s.state.qr, null);
+    assert.equal(s.state.status, 'authenticated');
+  } finally {
+    finish.resolve();
+    await connecting;
+  }
+});
