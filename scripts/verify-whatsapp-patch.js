@@ -34,7 +34,19 @@ function verifyWhatsAppBootstrap(projectRoot = path.resolve(__dirname, '..')) {
 
 if (require.main === module) {
   try {
-    verifyWhatsAppBootstrap();
+    const expected = verifyWhatsAppBootstrap();
+    if (process.argv[2]) {
+      const asar = require('@electron/asar');
+      const archive = process.argv[2];
+      const client = asar.extractFile(archive, path.join('node_modules', 'whatsapp-web.js', 'src', 'Client.js'));
+      if (crypto.createHash('sha256').update(client).digest('hex') !== expected.sha256) {
+        throw new Error('Packaged WhatsApp bootstrap differs from the verified client.');
+      }
+      const host = asar.extractFile(archive, path.join('electron', 'whatsapp.js'));
+      if (!host.equals(fs.readFileSync(path.join(__dirname, '../electron/whatsapp.js')))) {
+        throw new Error('Packaged WhatsApp session differs from the verified source.');
+      }
+    }
   } catch (error) {
     console.error(`Vyzium: compatibility bootstrap verification failed: ${error?.message || error}`);
     process.exitCode = 1;

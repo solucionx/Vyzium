@@ -194,3 +194,35 @@ test('official login canvas reaches the panel while socket bootstrap waits', asy
     await connecting;
   }
 });
+
+test('pausing discards a login canvas read that completes after disposal', async t => {
+  const {s} = fixture(t);
+  const pendingImage = deferred(), reading = deferred(), initialized = deferred();
+  s.deps.library.Client.prototype.initialize = function() {
+    this.pupPage = {evaluate: async fn => {
+      if (String(fn).includes('canvas.toDataURL')) {
+        reading.resolve();
+        return pendingImage.promise;
+      }
+      return {};
+    }};
+    this.emit('vyzium_inject_stage', {stage:'socket-wait'});
+    return initialized.promise;
+  };
+  const connecting = s._connectInternal();
+  let timeout;
+  try {
+    await Promise.race([reading.promise, new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error('QR read never started')), 3000);
+    })]);
+    await s.pause();
+    pendingImage.resolve('data:image/png;base64,dGVzdA==');
+    await tick();
+    assert.equal(s.status().status, 'paused');
+    assert.equal(s.status().qr, null);
+  } finally {
+    clearTimeout(timeout);
+    initialized.resolve();
+    await connecting;
+  }
+});

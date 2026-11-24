@@ -1,7 +1,7 @@
 {
   "name": "vyzium-gestao-operacional",
-  "version": "3.5.7",
-  "description": "Vyzium 3.5.7: transmissão auditada de comunicados para fornecedores por WhatsApp.",
+  "version": "3.5.8",
+  "description": "Vyzium 3.5.8: transmissão auditada de comunicados para fornecedores por WhatsApp.",
   "main": "electron/main.js",
   "private": true,
   "scripts": {

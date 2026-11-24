@@ -1533,7 +1533,7 @@ class WhatsAppSession {
           loginQrVisible = false;
           this._clearQrWatchdog();
           this.state = {status:'starting', qr:null, account:null, error:null};
-          this._armStartupWatchdog(generation, {});
+          this._armStartupWatchdog(generation, options);
         }
       } catch {
         // Navigation after scanning can replace the page while reading the canvas.
