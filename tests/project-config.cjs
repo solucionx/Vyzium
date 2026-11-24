@@ -150,14 +150,14 @@ test('3.1 data safety and authentication files are included', () => {
 
 
 
-test('3.4 line keeps the exact upstream WhatsApp bootstrap validated on a clean account', () => {
+test('WhatsApp bootstrap patch is installed with the pinned client', () => {
   assert.equal(pkg.dependencies?.['whatsapp-web.js'], '1.34.7');
   assert.equal(pkg.overrides, undefined);
-  assert.equal(pkg.scripts?.postinstall, undefined);
+  assert.equal(pkg.scripts.postinstall, 'node scripts/patch-whatsapp-web.js');
   const verifier = read('scripts/verify-whatsapp-patch.js');
   const whatsapp = read('electron/whatsapp.js');
   const main = read('electron/main.js');
-  assert.match(verifier, /36c70c1eb058087624e57ddea6b0c4d4a140faa2daf9c097dc670697ac321389/);
+  assert.match(verifier, /bbc38a9374f1cda780afbcdf133c42b8e89cc9480811d08590f870f51d22dcb6/);
   assert.match(whatsapp, /compatibilityMode/);
   assert.match(main, /browserMode:\s*'headless'/);
   assert.match(main, /compatibilityMode:\s*'legacy-2\.1'/);
